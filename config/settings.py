@@ -18,28 +18,36 @@ SECRET_KEY = os.getenv(
 
 DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes")
 
+# Production host: aidl-backend.onrender.com
+_DEFAULT_ALLOWED_HOSTS = (
+    "127.0.0.1,localhost,aidl-backend.onrender.com,vaptbackend.secureitlab.com"
+)
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+    for host in os.getenv("ALLOWED_HOSTS", _DEFAULT_ALLOWED_HOSTS).split(",")
     if host.strip()
 ]
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://aidl-frontend-8owk.vercel.app")
-# After Teams login, redirect here (test UI by default)
+# After Teams login, browser lands on frontend with tokens
 AUTH_SUCCESS_REDIRECT = os.getenv(
     "AUTH_SUCCESS_REDIRECT",
-    "http://localhost:8000/",
+    "https://aidl-frontend-8owk.vercel.app/auth/callback",
 )
 
 # Microsoft / Teams OAuth (Azure Entra ID)
-# Supports both MS_* and MICROSOFT_* env names
+# Supports both MS_* and MICROSOFT_* env names.
+# Default = production Render callback (override with localhost in local .env).
+_DEFAULT_MS_REDIRECT_URI = (
+    "https://aidl-backend.onrender.com/api/auth/teams/callback/"
+)
 MS_TENANT_ID = os.getenv("MS_TENANT_ID") or os.getenv("MICROSOFT_TENANT_ID") or "common"
 MS_CLIENT_ID = os.getenv("MS_CLIENT_ID") or os.getenv("MICROSOFT_CLIENT_ID") or ""
 MS_CLIENT_SECRET = os.getenv("MS_CLIENT_SECRET") or os.getenv("MICROSOFT_CLIENT_SECRET") or ""
 MS_REDIRECT_URI = (
     os.getenv("MS_REDIRECT_URI")
     or os.getenv("MICROSOFT_REDIRECT_URI")
-    or "http://localhost:8000/api/auth/teams/callback/"
+    or _DEFAULT_MS_REDIRECT_URI
 )
 MS_SCOPES = [
     s.strip()

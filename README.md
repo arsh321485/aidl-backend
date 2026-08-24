@@ -63,12 +63,25 @@ After Microsoft login, backend redirects to `AUTH_SUCCESS_REDIRECT` with `access
 
 ## Azure keys (real Microsoft login)
 
-`.env` mein set karo:
+### Local
 
 ```env
-MS_CLIENT_ID=...
-MS_CLIENT_SECRET=...
-MS_TENANT_ID=...
 MS_REDIRECT_URI=http://localhost:8000/api/auth/teams/callback/
-AUTH_SUCCESS_REDIRECT=https://your-frontend.app/auth/callback
+AUTH_SUCCESS_REDIRECT=http://localhost:5173/auth/callback
 ```
+
+### Production (Render — `aidl-backend.onrender.com`)
+
+Set in **Render Dashboard → Environment** (`.env` is gitignored and is NOT pushed):
+
+```env
+MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
+MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
+AUTH_SUCCESS_REDIRECT=https://aidl-frontend-8owk.vercel.app/auth/callback
+ALLOWED_HOSTS=aidl-backend.onrender.com
+DEBUG=False
+```
+
+Azure App Registration → Redirect URIs must include the same production callback URL.
+
+Confirm after deploy: `GET https://aidl-backend.onrender.com/api/` → check `microsoft_redirect_uri` is the Render URL, not localhost.
