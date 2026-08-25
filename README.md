@@ -61,27 +61,28 @@ VITE_API_BASE=http://localhost:8000
 
 After Microsoft login, backend redirects to `AUTH_SUCCESS_REDIRECT` with `access_token`, `refresh_token`, and `teams_url`.
 
-## Azure keys (real Microsoft login)
+## Azure / redirect URLs
 
-### Local
+Two different URLs — do not mix them:
+
+| Env var | Points to | Example |
+|---------|-----------|---------|
+| `MS_REDIRECT_URI` | Backend (Microsoft → API) | `https://aidl-backend.onrender.com/api/auth/teams/callback/` |
+| `AUTH_SUCCESS_REDIRECT` | Frontend (API → Vue `/auth/callback`) | `https://aidl-frontend-8owk.vercel.app/auth/callback` |
+
+### Local laptop
 
 ```env
 MS_REDIRECT_URI=http://localhost:8000/api/auth/teams/callback/
 AUTH_SUCCESS_REDIRECT=http://localhost:5173/auth/callback
+# or http://localhost:5184/auth/callback if that is your Vite port
 ```
 
-### Production (Render — `aidl-backend.onrender.com`)
+### Production (Render)
 
-Set in **Render Dashboard → Environment** (`.env` is gitignored and is NOT pushed):
+See [`RENDER_ENV.txt`](RENDER_ENV.txt) — paste into Render Dashboard → Environment, then restart.
 
-```env
-MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
-MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
-AUTH_SUCCESS_REDIRECT=https://aidl-frontend-8owk.vercel.app/auth/callback
-ALLOWED_HOSTS=aidl-backend.onrender.com
-DEBUG=False
-```
+Azure App Registration Redirect URI must match `MS_REDIRECT_URI` exactly.
 
-Azure App Registration → Redirect URIs must include the same production callback URL.
-
-Confirm after deploy: `GET https://aidl-backend.onrender.com/api/` → check `microsoft_redirect_uri` is the Render URL, not localhost.
+Confirm: `GET https://aidl-backend.onrender.com/api/`  
+→ `microsoft_redirect_uri` and `auth_success_redirect` must not be localhost in production.

@@ -146,7 +146,14 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://127.0.0.1:8000,http://localhost:8000,http://localhost:3000,https://aidl-frontend-8owk.vercel.app",
+        (
+            "http://127.0.0.1:8000,"
+            "http://localhost:8000,"
+            "http://localhost:3000,"
+            "http://localhost:5173,"
+            "http://localhost:5184,"
+            "https://aidl-frontend-8owk.vercel.app"
+        ),
     ).split(",")
     if origin.strip()
 ]
