@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from .auth_jwt import create_access_token, create_refresh_token, decode_token
 from .microsoft_auth import (
     build_auth_url,
+    consume_oauth_state,
     ensure_aidl_channel,
     exchange_code_for_token,
     fetch_microsoft_profile,
