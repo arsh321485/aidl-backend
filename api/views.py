@@ -16,6 +16,10 @@ def api_index(request):
             "message": "AIDL API index",
             "microsoft_redirect_uri": settings.MS_REDIRECT_URI,
             "auth_success_redirect": settings.AUTH_SUCCESS_REDIRECT,
+            "aidl_channel": {
+                "team_id_configured": bool((settings.MS_AIDL_TEAM_ID or "").strip()),
+                "channel_name": settings.MS_AIDL_CHANNEL_NAME or "AIDL",
+            },
             "endpoints": {
                 "health": request.build_absolute_uri("/api/health/"),
                 "teams_login": request.build_absolute_uri(

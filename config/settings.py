@@ -49,11 +49,23 @@ MS_REDIRECT_URI = (
     or os.getenv("MICROSOFT_REDIRECT_URI")
     or _DEFAULT_MS_REDIRECT_URI
 )
+_DEFAULT_MS_SCOPES = (
+    "User.Read,Channel.ReadBasic.All,Channel.Create,Team.ReadBasic.All"
+)
 MS_SCOPES = [
     s.strip()
-    for s in os.getenv("MS_SCOPES", "User.Read").split(",")
+    for s in os.getenv("MS_SCOPES", _DEFAULT_MS_SCOPES).split(",")
     if s.strip()
 ]
+
+# Parent Microsoft Team where the AIDL channel is created (Graph group / team id).
+# Empty = skip channel create; fallback to teams.microsoft.com/?login_hint=...
+MS_AIDL_TEAM_ID = (
+    os.getenv("MS_AIDL_TEAM_ID") or os.getenv("MICROSOFT_AIDL_TEAM_ID") or ""
+).strip()
+MS_AIDL_CHANNEL_NAME = (
+    os.getenv("MS_AIDL_CHANNEL_NAME") or os.getenv("MICROSOFT_AIDL_CHANNEL_NAME") or "AIDL"
+).strip() or "AIDL"
 
 # JWT for API auth
 JWT_SECRET = os.getenv("JWT_SECRET", SECRET_KEY)
