@@ -104,9 +104,10 @@ def fetch_microsoft_profile(access_token: str) -> dict:
 
 def build_teams_launch_url(email: str = "") -> str:
     """
-    Generic Teams web URL with login_hint (fallback when no AIDL channel deep link).
+    Open the real Microsoft Teams web/desktop platform for this Microsoft account.
+    Prefer modern Teams host; login_hint selects the same mailbox used during AIDL login.
     """
-    base = "https://teams.microsoft.com/"
+    base = "https://teams.microsoft.com/v2/"
     email = (email or "").strip()
     if email:
         return f"{base}?login_hint={quote(email)}"

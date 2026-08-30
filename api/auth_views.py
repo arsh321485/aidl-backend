@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from .auth_jwt import create_access_token, create_refresh_token, decode_token
 from .microsoft_auth import (
     build_auth_url,
+    build_teams_launch_url,
     consume_oauth_state,
     ensure_aidl_channel,
     exchange_code_for_token,
@@ -97,16 +98,26 @@ def _redirect_with_tokens(
     mode: str = "microsoft",
     ms_access_token: str = "",
     teams_url: str = "",
+    teams_channel_url: str = "",
 ):
     tokens = _issue_tokens(user)
-    if not teams_url:
-        teams_url = resolve_teams_url(
+    # Always open the real Microsoft Teams platform (chat/home) for this account.
+    platform_url = build_teams_launch_url(user.email)
+    # Optional AIDL channel deep link (when MS_AIDL_TEAM_ID + Graph succeed).
+    channel_url = (teams_channel_url or "").strip()
+    if not channel_url and teams_url and "/l/channel/" in teams_url:
+        channel_url = teams_url
+    if not channel_url:
+        channel_url = resolve_teams_url(
             email=user.email,
             ms_access_token=ms_access_token,
             team_id=getattr(user, "teams_team_id", "") or "",
             channel_id=getattr(user, "teams_channel_id", "") or "",
             channel_name=getattr(user, "teams_channel_name", "") or "",
         )
+        if channel_url and "/l/channel/" not in channel_url:
+            channel_url = ""
+
     query = {
         "access_token": tokens["access_token"],
         "refresh_token": tokens["refresh_token"],
@@ -114,10 +125,13 @@ def _redirect_with_tokens(
         "mode": mode,
         "email": user.email,
         "full_name": user.full_name,
-        "teams_url": teams_url,
+        # Primary: open THIS in a new tab/window → real MS Teams platform
+        "teams_url": platform_url,
         "open_teams": "1",
         "teams_connected": "true",
     }
+    if channel_url and channel_url != platform_url:
+        query["teams_channel_url"] = channel_url
     if ms_access_token:
         query["ms_access_token"] = ms_access_token
     return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
@@ -152,10 +166,11 @@ def teams_login(request):
     data["mode"] = "microsoft"
     data["after_login"] = {
         "open_teams": True,
-        "teams_url": "https://teams.microsoft.com/",
+        "teams_url": "https://teams.microsoft.com/v2/",
         "note": (
-            "After callback, open returned teams_url. "
-            "When MS_AIDL_TEAM_ID is set, teams_url is an AIDL channel deep link."
+            "After callback, ALWAYS window.open(teams_url) when open_teams=1. "
+            "teams_url is the real Microsoft Teams platform (login_hint included). "
+            "Optional teams_channel_url opens the AIDL channel deep link."
         ),
         "aidl_channel": {
             "team_id_configured": bool((settings.MS_AIDL_TEAM_ID or "").strip()),
@@ -223,18 +238,13 @@ def teams_callback(request):
 
     channel_info = ensure_aidl_channel(ms_token, email=user.email)
     _save_channel_on_user(user, channel_info)
-    teams_url = (channel_info or {}).get("teams_url") or resolve_teams_url(
-        email=user.email,
-        team_id=user.teams_team_id,
-        channel_id=user.teams_channel_id,
-        channel_name=user.teams_channel_name,
-    )
+    channel_url = (channel_info or {}).get("teams_url") or ""
 
     return _redirect_with_tokens(
         user,
         mode="microsoft",
         ms_access_token=ms_token,
-        teams_url=teams_url,
+        teams_channel_url=channel_url,
     )
 
 
@@ -242,26 +252,33 @@ def teams_callback(request):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def teams_launch(request):
-    """Return Microsoft Teams URL for the signed-in user (AIDL channel deep link when available)."""
-    teams_url = resolve_teams_url(
+    """Return Microsoft Teams platform URL (+ optional AIDL channel deep link)."""
+    platform_url = build_teams_launch_url(getattr(request.user, "email", ""))
+    channel_url = resolve_teams_url(
         email=getattr(request.user, "email", ""),
         team_id=getattr(request.user, "teams_team_id", "") or "",
         channel_id=getattr(request.user, "teams_channel_id", "") or "",
         channel_name=getattr(request.user, "teams_channel_name", "") or "",
     )
+    if channel_url and "/l/channel/" not in channel_url:
+        channel_url = ""
     return Response(
         {
             "teams_connected": True,
             "email": request.user.email,
             "full_name": request.user.full_name,
-            "teams_url": teams_url,
+            "teams_url": platform_url,
+            "teams_channel_url": channel_url or None,
             "channel": {
                 "team_id": getattr(request.user, "teams_team_id", "") or "",
                 "channel_id": getattr(request.user, "teams_channel_id", "") or "",
                 "channel_name": getattr(request.user, "teams_channel_name", "")
                 or (settings.MS_AIDL_CHANNEL_NAME or "AIDL"),
             },
-            "message": "Open teams_url to launch Microsoft Teams (AIDL channel when configured).",
+            "message": (
+                "Open teams_url for the real Microsoft Teams platform. "
+                "Optional teams_channel_url opens the AIDL channel when available."
+            ),
         }
     )
 
@@ -271,12 +288,14 @@ def teams_launch(request):
 @permission_classes([IsAuthenticated])
 def me(request):
     data = AIDLUserSerializer(request.user).data
-    data["teams_url"] = resolve_teams_url(
+    data["teams_url"] = build_teams_launch_url(request.user.email)
+    channel_url = resolve_teams_url(
         email=request.user.email,
         team_id=getattr(request.user, "teams_team_id", "") or "",
         channel_id=getattr(request.user, "teams_channel_id", "") or "",
         channel_name=getattr(request.user, "teams_channel_name", "") or "",
     )
+    data["teams_channel_url"] = channel_url if channel_url and "/l/channel/" in channel_url else None
     data["teams_connected"] = True
     return Response(data)
 
