@@ -173,15 +173,16 @@ def teams_login(request):
         "open_teams": True,
         "note": (
             "After callback, ALWAYS window.open(teams_url) when open_teams=1. "
-            "teams_url now points at the AIDL channel deep link (lands directly on the "
-            "channel, not chat) whenever MS_AIDL_TEAM_ID is configured and the Graph "
-            "call succeeds; it falls back to the plain Teams platform URL (chat/home) "
-            "otherwise. Use landed_on ('channel'|'chat') to know which one you got, and "
-            "teams_platform_url if you need an explicit link to chat/home as well."
+            "Backend auto-creates/finds Microsoft Team 'AIDL' and channel "
+            "'aidl dashboard', then sets teams_url to that channel deep link "
+            "(landed_on=channel). Falls back to Teams chat/home (landed_on=chat) "
+            "if Graph/Team.Create fails. teams_platform_url is always chat/home."
         ),
         "aidl_channel": {
             "team_id_configured": bool((settings.MS_AIDL_TEAM_ID or "").strip()),
-            "channel_name": settings.MS_AIDL_CHANNEL_NAME or "AIDL",
+            "team_name": settings.MS_AIDL_TEAM_NAME or "AIDL",
+            "channel_name": settings.MS_AIDL_CHANNEL_NAME or "aidl dashboard",
+            "auto_create_team": bool(getattr(settings, "MS_AIDL_AUTO_CREATE_TEAM", True)),
         },
     }
     return Response(data)

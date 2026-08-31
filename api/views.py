@@ -18,7 +18,9 @@ def api_index(request):
             "auth_success_redirect": settings.AUTH_SUCCESS_REDIRECT,
             "aidl_channel": {
                 "team_id_configured": bool((settings.MS_AIDL_TEAM_ID or "").strip()),
-                "channel_name": settings.MS_AIDL_CHANNEL_NAME or "AIDL",
+                "team_name": getattr(settings, "MS_AIDL_TEAM_NAME", None) or "AIDL",
+                "channel_name": settings.MS_AIDL_CHANNEL_NAME or "aidl dashboard",
+                "auto_create_team": bool(getattr(settings, "MS_AIDL_AUTO_CREATE_TEAM", True)),
             },
             "endpoints": {
                 "health": request.build_absolute_uri("/api/health/"),

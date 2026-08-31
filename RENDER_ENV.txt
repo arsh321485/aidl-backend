@@ -15,12 +15,16 @@ CORS_ALLOWED_ORIGINS=https://aidl-frontend-8owk.vercel.app,http://localhost:5173
 MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 
-MS_SCOPES=User.Read,Channel.ReadBasic.All,Channel.Create,Team.ReadBasic.All
-MS_AIDL_TEAM_ID=
-MS_AIDL_CHANNEL_NAME=AIDL
+MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,Group.ReadWrite.All
+MS_AIDL_TEAM_NAME=AIDL
+MS_AIDL_CHANNEL_NAME=aidl dashboard
+MS_AIDL_AUTO_CREATE_TEAM=True
+# MS_AIDL_TEAM_ID=   # only if you want a fixed existing Team instead of auto-create
 
 # Azure App Registration → API permissions (delegated) + admin consent:
-#   User.Read, Channel.ReadBasic.All, Channel.Create, Team.ReadBasic.All
+#   User.Read, Team.ReadBasic.All, Team.Create, Channel.ReadBasic.All,
+#   Channel.Create, Group.ReadWrite.All
+# Org must allow the signed-in user to create Teams.
 #
 # Also set (keep existing secrets):
 # MS_CLIENT_ID / MICROSOFT_CLIENT_ID
@@ -32,4 +36,6 @@ MS_AIDL_CHANNEL_NAME=AIDL
 # GET https://aidl-backend.onrender.com/api/
 #   microsoft_redirect_uri  → https://aidl-backend.onrender.com/api/auth/teams/callback/
 #   auth_success_redirect   → https://aidl-frontend-8owk.vercel.app/auth/callback
-#   aidl_channel.team_id_configured → true when MS_AIDL_TEAM_ID is set
+#   aidl_channel.auto_create_team → true
+#   aidl_channel.team_name → AIDL
+#   aidl_channel.channel_name → aidl dashboard
