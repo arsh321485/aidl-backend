@@ -59,7 +59,20 @@ VITE_API_BASE=http://localhost:8000
 
 `enroll_as`: `individual` | `organization`
 
-After Microsoft login, backend redirects to `AUTH_SUCCESS_REDIRECT` with `access_token`, `refresh_token`, and `teams_url`.
+After Microsoft login, backend redirects to `AUTH_SUCCESS_REDIRECT` with query params:
+
+| Param | Meaning |
+|-------|---------|
+| `access_token`, `refresh_token` | JWTs to store on the frontend |
+| `teams_url` | **Open this.** AIDL channel deep link when available, else falls back to Teams chat/home |
+| `teams_channel_url` | Present only when the AIDL channel deep link was resolved (same value as `teams_url` in that case) |
+| `teams_platform_url` | Always the plain Teams chat/home URL — use for an explicit "open Teams home" link |
+| `landed_on` | `"channel"` or `"chat"` — tells the FE which one `teams_url` actually is |
+| `enroll_as`, `mode`, `email`, `full_name`, `open_teams`, `teams_connected` | as before |
+
+`GET /api/auth/teams/launch/` and `GET /api/auth/me/` return the same `teams_url` / `teams_platform_url` / `teams_channel_url` / `landed_on` shape for post-login use (e.g. a "Reopen Teams" button).
+
+The AIDL channel is only created/found when `MS_AIDL_TEAM_ID` (an existing Microsoft Team's group id) is set — Graph can create a **channel** inside a team but not a new **Team**. Until that env var is set, `landed_on` stays `"chat"` and everyone falls back to Teams chat/home.
 
 ## Azure / redirect URLs
 

@@ -1,0 +1,180 @@
+FRONTEND INTEGRATION PROMPT — Teams Login: land on AIDL Channel (not Chat)
+============================================================================
+Give this whole file to the frontend engineer working on the Teams login flow.
+
+GOAL
+----
+When a user clicks "Team" / signs in with Microsoft, after login they should
+land inside the AIDL CHANNEL in Microsoft Teams — not the generic Teams
+chat/home screen. The backend now returns the channel link as the primary
+`teams_url`; the frontend just needs to keep using that field the way it
+already does, plus read one new flag to know which one it actually got.
+
+Nothing about the token flow (access_token/refresh_token) changes.
+
+BASE URL
+--------
+Production backend: https://aidl-backend.onrender.com
+All paths below are relative to that (e.g. /api/auth/teams/login/).
+
+============================================================================
+STEP 1 — "Sign in with Teams" button
+============================================================================
+GET /api/auth/teams/login/?enroll_as=individual|organization
+
+Response 200:
+{
+  "auth_url": "https://login.microsoftonline.com/...",   // redirect the browser here
+  "state": "...",
+  "enroll_as": "individual",
+  "mode": "microsoft",
+  "after_login": { "open_teams": true, "note": "...", "aidl_channel": {...} }
+}
+
+Response 503 (Microsoft not configured on backend):
+{ "error": "microsoft_not_configured", "message": "...", "required_env": [...] }
+-> show a "sign-in temporarily unavailable" state, don't crash.
+
+Frontend action: window.location.href = data.auth_url
+(This is a full-page redirect to Microsoft's login page — not a popup, not fetch-and-open.)
+
+============================================================================
+STEP 2 — Callback page: /auth/callback
+============================================================================
+Microsoft redirects back to the backend, backend does the token exchange +
+channel lookup, then 302-redirects the BROWSER to your frontend at:
+
+  https://<your-frontend-domain>/auth/callback?<query params below>
+
+Your /auth/callback route just needs to parse `window.location.search` (or
+useSearchParams() in Next.js) — no fetch call needed for this step.
+
+Query params on success:
+  access_token       string   — store this (e.g. localStorage / secure storage)
+  refresh_token       string   — store this
+  enroll_as           "individual" | "organization"
+  mode                 "microsoft"
+  email                 string
+  full_name             string
+  teams_url             string — ALWAYS window.open(teams_url) when open_teams=1.
+                                  This is the AIDL channel deep link when available,
+                                  else it falls back to Teams chat/home automatically.
+                                  You do not need to branch on this — just open it.
+  teams_platform_url    string — Teams chat/home link, always present. Use this only
+                                  if you want a separate "Open Teams chat" button.
+  teams_channel_url     string — present ONLY when the channel link is available
+                                  (same value as teams_url in that case). Optional to use.
+  open_teams            "1"
+  teams_connected        "true"
+  landed_on             "channel" | "chat" — tells you which one teams_url actually is.
+                                  Use this to show a toast, e.g.:
+                                  "channel"  -> "Opened your AIDL channel in Teams"
+                                  "chat"     -> "Opened Teams (AIDL channel not ready yet)"
+  ms_access_token       string   (optional, present sometimes) — Microsoft Graph token,
+                                  not your app's auth token, ignore unless you need Graph calls.
+
+Query params on error (Microsoft returned an error):
+  error                 string
+  error_description     string
+
+Minimal handler (React / Next.js example):
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error")) {
+      // show error UI using params.get("error_description")
+      return;
+    }
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (!accessToken) return; // not a valid callback hit
+
+    saveTokens(accessToken, refreshToken);          // your existing auth storage
+    saveUser({
+      email: params.get("email"),
+      fullName: params.get("full_name"),
+      enrollAs: params.get("enroll_as"),
+    });
+
+    if (params.get("open_teams") === "1") {
+      const teamsUrl = params.get("teams_url");
+      window.open(teamsUrl, "_blank", "noopener,noreferrer");
+      const landedOn = params.get("landed_on"); // "channel" | "chat"
+      showToast(
+        landedOn === "channel"
+          ? "Opened your AIDL channel in Teams"
+          : "Opened Teams (channel not ready yet)"
+      );
+    }
+
+    router.replace("/dashboard"); // or wherever the app lands post-login
+  }, []);
+
+IMPORTANT: window.open must be called synchronously inside this handler (not
+after an awaited fetch) or some browsers will block it as a popup. If you need
+to fetch something first, open a blank tab immediately (window.open("", "_blank"))
+and set its .location after, or just rely on teams_url from the query string
+directly as shown above — no fetch needed at this step.
+
+============================================================================
+STEP 3 — Authenticated requests
+============================================================================
+All authenticated endpoints take:
+  Authorization: Bearer <access_token>
+
+GET /api/auth/me/
+  -> current user + same teams_url / teams_platform_url / teams_channel_url /
+     landed_on fields as above, plus your normal user profile fields.
+     Use this to re-show the "Open AIDL channel" button anywhere in the app
+     later (e.g. a persistent "Open in Teams" button in the header) without
+     re-doing login.
+
+GET /api/auth/teams/launch/
+  -> {
+       "teams_connected": true,
+       "email": "...",
+       "full_name": "...",
+       "teams_url": "...",            // channel-first, same rule as above
+       "teams_platform_url": "...",
+       "teams_channel_url": "..." | null,
+       "landed_on": "channel" | "chat",
+       "channel": { "team_id": "...", "channel_id": "...", "channel_name": "AIDL" }
+     }
+  Use this for a standalone "Open Teams" button anywhere in the app (nav bar,
+  dashboard card, etc.) — call it, then window.open(data.teams_url).
+
+POST /api/auth/refresh/
+  body: { "refresh_token": "..." }
+  -> { "access_token": "...", "refresh_token": "...", "token_type": "Bearer" }
+  Use on 401 from any authenticated endpoint, then retry the original request.
+
+POST /api/auth/logout/
+  -> { "message": "Logged out. Delete tokens on client." }
+  Backend is stateless here — the frontend must clear stored tokens itself.
+
+============================================================================
+KNOWN CURRENT LIMITATION (backend team is handling, not frontend's job)
+============================================================================
+Right now `landed_on` will come back as "chat" for everyone, because the
+backend's MS_AIDL_TEAM_ID config value is not yet set — so no AIDL channel
+exists to link to yet. This is a backend/Azure config task, not a frontend
+bug. Frontend code should be written per the "channel" vs "chat" branches
+above regardless, so it starts working automatically the moment the backend
+config lands — no frontend redeploy needed when that happens.
+
+============================================================================
+CHECKLIST FOR THE FRONTEND ENGINEER
+============================================================================
+[ ] "Sign in with Teams" button hits GET /api/auth/teams/login/ and does a
+    full redirect (window.location.href) to auth_url, not a popup.
+[ ] /auth/callback route parses query params (not a fetch call).
+[ ] Tokens (access_token/refresh_token) saved from the callback query string.
+[ ] window.open(teams_url) called synchronously in the callback handler when
+    open_teams=1.
+[ ] landed_on used to show the right toast/message (optional but recommended).
+[ ] teams_platform_url wired to an optional "Open Teams chat" button if the
+    design calls for one.
+[ ] 401 on any authenticated call triggers POST /api/auth/refresh/ then retry.
+[ ] Logout clears local tokens after calling POST /api/auth/logout/.
+[ ] error / error_description query params on /auth/callback show a proper
+    error screen instead of silently failing.

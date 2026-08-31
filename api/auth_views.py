@@ -101,9 +101,10 @@ def _redirect_with_tokens(
     teams_channel_url: str = "",
 ):
     tokens = _issue_tokens(user)
-    # Always open the real Microsoft Teams platform (chat/home) for this account.
+    # Chat/home fallback for this Microsoft account.
     platform_url = build_teams_launch_url(user.email)
-    # Optional AIDL channel deep link (when MS_AIDL_TEAM_ID + Graph succeed).
+    # AIDL channel deep link (when MS_AIDL_TEAM_ID + Graph succeed) — this is what should
+    # actually open after login, not chat.
     channel_url = (teams_channel_url or "").strip()
     if not channel_url and teams_url and "/l/channel/" in teams_url:
         channel_url = teams_url
@@ -125,12 +126,16 @@ def _redirect_with_tokens(
         "mode": mode,
         "email": user.email,
         "full_name": user.full_name,
-        # Primary: open THIS in a new tab/window → real MS Teams platform
-        "teams_url": platform_url,
+        # Primary: open THIS in a new tab/window → AIDL channel when available,
+        # else falls back to Teams chat/home.
+        "teams_url": channel_url or platform_url,
+        # Secondary: Teams chat/home, kept for a "switch to chat" link on the frontend.
+        "teams_platform_url": platform_url,
         "open_teams": "1",
         "teams_connected": "true",
+        "landed_on": "channel" if channel_url else "chat",
     }
-    if channel_url and channel_url != platform_url:
+    if channel_url:
         query["teams_channel_url"] = channel_url
     if ms_access_token:
         query["ms_access_token"] = ms_access_token
@@ -166,11 +171,13 @@ def teams_login(request):
     data["mode"] = "microsoft"
     data["after_login"] = {
         "open_teams": True,
-        "teams_url": "https://teams.microsoft.com/v2/",
         "note": (
             "After callback, ALWAYS window.open(teams_url) when open_teams=1. "
-            "teams_url is the real Microsoft Teams platform (login_hint included). "
-            "Optional teams_channel_url opens the AIDL channel deep link."
+            "teams_url now points at the AIDL channel deep link (lands directly on the "
+            "channel, not chat) whenever MS_AIDL_TEAM_ID is configured and the Graph "
+            "call succeeds; it falls back to the plain Teams platform URL (chat/home) "
+            "otherwise. Use landed_on ('channel'|'chat') to know which one you got, and "
+            "teams_platform_url if you need an explicit link to chat/home as well."
         ),
         "aidl_channel": {
             "team_id_configured": bool((settings.MS_AIDL_TEAM_ID or "").strip()),
@@ -267,8 +274,11 @@ def teams_launch(request):
             "teams_connected": True,
             "email": request.user.email,
             "full_name": request.user.full_name,
-            "teams_url": platform_url,
+            # Primary: AIDL channel deep link when available, else chat/home.
+            "teams_url": channel_url or platform_url,
+            "teams_platform_url": platform_url,
             "teams_channel_url": channel_url or None,
+            "landed_on": "channel" if channel_url else "chat",
             "channel": {
                 "team_id": getattr(request.user, "teams_team_id", "") or "",
                 "channel_id": getattr(request.user, "teams_channel_id", "") or "",
@@ -276,8 +286,9 @@ def teams_launch(request):
                 or (settings.MS_AIDL_CHANNEL_NAME or "AIDL"),
             },
             "message": (
-                "Open teams_url for the real Microsoft Teams platform. "
-                "Optional teams_channel_url opens the AIDL channel when available."
+                "Open teams_url — it opens the AIDL channel directly when available, "
+                "otherwise Teams chat/home. teams_platform_url is always chat/home if "
+                "you need an explicit link to it."
             ),
         }
     )
@@ -288,14 +299,18 @@ def teams_launch(request):
 @permission_classes([IsAuthenticated])
 def me(request):
     data = AIDLUserSerializer(request.user).data
-    data["teams_url"] = build_teams_launch_url(request.user.email)
+    platform_url = build_teams_launch_url(request.user.email)
     channel_url = resolve_teams_url(
         email=request.user.email,
         team_id=getattr(request.user, "teams_team_id", "") or "",
         channel_id=getattr(request.user, "teams_channel_id", "") or "",
         channel_name=getattr(request.user, "teams_channel_name", "") or "",
     )
-    data["teams_channel_url"] = channel_url if channel_url and "/l/channel/" in channel_url else None
+    channel_url = channel_url if channel_url and "/l/channel/" in channel_url else None
+    data["teams_url"] = channel_url or platform_url
+    data["teams_platform_url"] = platform_url
+    data["teams_channel_url"] = channel_url
+    data["landed_on"] = "channel" if channel_url else "chat"
     data["teams_connected"] = True
     return Response(data)
 
