@@ -81,10 +81,13 @@ def _upsert_user(profile: dict, enroll_as: str) -> tuple[AIDLUser, bool]:
 
 def _save_channel_on_user(user: AIDLUser, channel_info: dict | None) -> None:
     if not channel_info:
-        return
-    user.teams_team_id = channel_info.get("team_id") or user.teams_team_id
-    user.teams_channel_id = channel_info.get("channel_id") or user.teams_channel_id
-    user.teams_channel_name = channel_info.get("channel_name") or user.teams_channel_name
+        user.teams_team_id = ""
+        user.teams_channel_id = ""
+        user.teams_channel_name = ""
+    else:
+        user.teams_team_id = channel_info.get("team_id") or ""
+        user.teams_channel_id = channel_info.get("channel_id") or ""
+        user.teams_channel_name = channel_info.get("channel_name") or ""
     user.save(
         update_fields=[
             "teams_team_id",
@@ -101,6 +104,8 @@ def _redirect_with_tokens(
     ms_access_token: str = "",
     teams_url: str = "",
     teams_channel_url: str = "",
+    teams_setup: str = "",
+    welcome_card_sent: bool = False,
 ):
     tokens = _issue_tokens(user)
     # Chat/home fallback for this Microsoft account.
@@ -137,6 +142,10 @@ def _redirect_with_tokens(
         "teams_connected": "true",
         "landed_on": "channel" if channel_url else "chat",
     }
+    if teams_setup:
+        query["teams_setup"] = teams_setup
+    if welcome_card_sent:
+        query["welcome_card_sent"] = "1"
     if channel_url:
         query["teams_channel_url"] = channel_url
     if ms_access_token:
@@ -245,25 +254,37 @@ def teams_callback(request):
         )
 
     user, is_new_signup = _upsert_user(profile, enroll_as)
+    old_team_id = getattr(user, "teams_team_id", "") or ""
+    old_channel_id = getattr(user, "teams_channel_id", "") or ""
 
     channel_info = ensure_aidl_channel(ms_token, email=user.email)
     _save_channel_on_user(user, channel_info)
     channel_url = (channel_info or {}).get("teams_url") or ""
 
-    if channel_info and is_new_signup:
-        send_welcome_card_after_signup(
-            ms_token,
-            team_id=channel_info.get("team_id") or "",
-            channel_id=channel_info.get("channel_id") or "",
-            full_name=user.full_name,
-            org_name=org_display_name(),
+    welcome_card_sent = False
+    if channel_info:
+        channel_recreated = (
+            (channel_info.get("team_id") or "") != old_team_id
+            or (channel_info.get("channel_id") or "") != old_channel_id
         )
+        should_send_welcome = is_new_signup or channel_recreated
+        if should_send_welcome:
+            welcome_result = send_welcome_card_after_signup(
+                ms_token,
+                team_id=channel_info.get("team_id") or "",
+                channel_id=channel_info.get("channel_id") or "",
+                full_name=user.full_name,
+                org_name=org_display_name(),
+            )
+            welcome_card_sent = bool(welcome_result)
 
     return _redirect_with_tokens(
         user,
         mode="microsoft",
         ms_access_token=ms_token,
         teams_channel_url=channel_url,
+        teams_setup="ok" if channel_info else "failed",
+        welcome_card_sent=welcome_card_sent,
     )
 
 

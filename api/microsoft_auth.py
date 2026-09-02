@@ -167,6 +167,40 @@ def list_team_channels(access_token: str, team_id: str) -> list:
     return response.json().get("value") or []
 
 
+def team_is_accessible(access_token: str, team_id: str) -> bool:
+    """Return False when the team was deleted or the user lost access."""
+    if not team_id:
+        return False
+    url = f"{GRAPH_BASE}/teams/{team_id}"
+    try:
+        response = requests.get(
+            url,
+            headers=_graph_headers(access_token),
+            timeout=20,
+        )
+        return response.status_code == 200
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code in {403, 404}:
+            return False
+        logger.warning("team access check failed for %s: %s", team_id, exc)
+        return False
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("team access check failed for %s: %s", team_id, exc)
+        return False
+
+
+def find_joined_team_id_by_name(access_token: str, display_name: str) -> str | None:
+    target = (display_name or "").strip().lower()
+    if not target:
+        return None
+    for team in list_joined_teams(access_token):
+        if (team.get("displayName") or "").strip().lower() == target:
+            team_id = team.get("id") or ""
+            if team_id and team_is_accessible(access_token, team_id):
+                return team_id
+    return None
+
+
 def create_team_channel(
     access_token: str,
     team_id: str,
@@ -259,11 +293,11 @@ def create_aidl_team(access_token: str, display_name: str) -> str:
             team_id = location[start:end]
 
     if not team_id:
-        # Fallback: re-list joined teams by name (may take a moment)
-        time.sleep(3)
-        for t in list_joined_teams(access_token):
-            if (t.get("displayName") or "").strip().lower() == display_name.lower():
-                team_id = t.get("id") or ""
+        # New teams can take a while to appear in joinedTeams after async create.
+        for wait in (3, 5, 8, 10, 15):
+            time.sleep(wait)
+            team_id = find_joined_team_id_by_name(access_token, display_name) or ""
+            if team_id:
                 break
 
     if not team_id:
@@ -274,19 +308,25 @@ def create_aidl_team(access_token: str, display_name: str) -> str:
 def ensure_aidl_team(access_token: str) -> str | None:
     """
     Resolve the AIDL Microsoft Team id:
-    1) MS_AIDL_TEAM_ID override if set
+    1) MS_AIDL_TEAM_ID override if set and still accessible
     2) Else find joined team named MS_AIDL_TEAM_NAME (default "AIDL")
     3) Else create that team (when MS_AIDL_AUTO_CREATE_TEAM is true)
     """
     override = (getattr(settings, "MS_AIDL_TEAM_ID", None) or "").strip()
     if override:
-        return override
+        if team_is_accessible(access_token, override):
+            return override
+        logger.warning(
+            "MS_AIDL_TEAM_ID %s is missing or inaccessible; will find/create %s",
+            override,
+            _aidl_team_name(),
+        )
 
     team_name = _aidl_team_name()
     try:
-        for t in list_joined_teams(access_token):
-            if (t.get("displayName") or "").strip().lower() == team_name.lower():
-                return t.get("id") or None
+        team_id = find_joined_team_id_by_name(access_token, team_name)
+        if team_id:
+            return team_id
     except Exception as exc:  # noqa: BLE001
         logger.warning("list joined teams failed: %s", exc)
 
@@ -304,11 +344,59 @@ def ensure_aidl_team(access_token: str) -> str | None:
         return None
 
 
+def _list_channels_with_retry(
+    access_token: str,
+    team_id: str,
+    *,
+    attempts: int = 12,
+    delay_sec: int = 3,
+) -> tuple[list, bool]:
+    """
+    List channels for a team. Returns (channels, team_still_exists).
+    Retries while Microsoft finishes provisioning a newly created team.
+    """
+    for attempt in range(attempts):
+        try:
+            return list_team_channels(access_token, team_id), True
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code in {403, 404}:
+                if team_is_accessible(access_token, team_id):
+                    logger.info(
+                        "channels not ready yet for team %s (attempt %s/%s)",
+                        team_id,
+                        attempt + 1,
+                        attempts,
+                    )
+                    time.sleep(delay_sec)
+                    continue
+                return [], False
+            logger.warning(
+                "list channels attempt %s/%s failed for team %s: %s",
+                attempt + 1,
+                attempts,
+                team_id,
+                exc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "list channels attempt %s/%s failed for team %s: %s",
+                attempt + 1,
+                attempts,
+                team_id,
+                exc,
+            )
+        time.sleep(delay_sec)
+    if team_is_accessible(access_token, team_id):
+        return [], True
+    return [], False
+
+
 def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
     """
     Ensure Team "AIDL" exists (or MS_AIDL_TEAM_ID), then ensure channel
     "aidl dashboard" inside it. Returns deep-link payload or None on failure.
-    Login must not break if this fails.
+    Re-creates team/channel after manual deletion on reconnect/login.
     """
     if not access_token:
         return None
@@ -322,14 +410,16 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             return None
 
         channel_name = _aidl_channel_name()
-        # New teams need a short settle time before channels API works reliably
-        channels = []
-        for _ in range(5):
-            try:
-                channels = list_team_channels(access_token, team_id)
-                break
-            except requests.HTTPError:
-                time.sleep(2)
+        channels, team_still_exists = _list_channels_with_retry(access_token, team_id)
+
+        if not team_still_exists:
+            logger.warning("AIDL team %s is gone; creating a fresh team", team_id)
+            team_id = ensure_aidl_team(access_token)
+            if not team_id:
+                return None
+            channels, team_still_exists = _list_channels_with_retry(access_token, team_id)
+            if not team_still_exists:
+                return None
 
         match = next(
             (
@@ -386,7 +476,12 @@ def resolve_teams_url(
     channel_id: str = "",
     channel_name: str = "",
 ) -> str:
-    """Prefer channel deep link; else platform login_hint fallback."""
+    """Prefer live Graph ensure; avoid stale deleted team/channel ids."""
+    if ms_access_token:
+        ensured = ensure_aidl_channel(ms_access_token, email=email)
+        if ensured and ensured.get("teams_url"):
+            return ensured["teams_url"]
+
     name = (channel_name or _aidl_channel_name()).strip()
     tid = (team_id or getattr(settings, "MS_AIDL_TEAM_ID", None) or "").strip()
     cid = (channel_id or "").strip()
@@ -399,10 +494,5 @@ def resolve_teams_url(
             tenant_id=settings.MS_TENANT_ID or "",
             email=email,
         )
-
-    if ms_access_token:
-        ensured = ensure_aidl_channel(ms_access_token, email=email)
-        if ensured and ensured.get("teams_url"):
-            return ensured["teams_url"]
 
     return build_teams_launch_url(email)
