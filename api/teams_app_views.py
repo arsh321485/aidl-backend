@@ -13,6 +13,7 @@ from rest_framework.response import Response
 
 from .auth_views import JWTAuthentication
 from .teams_cards import CARD_BUILDERS, TEAMS_TABS, build_card, org_display_name
+from .teams_channel_tabs import ensure_aidl_channel_tabs, is_aidl_dashboard_channel, target_channel_name
 from .teams_messaging import send_channel_adaptive_card, send_welcome_card_after_signup
 
 
@@ -93,6 +94,66 @@ def teams_app_index(request):
             "teams_base_url": base,
         }
     )
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_install_channel_tabs(request):
+    """
+    Install Home / Learner's Permit / Highway Code / Traffic Light Check tabs
+    on the aidl dashboard channel only (never General).
+    """
+    user = request.user
+    team_id = getattr(user, "teams_team_id", "") or ""
+    channel_id = getattr(user, "teams_channel_id", "") or ""
+    channel_name = getattr(user, "teams_channel_name", "") or target_channel_name()
+
+    if not team_id or not channel_id:
+        return Response(
+            {
+                "error": "channel_not_configured",
+                "message": "Log in via Teams first so aidl dashboard ids are saved.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not is_aidl_dashboard_channel(channel_name):
+        return Response(
+            {
+                "error": "wrong_channel",
+                "message": (
+                    f"Tabs only install on '{target_channel_name()}' channel, "
+                    f"not '{channel_name}'."
+                ),
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    ms_token = (request.data.get("ms_access_token") or "").strip()
+    if not ms_token:
+        return Response(
+            {"error": "ms_access_token_required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    result = ensure_aidl_channel_tabs(
+        ms_token,
+        team_id=team_id,
+        channel_id=channel_id,
+        channel_name=channel_name,
+    )
+    if not result or result.get("skipped"):
+        return Response(
+            {"error": "tab_install_skipped", "details": result},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not result.get("ok"):
+        return Response(
+            {"error": "tab_install_partial", "details": result},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    return Response({"ok": True, "details": result})
 
 
 @api_view(["POST"])

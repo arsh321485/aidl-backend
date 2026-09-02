@@ -427,13 +427,16 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
                 c
                 for c in channels
                 if (c.get("displayName") or "").strip().lower() == channel_name.lower()
+                and (c.get("displayName") or "").strip().lower() != "general"
             ),
             None,
         )
+        channel_just_created = False
         if match is None:
             created = create_team_channel(access_token, team_id, channel_name)
             channel_id = created.get("id") or ""
             channel_name = created.get("displayName") or channel_name
+            channel_just_created = True
         else:
             channel_id = match.get("id") or ""
             channel_name = match.get("displayName") or channel_name
@@ -463,6 +466,8 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
                 access_token,
                 team_id=team_id,
                 channel_id=channel_id,
+                channel_name=channel_name,
+                channel_just_created=channel_just_created,
             )
 
         return {

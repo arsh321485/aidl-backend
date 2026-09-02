@@ -107,6 +107,9 @@ def _redirect_with_tokens(
     teams_channel_url: str = "",
     teams_setup: str = "",
     welcome_card_sent: bool = False,
+    channel_name: str = "",
+    channel_tabs_created: int = 0,
+    channel_tabs_ok: bool = False,
 ):
     tokens = _issue_tokens(user)
     # Chat/home fallback for this Microsoft account.
@@ -150,6 +153,12 @@ def _redirect_with_tokens(
     if channel_url:
         query["teams_channel_url"] = channel_url
         query["teams_home_tab_url"] = channel_url
+    if channel_name:
+        query["teams_channel_name"] = channel_name
+    if channel_tabs_created:
+        query["channel_tabs_created"] = str(channel_tabs_created)
+    if channel_tabs_ok:
+        query["channel_tabs_ok"] = "1"
     if ms_access_token:
         query["ms_access_token"] = ms_access_token
     return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
@@ -266,6 +275,7 @@ def teams_callback(request):
     home_tab_url = (channel_info or {}).get("home_tab_url") or channel_url
 
     welcome_card_sent = False
+    channel_tabs_created = 0
     if channel_info:
         channel_recreated = (
             (channel_info.get("team_id") or "") != old_team_id
@@ -281,6 +291,8 @@ def teams_callback(request):
                 org_name=org_display_name(),
             )
             welcome_card_sent = bool(welcome_result)
+        tab_info = channel_info.get("channel_tabs") or {}
+        channel_tabs_created = len(tab_info.get("tabs_created") or [])
 
     return _redirect_with_tokens(
         user,
@@ -289,6 +301,9 @@ def teams_callback(request):
         teams_channel_url=home_tab_url or channel_url,
         teams_setup="ok" if channel_info else "failed",
         welcome_card_sent=welcome_card_sent,
+        channel_name=(channel_info or {}).get("channel_name") or "",
+        channel_tabs_created=channel_tabs_created,
+        channel_tabs_ok=bool((channel_info or {}).get("channel_tabs") or {}).get("ok"),
     )
 
 

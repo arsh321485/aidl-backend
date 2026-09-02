@@ -1,6 +1,7 @@
 """Install AIDL UI tabs on the Microsoft Teams channel + build tab deep links."""
 
 import logging
+import time
 
 import requests
 from django.conf import settings
@@ -18,6 +19,20 @@ AIDL_CHANNEL_TABS = tuple(
     (f"aidl-{tab_id}", label, tab_id)
     for tab_id, label, _icon in TEAMS_TABS
 )
+
+
+def target_channel_name() -> str:
+    return (
+        getattr(settings, "MS_AIDL_CHANNEL_NAME", None) or "aidl dashboard"
+    ).strip().lower() or "aidl dashboard"
+
+
+def is_aidl_dashboard_channel(channel_name: str) -> bool:
+    """Tabs must only be installed on aidl dashboard — never General."""
+    name = (channel_name or "").strip().lower()
+    if not name or name == "general":
+        return False
+    return name == target_channel_name()
 
 
 def _teams_tab_base_url() -> str:
@@ -46,7 +61,7 @@ def create_channel_website_tab(
     entity_id: str,
     display_name: str,
     content_url: str,
-) -> dict | None:
+) -> tuple[dict | None, str | None]:
     url = f"{GRAPH_BASE}/teams/{team_id}/channels/{channel_id}/tabs"
     payload = {
         "displayName": display_name,
@@ -57,7 +72,6 @@ def create_channel_website_tab(
             "entityId": entity_id,
             "contentUrl": content_url,
             "websiteUrl": content_url,
-            "removeUrl": None,
         },
     }
     try:
@@ -68,7 +82,7 @@ def create_channel_website_tab(
             timeout=30,
         )
         response.raise_for_status()
-        return response.json()
+        return response.json(), None
     except requests.HTTPError as exc:
         detail = ""
         try:
@@ -76,15 +90,16 @@ def create_channel_website_tab(
         except Exception:  # noqa: BLE001
             detail = str(exc)
         logger.warning(
-            "create channel tab %s failed: %s %s",
+            "create channel tab %s on channel %s failed: %s %s",
             display_name,
+            channel_id,
             exc,
             detail,
         )
-        return None
+        return None, detail or str(exc)
     except Exception as exc:  # noqa: BLE001
         logger.warning("create channel tab %s failed: %s", display_name, exc)
-        return None
+        return None, str(exc)
 
 
 def _existing_entity_ids(existing_tabs: list) -> set[str]:
@@ -102,28 +117,65 @@ def ensure_aidl_channel_tabs(
     *,
     team_id: str,
     channel_id: str,
+    channel_name: str = "",
+    channel_just_created: bool = False,
 ) -> dict | None:
     """
     Add Home / Learner's Permit / Highway Code / Traffic Light Check tabs
-    to the AIDL channel. Safe to call on every login (skips existing tabs).
+    ONLY on the configured aidl dashboard channel (never General).
     """
     if not getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
-        return None
-    if not access_token or not team_id or not channel_id:
-        return None
+        return {"skipped": True, "reason": "disabled"}
 
-    try:
-        existing_tabs = list_channel_tabs(access_token, team_id, channel_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("list channel tabs failed: %s", exc)
-        existing_tabs = []
+    if not access_token or not team_id or not channel_id:
+        return {"skipped": True, "reason": "missing_ids"}
+
+    if not is_aidl_dashboard_channel(channel_name):
+        logger.warning(
+            "Refusing tab install on channel %r — tabs only go on %r",
+            channel_name,
+            target_channel_name(),
+        )
+        return {
+            "skipped": True,
+            "reason": "wrong_channel",
+            "channel_name": channel_name,
+            "expected_channel": target_channel_name(),
+        }
+
+    if channel_just_created:
+        time.sleep(5)
+
+    existing_tabs: list = []
+    last_list_error = ""
+    for attempt in range(5):
+        try:
+            existing_tabs = list_channel_tabs(access_token, team_id, channel_id)
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_list_error = str(exc)
+            logger.warning(
+                "list channel tabs attempt %s/5 failed for %s: %s",
+                attempt + 1,
+                channel_id,
+                exc,
+            )
+            time.sleep(3)
+    else:
+        return {
+            "ok": False,
+            "channel_name": channel_name,
+            "error": last_list_error or "could_not_list_tabs",
+        }
 
     present = _existing_entity_ids(existing_tabs)
-    created = []
+    created: list[str] = []
+    failed: list[dict] = []
+
     for entity_id, display_name, tab_slug in AIDL_CHANNEL_TABS:
         if entity_id in present:
             continue
-        result = create_channel_website_tab(
+        result, error = create_channel_website_tab(
             access_token,
             team_id=team_id,
             channel_id=channel_id,
@@ -133,12 +185,19 @@ def ensure_aidl_channel_tabs(
         )
         if result:
             created.append(display_name)
+        else:
+            failed.append({"tab": display_name, "error": error or "unknown"})
 
     home_entity = AIDL_CHANNEL_TABS[0][0]
     return {
+        "ok": len(failed) == 0,
+        "channel_name": channel_name,
+        "channel_id": channel_id,
         "home_entity_id": home_entity,
         "tabs_created": created,
+        "tabs_failed": failed,
         "tabs_present": len(present) + len(created),
+        "expected_tabs": len(AIDL_CHANNEL_TABS),
     }
 
 

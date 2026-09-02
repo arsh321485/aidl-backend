@@ -15,7 +15,8 @@ CORS_ALLOWED_ORIGINS=https://aidl-frontend-8owk.vercel.app,http://localhost:5173
 MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 
-MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,Group.ReadWrite.All
+MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All
+MS_AIDL_CHANNEL_NAME=aidl dashboard
 MS_AIDL_INSTALL_CHANNEL_TABS=True
 MS_AIDL_TEAM_NAME=AIDL
 MS_AIDL_CHANNEL_NAME=aidl dashboard

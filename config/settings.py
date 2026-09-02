@@ -57,6 +57,7 @@ _DEFAULT_MS_SCOPES = (
     "Channel.Create,"
     "ChannelMessage.Send,"
     "TeamsTab.Create,"
+    "TeamsTab.ReadWrite.All,"
     "Group.ReadWrite.All"
 )
 MS_SCOPES = [
