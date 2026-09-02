@@ -24,6 +24,7 @@ from .microsoft_auth import (
     resolve_teams_url,
 )
 from .teams_cards import org_display_name
+from .teams_channel_tabs import is_aidl_teams_landing_url
 from .teams_messaging import send_welcome_card_after_signup
 from .models import AIDLUser
 from .serializers import AIDLUserSerializer
@@ -123,7 +124,7 @@ def _redirect_with_tokens(
             channel_id=getattr(user, "teams_channel_id", "") or "",
             channel_name=getattr(user, "teams_channel_name", "") or "",
         )
-        if channel_url and "/l/channel/" not in channel_url:
+        if channel_url and not is_aidl_teams_landing_url(channel_url):
             channel_url = ""
 
     query = {
@@ -148,6 +149,7 @@ def _redirect_with_tokens(
         query["welcome_card_sent"] = "1"
     if channel_url:
         query["teams_channel_url"] = channel_url
+        query["teams_home_tab_url"] = channel_url
     if ms_access_token:
         query["ms_access_token"] = ms_access_token
     return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
@@ -185,7 +187,8 @@ def teams_login(request):
         "note": (
             "After callback, ALWAYS window.open(teams_url) when open_teams=1. "
             "Backend auto-creates/finds Microsoft Team 'AIDL' and channel "
-            "'aidl dashboard', then sets teams_url to that channel deep link "
+            "'aidl dashboard', installs Home/Learner's Permit/Highway Code/"
+            "Traffic Light Check tabs, then sets teams_url to the Home tab deep link "
             "(landed_on=channel). Falls back to Teams chat/home (landed_on=chat) "
             "if Graph/Team.Create fails. teams_platform_url is always chat/home."
         ),
@@ -260,6 +263,7 @@ def teams_callback(request):
     channel_info = ensure_aidl_channel(ms_token, email=user.email)
     _save_channel_on_user(user, channel_info)
     channel_url = (channel_info or {}).get("teams_url") or ""
+    home_tab_url = (channel_info or {}).get("home_tab_url") or channel_url
 
     welcome_card_sent = False
     if channel_info:
@@ -282,7 +286,7 @@ def teams_callback(request):
         user,
         mode="microsoft",
         ms_access_token=ms_token,
-        teams_channel_url=channel_url,
+        teams_channel_url=home_tab_url or channel_url,
         teams_setup="ok" if channel_info else "failed",
         welcome_card_sent=welcome_card_sent,
     )
@@ -300,14 +304,14 @@ def teams_launch(request):
         channel_id=getattr(request.user, "teams_channel_id", "") or "",
         channel_name=getattr(request.user, "teams_channel_name", "") or "",
     )
-    if channel_url and "/l/channel/" not in channel_url:
+    if channel_url and not is_aidl_teams_landing_url(channel_url):
         channel_url = ""
     return Response(
         {
             "teams_connected": True,
             "email": request.user.email,
             "full_name": request.user.full_name,
-            # Primary: AIDL channel deep link when available, else chat/home.
+            # Primary: AIDL Home tab deep link when available, else chat/home.
             "teams_url": channel_url or platform_url,
             "teams_platform_url": platform_url,
             "teams_channel_url": channel_url or None,
@@ -339,7 +343,7 @@ def me(request):
         channel_id=getattr(request.user, "teams_channel_id", "") or "",
         channel_name=getattr(request.user, "teams_channel_name", "") or "",
     )
-    channel_url = channel_url if channel_url and "/l/channel/" in channel_url else None
+    channel_url = channel_url if channel_url and is_aidl_teams_landing_url(channel_url) else None
     data["teams_url"] = channel_url or platform_url
     data["teams_platform_url"] = platform_url
     data["teams_channel_url"] = channel_url

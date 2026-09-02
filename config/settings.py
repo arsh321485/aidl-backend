@@ -56,6 +56,7 @@ _DEFAULT_MS_SCOPES = (
     "Channel.ReadBasic.All,"
     "Channel.Create,"
     "ChannelMessage.Send,"
+    "TeamsTab.Create,"
     "Group.ReadWrite.All"
 )
 MS_SCOPES = [
@@ -88,6 +89,11 @@ MS_TEAMS_APP_BASE_URL = (
     os.getenv("MS_TEAMS_APP_BASE_URL") or "https://aidl-backend.onrender.com/api/teams"
 ).strip().rstrip("/")
 MS_SEND_WELCOME_CARD = os.getenv("MS_SEND_WELCOME_CARD", "True").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+MS_AIDL_INSTALL_CHANNEL_TABS = os.getenv("MS_AIDL_INSTALL_CHANNEL_TABS", "True").lower() in (
     "1",
     "true",
     "yes",

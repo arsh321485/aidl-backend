@@ -9,8 +9,7 @@
   <style>
     :root {
       --aidl-purple: #6264a7;
-      --aidl-purple-dark: #464775;
-      --aidl-bg: #f5f5f5;
+      --aidl-bg: #faf9f8;
       --aidl-card: #ffffff;
       --aidl-text: #242424;
       --aidl-muted: #616161;
@@ -18,24 +17,29 @@
       --aidl-beige: #f3ede2;
     }
     * { box-sizing: border-box; }
-    body {
+    html, body {
       margin: 0;
+      min-height: 100%;
       font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
       background: var(--aidl-bg);
       color: var(--aidl-text);
-      padding: 16px;
+    }
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 20px 24px 32px;
     }
     .nav {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 16px;
+      gap: 10px;
+      margin-bottom: 20px;
     }
     .nav a {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 14px;
+      padding: 10px 16px;
       border-radius: 999px;
       border: 1px solid var(--aidl-border);
       background: var(--aidl-card);
@@ -43,34 +47,34 @@
       text-decoration: none;
       font-size: 14px;
       font-weight: 600;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
     }
     .nav a.active {
       background: var(--aidl-purple);
       border-color: var(--aidl-purple);
       color: #fff;
     }
-    .nav a:hover:not(.active) {
-      border-color: var(--aidl-purple);
-    }
     .card-shell {
       background: var(--aidl-card);
       border: 1px solid var(--aidl-border);
-      border-radius: 8px;
-      padding: 16px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-      max-width: 720px;
+      border-radius: 12px;
+      padding: 20px 24px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
     }
-    #cardHost .ac-container[style*="emphasis"] {
+    #cardHost .ac-container[style*="emphasis"],
+    #cardHost .ac-container.ac-emphasis {
       background-color: var(--aidl-beige) !important;
     }
-    #cardHost .ac-pushButton[style*="positive"] {
+    #cardHost .ac-pushButton[style*="positive"],
+    #cardHost button.ac-pushButton {
       background-color: var(--aidl-purple) !important;
       border-color: var(--aidl-purple) !important;
+      color: #fff !important;
     }
-    .context {
+    .footer-note {
+      margin-top: 14px;
       font-size: 12px;
       color: var(--aidl-muted);
-      margin-bottom: 12px;
     }
     .loading {
       color: var(--aidl-muted);
@@ -79,19 +83,21 @@
   </style>
 </head>
 <body>
-  <nav class="nav" aria-label="AIDL navigation">
-    {% for tab in tabs %}
-    <a href="{{ tab.url }}" class="{% if tab.active %}active{% endif %}">
-      <span aria-hidden="true">{{ tab.icon }}</span>
-      <span>{{ tab.label }}</span>
-    </a>
-    {% endfor %}
-  </nav>
+  <div class="page">
+    <nav class="nav" aria-label="AIDL navigation">
+      {% for tab in tabs %}
+      <a href="{{ tab.url }}" class="{% if tab.active %}active{% endif %}">
+        <span aria-hidden="true">{{ tab.icon }}</span>
+        <span>{{ tab.label }}</span>
+      </a>
+      {% endfor %}
+    </nav>
 
-  <p class="context">AIDL for {{ org_name }} · Teams app tab</p>
+    <div class="card-shell">
+      <div id="cardHost"><p class="loading">Loading…</p></div>
+    </div>
 
-  <div class="card-shell">
-    <div id="cardHost"><p class="loading">Loading…</p></div>
+    <p class="footer-note">Sent automatically on signup · {{ org_name }}</p>
   </div>
 
   <script>
@@ -142,8 +148,7 @@
         }
       };
       adaptiveCard.parse(card);
-      const rendered = adaptiveCard.render();
-      host.appendChild(rendered);
+      host.appendChild(adaptiveCard.render());
     }
 
     loadCard();

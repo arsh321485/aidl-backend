@@ -12,6 +12,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from .models import OAuthState
+from .teams_channel_tabs import build_home_tab_deep_link
 
 
 logger = logging.getLogger(__name__)
@@ -448,12 +449,32 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             tenant_id=settings.MS_TENANT_ID or "",
             email=email,
         )
+
+        home_tab_url = build_home_tab_deep_link(
+            team_id=team_id,
+            channel_id=channel_id,
+            tenant_id=settings.MS_TENANT_ID or "",
+            email=email,
+        )
+
+        tab_info = None
+        if getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
+            tab_info = ensure_aidl_channel_tabs(
+                access_token,
+                team_id=team_id,
+                channel_id=channel_id,
+            )
+
         return {
             "team_id": team_id,
             "team_name": _aidl_team_name(),
             "channel_id": channel_id,
             "channel_name": channel_name,
-            "teams_url": teams_url,
+            # Primary landing: Home tab with welcome card UI (not Posts/chat).
+            "teams_url": home_tab_url,
+            "home_tab_url": home_tab_url,
+            "channel_posts_url": teams_url,
+            "channel_tabs": tab_info,
         }
     except requests.HTTPError as exc:
         detail = ""
@@ -487,10 +508,9 @@ def resolve_teams_url(
     cid = (channel_id or "").strip()
 
     if tid and cid:
-        return build_channel_deep_link(
+        return build_home_tab_deep_link(
             team_id=tid,
             channel_id=cid,
-            channel_name=name,
             tenant_id=settings.MS_TENANT_ID or "",
             email=email,
         )
