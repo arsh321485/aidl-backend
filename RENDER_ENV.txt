@@ -15,15 +15,18 @@ CORS_ALLOWED_ORIGINS=https://aidl-frontend-8owk.vercel.app,http://localhost:5173
 MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 
-MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,Group.ReadWrite.All
+MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,Group.ReadWrite.All
 MS_AIDL_TEAM_NAME=AIDL
 MS_AIDL_CHANNEL_NAME=aidl dashboard
 MS_AIDL_AUTO_CREATE_TEAM=True
+MS_SEND_WELCOME_CARD=True
+MS_TEAMS_APP_BASE_URL=https://aidl-backend.onrender.com/api/teams
+AIDL_ORG_DISPLAY_NAME=Northwind Logistics
 # MS_AIDL_TEAM_ID=   # only if you want a fixed existing Team instead of auto-create
 
 # Azure App Registration → API permissions (delegated) + admin consent:
 #   User.Read, Team.ReadBasic.All, Team.Create, Channel.ReadBasic.All,
-#   Channel.Create, Group.ReadWrite.All
+#   Channel.Create, ChannelMessage.Send, Group.ReadWrite.All
 # Org must allow the signed-in user to create Teams.
 #
 # Also set (keep existing secrets):

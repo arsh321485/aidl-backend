@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AIDL — {{ active_tab|title }}</title>
+  <script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js"></script>
+  <script src="https://unpkg.com/adaptivecards@3.0.1/dist/adaptivecards.min.js"></script>
+  <style>
+    :root {
+      --aidl-purple: #6264a7;
+      --aidl-purple-dark: #464775;
+      --aidl-bg: #f5f5f5;
+      --aidl-card: #ffffff;
+      --aidl-text: #242424;
+      --aidl-muted: #616161;
+      --aidl-border: #e1dfdd;
+      --aidl-beige: #f3ede2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--aidl-bg);
+      color: var(--aidl-text);
+      padding: 16px;
+    }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--aidl-border);
+      background: var(--aidl-card);
+      color: var(--aidl-text);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .nav a.active {
+      background: var(--aidl-purple);
+      border-color: var(--aidl-purple);
+      color: #fff;
+    }
+    .nav a:hover:not(.active) {
+      border-color: var(--aidl-purple);
+    }
+    .card-shell {
+      background: var(--aidl-card);
+      border: 1px solid var(--aidl-border);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      max-width: 720px;
+    }
+    #cardHost .ac-container[style*="emphasis"] {
+      background-color: var(--aidl-beige) !important;
+    }
+    #cardHost .ac-pushButton[style*="positive"] {
+      background-color: var(--aidl-purple) !important;
+      border-color: var(--aidl-purple) !important;
+    }
+    .context {
+      font-size: 12px;
+      color: var(--aidl-muted);
+      margin-bottom: 12px;
+    }
+    .loading {
+      color: var(--aidl-muted);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav" aria-label="AIDL navigation">
+    {% for tab in tabs %}
+    <a href="{{ tab.url }}" class="{% if tab.active %}active{% endif %}">
+      <span aria-hidden="true">{{ tab.icon }}</span>
+      <span>{{ tab.label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  <p class="context">AIDL for {{ org_name }} · Teams app tab</p>
+
+  <div class="card-shell">
+    <div id="cardHost"><p class="loading">Loading…</p></div>
+  </div>
+
+  <script>
+    const defaultCard = {{ card_json|safe }};
+
+    async function loadCard() {
+      let card = defaultCard;
+      const params = new URLSearchParams(window.location.search);
+
+      try {
+        if (window.microsoftTeams) {
+          await microsoftTeams.app.initialize();
+          const ctx = await microsoftTeams.app.getContext();
+          if (ctx && ctx.user && ctx.user.displayName) {
+            params.set("full_name", ctx.user.displayName);
+          }
+        }
+      } catch (e) {
+        console.warn("Teams SDK context unavailable", e);
+      }
+
+      const cardUrl = "{{ teams_base_url }}/cards/{{ active_tab }}/?" + params.toString();
+      try {
+        const resp = await fetch(cardUrl);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.card) card = data.card;
+        }
+      } catch (e) {
+        console.warn("Card fetch failed, using server default", e);
+      }
+
+      renderCard(card);
+    }
+
+    function renderCard(card) {
+      const host = document.getElementById("cardHost");
+      host.innerHTML = "";
+      if (!window.AdaptiveCards) {
+        host.textContent = "Adaptive Cards library failed to load.";
+        return;
+      }
+      const adaptiveCard = new AdaptiveCards.AdaptiveCard();
+      adaptiveCard.onExecuteAction = function (action) {
+        if (action.getJsonTypeName && action.getJsonTypeName() === "Action.OpenUrl") {
+          const url = action.url || (action._processedData && action._processedData.url);
+          if (url) window.open(url, "_blank", "noopener,noreferrer");
+        }
+      };
+      adaptiveCard.parse(card);
+      const rendered = adaptiveCard.render();
+      host.appendChild(rendered);
+    }
+
+    loadCard();
+  </script>
+</body>
+</html>

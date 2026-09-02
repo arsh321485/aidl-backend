@@ -23,6 +23,8 @@ from .microsoft_auth import (
     microsoft_configured,
     resolve_teams_url,
 )
+from .teams_cards import org_display_name
+from .teams_messaging import send_welcome_card_after_signup
 from .models import AIDLUser
 from .serializers import AIDLUserSerializer
 
@@ -62,8 +64,8 @@ def _issue_tokens(user: AIDLUser) -> dict:
     }
 
 
-def _upsert_user(profile: dict, enroll_as: str) -> AIDLUser:
-    user, _created = AIDLUser.objects.update_or_create(
+def _upsert_user(profile: dict, enroll_as: str) -> tuple[AIDLUser, bool]:
+    user, created = AIDLUser.objects.update_or_create(
         microsoft_id=profile["microsoft_id"],
         defaults={
             "email": profile.get("email", ""),
@@ -74,7 +76,7 @@ def _upsert_user(profile: dict, enroll_as: str) -> AIDLUser:
             "is_active": True,
         },
     )
-    return user
+    return user, created
 
 
 def _save_channel_on_user(user: AIDLUser, channel_info: dict | None) -> None:
@@ -242,11 +244,20 @@ def teams_callback(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user = _upsert_user(profile, enroll_as)
+    user, is_new_signup = _upsert_user(profile, enroll_as)
 
     channel_info = ensure_aidl_channel(ms_token, email=user.email)
     _save_channel_on_user(user, channel_info)
     channel_url = (channel_info or {}).get("teams_url") or ""
+
+    if channel_info and is_new_signup:
+        send_welcome_card_after_signup(
+            ms_token,
+            team_id=channel_info.get("team_id") or "",
+            channel_id=channel_info.get("channel_id") or "",
+            full_name=user.full_name,
+            org_name=org_display_name(),
+        )
 
     return _redirect_with_tokens(
         user,

@@ -55,6 +55,7 @@ _DEFAULT_MS_SCOPES = (
     "Team.Create,"
     "Channel.ReadBasic.All,"
     "Channel.Create,"
+    "ChannelMessage.Send,"
     "Group.ReadWrite.All"
 )
 MS_SCOPES = [
@@ -81,6 +82,39 @@ MS_AIDL_AUTO_CREATE_TEAM = os.getenv("MS_AIDL_AUTO_CREATE_TEAM", "True").lower()
     "true",
     "yes",
 )
+
+# AIDL Teams app content (Adaptive Cards + tab pages)
+MS_TEAMS_APP_BASE_URL = (
+    os.getenv("MS_TEAMS_APP_BASE_URL") or "https://aidl-backend.onrender.com/api/teams"
+).strip().rstrip("/")
+MS_SEND_WELCOME_CARD = os.getenv("MS_SEND_WELCOME_CARD", "True").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+AIDL_ORG_DISPLAY_NAME = (
+    os.getenv("AIDL_ORG_DISPLAY_NAME") or "Northwind Logistics"
+).strip() or "Northwind Logistics"
+AIDL_POLICY_URL = (
+    os.getenv("AIDL_POLICY_URL") or "https://www.spinifexit.com/acceptable-use-policy"
+).strip()
+AIDL_LOGO_URL = (
+    os.getenv("AIDL_LOGO_URL")
+    or "https://aidl-backend.onrender.com/static/aidl/logo.svg"
+).strip()
+_default_policy_entities = (
+    "SpinifexIT Global Pty Ltd,"
+    "SpinifexIT North America Inc.,"
+    "SpinifexIT Solutions UK Limited,"
+    "SpinifexIT Philippines Inc.,"
+    "SpinifexIT Singapore Pte. Ltd.,"
+    "SpinifexIT Deutschland GmbH"
+)
+AIDL_POLICY_ENTITIES = [
+    item.strip()
+    for item in os.getenv("AIDL_POLICY_ENTITIES", _default_policy_entities).split(",")
+    if item.strip()
+]
 
 # JWT for API auth
 JWT_SECRET = os.getenv("JWT_SECRET", SECRET_KEY)

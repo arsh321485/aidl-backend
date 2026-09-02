@@ -29,10 +29,19 @@ def api_index(request):
                 ),
                 "teams_callback": request.build_absolute_uri("/api/auth/teams/callback/"),
                 "teams_launch": request.build_absolute_uri("/api/auth/teams/launch/"),
+                "teams_app": request.build_absolute_uri("/api/teams/"),
+                "teams_tab_home": request.build_absolute_uri("/api/teams/tabs/home/"),
+                "teams_card_home": request.build_absolute_uri("/api/teams/cards/home/"),
+                "teams_manifest": request.build_absolute_uri("/teams/manifest.json"),
                 "me": request.build_absolute_uri("/api/auth/me/"),
                 "refresh": request.build_absolute_uri("/api/auth/refresh/"),
                 "logout": request.build_absolute_uri("/api/auth/logout/"),
                 "items": request.build_absolute_uri("/api/items/"),
+            },
+            "teams_app": {
+                "org_display_name": getattr(settings, "AIDL_ORG_DISPLAY_NAME", "Northwind Logistics"),
+                "send_welcome_on_signup": bool(getattr(settings, "MS_SEND_WELCOME_CARD", True)),
+                "tabs": ["home", "learners-permit", "highway-code", "traffic-light-check"],
             },
         }
     )
