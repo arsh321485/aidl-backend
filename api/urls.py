@@ -23,6 +23,31 @@ urlpatterns = [
     # AIDL Teams app — menu tabs + Adaptive Cards
     path("teams/", teams_app_views.teams_app_index, name="teams-app-index"),
     path("teams/tabs/<str:tab>/", teams_app_views.teams_tab_page, name="teams-tab-page"),
+    path(
+        "teams/admin/export/",
+        teams_app_views.teams_admin_export_csv,
+        name="teams-admin-export",
+    ),
+    path(
+        "teams/admin/invite/",
+        teams_app_views.teams_admin_invite,
+        name="teams-admin-invite",
+    ),
+    path(
+        "teams/admin/aup/sign/",
+        teams_app_views.teams_admin_sign_aup,
+        name="teams-admin-sign-aup",
+    ),
+    path(
+        "teams/admin/licence/issue/",
+        teams_app_views.teams_admin_issue_licence,
+        name="teams-admin-issue-licence",
+    ),
+    path(
+        "teams/admin/<str:tab>/",
+        teams_app_views.teams_admin_json,
+        name="teams-admin-json",
+    ),
     path("teams/cards/<str:tab>/", teams_app_views.teams_card_json, name="teams-card-json"),
     path(
         "teams/channel-tabs/install/",

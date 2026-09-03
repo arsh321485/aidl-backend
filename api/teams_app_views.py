@@ -3,7 +3,7 @@
 import json
 
 from django.conf import settings
-from django.http import Http404, HttpResponse
+from django.http import Http404
 from django.shortcuts import render
 from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework import status
@@ -12,6 +12,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .auth_views import JWTAuthentication
+from .models import AIDLUser
+from .teams_admin import (
+    ADMIN_TABS,
+    build_admin_dashboard,
+    build_admin_placeholder,
+)
 from .teams_cards import CARD_BUILDERS, TEAMS_TABS, build_card, org_display_name
 from .teams_channel_tabs import ensure_aidl_channel_tabs, is_aidl_dashboard_channel, target_channel_name
 from .teams_messaging import send_channel_adaptive_card, send_welcome_card_after_signup
@@ -24,35 +30,169 @@ def _teams_base_url(request) -> str:
     return request.build_absolute_uri("/api/teams").rstrip("/")
 
 
-def _tab_context(request, active_tab: str) -> dict:
+def _request_user_bits(request) -> dict:
+    """Resolve signed-in identity from query, JWT, or Mongo AIDLUser."""
+    get = getattr(request, "query_params", None) or request.GET
+    full_name = (get.get("full_name") or "").strip()
+    org_name = (get.get("org_name") or "").strip()
+    email = (get.get("email") or "").strip()
+
+    user = getattr(request, "user", None)
+    db_user = None
+    if user is not None and getattr(user, "is_authenticated", False) and isinstance(user, AIDLUser):
+        db_user = user
+        full_name = full_name or (user.full_name or "")
+        email = email or (user.email or "")
+        org_name = org_name or (user.organization_name or "")
+
+    if email and db_user is None:
+        try:
+            db_user = AIDLUser.objects.filter(email__iexact=email, is_active=True).first()
+            if db_user:
+                full_name = full_name or db_user.full_name
+                email = email or db_user.email
+                org_name = org_name or db_user.organization_name
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "full_name": full_name,
+        "org_name": org_display_name(org_name),
+        "email": email,
+        "user": db_user,
+    }
+
+
+def _admin_tab_ids() -> set[str]:
+    return {tab_id for tab_id, _label, _icon in ADMIN_TABS}
+
+
+def _admin_tab_context(request, active_tab: str, user_bits: dict) -> dict:
     base = _teams_base_url(request)
+    q_parts = []
+    if user_bits.get("full_name"):
+        from urllib.parse import urlencode
+
+        q = urlencode(
+            {
+                k: v
+                for k, v in {
+                    "full_name": user_bits.get("full_name"),
+                    "org_name": user_bits.get("org_name"),
+                    "email": user_bits.get("email"),
+                }.items()
+                if v
+            }
+        )
+        q_parts = [q] if q else []
+
+    suffix = f"?{q_parts[0]}" if q_parts else ""
     tabs = []
-    for tab_id, label, icon in TEAMS_TABS:
+    for tab_id, label, icon in ADMIN_TABS:
         tabs.append(
             {
                 "id": tab_id,
                 "label": label,
                 "icon": icon,
-                "url": f"{base}/tabs/{tab_id}/",
+                "url": f"{base}/tabs/{tab_id}/{suffix}",
                 "active": tab_id == active_tab,
             }
         )
+
+    dashboard = build_admin_dashboard(
+        full_name=user_bits.get("full_name", ""),
+        org_name=user_bits.get("org_name", ""),
+        email=user_bits.get("email", ""),
+        user=user_bits.get("user"),
+    )
+    placeholder = build_admin_placeholder(
+        active_tab,
+        full_name=user_bits.get("full_name", ""),
+        org_name=user_bits.get("org_name", ""),
+        email=user_bits.get("email", ""),
+        user=user_bits.get("user"),
+    )
     return {
         "tabs": tabs,
         "active_tab": active_tab,
-        "org_name": org_display_name(),
+        "org_name": user_bits.get("org_name") or org_display_name(),
         "teams_base_url": base,
+        "dashboard": dashboard,
+        "placeholder": placeholder,
+        "dashboard_json": json.dumps(dashboard),
+        "placeholder_json": json.dumps(placeholder),
+        "next_tab_url": f"{base}/tabs/add-admin/{suffix}",
     }
 
 
 @xframe_options_exempt
 def teams_tab_page(request, tab: str):
-    """HTML tab page for Teams static tabs (menu bar + card host)."""
+    """
+    Option C: Admin Center in-page UI (Home + clickable pills).
+    Channel login/redirect flow unchanged — only the Home tab content.
+    """
+    if tab in _admin_tab_ids():
+        user_bits = _request_user_bits(request)
+        context = _admin_tab_context(request, tab, user_bits)
+        return render(request, "teams/admin.html", context)
+
+    # Legacy learner Adaptive Card pages (still available if channel tabs point here)
     if tab not in CARD_BUILDERS:
         raise Http404("Unknown tab")
-    context = _tab_context(request, tab)
-    context["card_json"] = json.dumps(build_card(tab) or {})
+    from .teams_cards import TEAMS_TABS as LEARNER_TABS
+
+    base = _teams_base_url(request)
+    tabs = [
+        {
+            "id": tab_id,
+            "label": label,
+            "icon": icon,
+            "url": f"{base}/tabs/{tab_id}/",
+            "active": tab_id == tab,
+        }
+        for tab_id, label, icon in LEARNER_TABS
+    ]
+    context = {
+        "tabs": tabs,
+        "active_tab": tab,
+        "org_name": org_display_name(),
+        "teams_base_url": base,
+        "card_json": json.dumps(build_card(tab) or {}),
+    }
     return render(request, "teams/tab.html", context)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def teams_admin_json(request, tab: str):
+    """Dynamic Admin Center JSON — user name from query / Teams / DB."""
+    if tab not in _admin_tab_ids():
+        return Response({"error": "unknown_tab"}, status=status.HTTP_404_NOT_FOUND)
+    user_bits = _request_user_bits(request)
+    if tab == "home":
+        return Response(
+            {
+                "tab": tab,
+                "dashboard": build_admin_dashboard(
+                    full_name=user_bits["full_name"],
+                    org_name=user_bits["org_name"],
+                    email=user_bits["email"],
+                    user=user_bits.get("user"),
+                ),
+            }
+        )
+    return Response(
+        {
+            "tab": tab,
+            "placeholder": build_admin_placeholder(
+                tab,
+                full_name=user_bits["full_name"],
+                org_name=user_bits["org_name"],
+                email=user_bits["email"],
+                user=user_bits.get("user"),
+            ),
+        }
+    )
 
 
 @api_view(["GET"])
@@ -72,13 +212,24 @@ def teams_card_json(request, tab: str):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def teams_app_index(request):
-    """Teams app metadata + tab/card endpoints."""
+    """Teams app metadata + Admin Center tab endpoints."""
     base = _teams_base_url(request)
     return Response(
         {
-            "app": "AIDL Teams",
+            "app": "AIDL Teams Admin Center",
             "org_display_name": org_display_name(),
-            "tabs": [
+            "admin_tabs": [
+                {
+                    "id": tab_id,
+                    "name": label,
+                    "tab_url": request.build_absolute_uri(f"/api/teams/tabs/{tab_id}/"),
+                    "admin_json": request.build_absolute_uri(
+                        f"/api/teams/admin/{tab_id}/"
+                    ),
+                }
+                for tab_id, label, _icon in ADMIN_TABS
+            ],
+            "legacy_learner_tabs": [
                 {
                     "id": tab_id,
                     "name": label,
@@ -92,6 +243,10 @@ def teams_app_index(request):
             "manifest_path": "/teams/manifest.json",
             "send_welcome_on_signup": bool(getattr(settings, "MS_SEND_WELCOME_CARD", True)),
             "teams_base_url": base,
+            "note": (
+                "Option C: Home tab shows Admin Center UI with in-page pills. "
+                "Login/channel create flow unchanged."
+            ),
         }
     )
 
@@ -228,3 +383,127 @@ def teams_send_card(request, tab: str):
     if not result:
         return Response({"error": "send_failed"}, status=status.HTTP_502_BAD_GATEWAY)
     return Response({"ok": True, "tab": tab, "message_id": result.get("id")})
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def teams_admin_export_csv(request):
+    """Export coverage CSV for the signed-in user's organisation."""
+    import csv
+    from io import StringIO
+
+    from django.http import HttpResponse
+
+    from .org_service import coverage_csv_rows
+
+    bits = _request_user_bits(request)
+    rows = coverage_csv_rows(email=bits.get("email", ""), user=bits.get("user"))
+    buffer = StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=[
+            "full_name",
+            "email",
+            "role",
+            "licence_issued",
+            "aup_signed",
+            "organization",
+            "teams_channel",
+        ],
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    response = HttpResponse(buffer.getvalue(), content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="aidl-coverage.csv"'
+    return response
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_admin_invite(request):
+    """Promote / add an admin by email within the caller's organisation."""
+    caller = request.user
+    email = (request.data.get("email") or "").strip().lower()
+    if not email:
+        return Response({"error": "email_required"}, status=status.HTTP_400_BAD_REQUEST)
+    if not caller.organization_id:
+        return Response(
+            {"error": "no_organization"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    target = AIDLUser.objects.filter(email__iexact=email, is_active=True).first()
+    if target is None:
+        return Response(
+            {
+                "error": "user_not_found",
+                "message": "User must sign in via Teams once before becoming admin.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    admins = AIDLUser.objects.filter(
+        organization_id=caller.organization_id,
+        role=AIDLUser.Role.ADMIN,
+        is_active=True,
+    ).count()
+    from .models import Organization
+
+    org = Organization.objects.filter(pk=caller.organization_id).first()
+    limit = org.admin_seat_limit if org else 3
+    if target.role != AIDLUser.Role.ADMIN and admins >= limit:
+        return Response(
+            {"error": "admin_seats_full", "limit": limit},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    target.organization_id = caller.organization_id
+    target.organization_name = caller.organization_name or (org.name if org else "")
+    target.role = AIDLUser.Role.ADMIN
+    target.save(
+        update_fields=["organization_id", "organization_name", "role", "updated_at"]
+    )
+    return Response(
+        {
+            "ok": True,
+            "admin": {
+                "email": target.email,
+                "full_name": target.full_name,
+                "role": target.role,
+            },
+        }
+    )
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_admin_sign_aup(request):
+    """Mark Acceptable Use Policy signed for the current user."""
+    from django.utils import timezone
+
+    user = request.user
+    user.aup_signed = True
+    user.aup_signed_at = timezone.now()
+    user.save(update_fields=["aup_signed", "aup_signed_at", "updated_at"])
+    return Response({"ok": True, "aup_signed": True, "aup_signed_at": user.aup_signed_at})
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_admin_issue_licence(request):
+    """Issue licence flag for a member in the same organisation."""
+    email = (request.data.get("email") or "").strip().lower()
+    if not email:
+        return Response({"error": "email_required"}, status=status.HTTP_400_BAD_REQUEST)
+    caller = request.user
+    target = AIDLUser.objects.filter(
+        email__iexact=email,
+        organization_id=caller.organization_id,
+        is_active=True,
+    ).first()
+    if target is None:
+        return Response({"error": "user_not_found"}, status=status.HTTP_404_NOT_FOUND)
+    target.licence_issued = True
+    target.save(update_fields=["licence_issued", "updated_at"])
+    return Response({"ok": True, "email": target.email, "licence_issued": True})

@@ -26,6 +26,7 @@ from .microsoft_auth import (
 from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
 from .teams_messaging import send_welcome_card_after_signup
+from .org_service import ensure_organization_for_login
 from .models import AIDLUser
 from .serializers import AIDLUserSerializer
 
@@ -276,6 +277,21 @@ def teams_callback(request):
 
     channel_info = ensure_aidl_channel(ms_token, email=user.email)
     _save_channel_on_user(user, channel_info)
+    # Refresh user after channel ids saved
+    user.refresh_from_db()
+    try:
+        ensure_organization_for_login(
+            user,
+            channel_info=channel_info or {},
+            org_name=org_display_name(),
+        )
+        user.refresh_from_db()
+    except Exception as exc:  # noqa: BLE001
+        # Login must not break if org bootstrap fails.
+        import logging
+
+        logging.getLogger(__name__).warning("ensure organization failed: %s", exc)
+
     channel_url = (channel_info or {}).get("teams_url") or ""
     home_tab_url = (channel_info or {}).get("home_tab_url") or channel_url
 
@@ -293,7 +309,7 @@ def teams_callback(request):
                 team_id=channel_info.get("team_id") or "",
                 channel_id=channel_info.get("channel_id") or "",
                 full_name=user.full_name,
-                org_name=org_display_name(),
+                org_name=user.organization_name or org_display_name(),
             )
             welcome_card_sent = bool(welcome_result)
         tab_info = channel_info.get("channel_tabs") or {}
