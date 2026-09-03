@@ -465,13 +465,6 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             ensure_aidl_channel_tabs,
         )
 
-        home_tab_url = build_home_tab_deep_link(
-            team_id=team_id,
-            channel_id=channel_id,
-            tenant_id=settings.MS_TENANT_ID or "",
-            email=email,
-        )
-
         tab_info = None
         if getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
             tab_info = ensure_aidl_channel_tabs(
@@ -482,16 +475,26 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
                 channel_just_created=channel_just_created,
             )
 
+        home_web_url = ((tab_info or {}).get("home_web_url") or "").strip()
+        home_tab_url = build_home_tab_deep_link(
+            team_id=team_id,
+            channel_id=channel_id,
+            tenant_id=settings.MS_TENANT_ID or "",
+            email=email,
+            home_web_url=home_web_url,
+        )
+
         return {
             "team_id": team_id,
             "team_name": _aidl_team_name(),
             "channel_id": channel_id,
             "channel_name": channel_name,
-            # Primary landing: Home tab with welcome card UI (not Posts/chat).
+            # Primary landing: Home tab (NOT Posts/chat).
             "teams_url": home_tab_url,
             "home_tab_url": home_tab_url,
             "channel_posts_url": teams_url,
             "channel_tabs": tab_info,
+            "landed_on": "home_tab",
         }
     except requests.HTTPError as exc:
         detail = ""

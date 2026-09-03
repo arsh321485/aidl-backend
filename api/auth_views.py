@@ -144,7 +144,12 @@ def _redirect_with_tokens(
         "teams_platform_url": platform_url,
         "open_teams": "1",
         "teams_connected": "true",
-        "landed_on": "channel" if channel_url else "chat",
+        # home_tab = aidl dashboard Home tab; channel = Posts; chat = Teams home
+        "landed_on": (
+            "home_tab"
+            if channel_url and "/l/entity/" in channel_url
+            else ("channel" if channel_url else "chat")
+        ),
     }
     if teams_setup:
         query["teams_setup"] = teams_setup
@@ -332,17 +337,20 @@ def teams_launch(request):
             "teams_url": channel_url or platform_url,
             "teams_platform_url": platform_url,
             "teams_channel_url": channel_url or None,
-            "landed_on": "channel" if channel_url else "chat",
+            "landed_on": (
+                "home_tab"
+                if channel_url and "/l/entity/" in channel_url
+                else ("channel" if channel_url else "chat")
+            ),
             "channel": {
                 "team_id": getattr(request.user, "teams_team_id", "") or "",
                 "channel_id": getattr(request.user, "teams_channel_id", "") or "",
                 "channel_name": getattr(request.user, "teams_channel_name", "")
-                or (settings.MS_AIDL_CHANNEL_NAME or "AIDL"),
+                or (settings.MS_AIDL_CHANNEL_NAME or "aidl dashboard"),
             },
             "message": (
-                "Open teams_url — it opens the AIDL channel directly when available, "
-                "otherwise Teams chat/home. teams_platform_url is always chat/home if "
-                "you need an explicit link to it."
+                "Open teams_url — it opens AIDL → aidl dashboard → Home tab when ready. "
+                "Do NOT open teams_platform_url for primary landing (that is Chat)."
             ),
         }
     )
@@ -364,7 +372,11 @@ def me(request):
     data["teams_url"] = channel_url or platform_url
     data["teams_platform_url"] = platform_url
     data["teams_channel_url"] = channel_url
-    data["landed_on"] = "channel" if channel_url else "chat"
+    data["landed_on"] = (
+        "home_tab"
+        if channel_url and "/l/entity/" in channel_url
+        else ("channel" if channel_url else "chat")
+    )
     data["teams_connected"] = True
     return Response(data)
 

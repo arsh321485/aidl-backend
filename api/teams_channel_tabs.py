@@ -112,6 +112,20 @@ def _existing_entity_ids(existing_tabs: list) -> set[str]:
     return ids
 
 
+def _find_home_tab_web_url(tabs: list) -> str:
+    """Prefer Microsoft Graph's official Home tab webUrl for reliable landing."""
+    home_entity = AIDL_CHANNEL_TABS[0][0]
+    for tab in tabs:
+        config = tab.get("configuration") or {}
+        entity_id = (config.get("entityId") or "").strip()
+        name = (tab.get("displayName") or "").strip().lower()
+        if entity_id == home_entity or name == "home":
+            web_url = (tab.get("webUrl") or "").strip()
+            if web_url:
+                return web_url
+    return ""
+
+
 def ensure_aidl_channel_tabs(
     access_token: str,
     *,
@@ -171,6 +185,7 @@ def ensure_aidl_channel_tabs(
     present = _existing_entity_ids(existing_tabs)
     created: list[str] = []
     failed: list[dict] = []
+    home_web_url = _find_home_tab_web_url(existing_tabs)
 
     for entity_id, display_name, tab_slug in AIDL_CHANNEL_TABS:
         if entity_id in present:
@@ -185,8 +200,19 @@ def ensure_aidl_channel_tabs(
         )
         if result:
             created.append(display_name)
+            if entity_id == AIDL_CHANNEL_TABS[0][0]:
+                home_web_url = (result.get("webUrl") or "").strip() or home_web_url
         else:
             failed.append({"tab": display_name, "error": error or "unknown"})
+
+    # Re-list so we pick up Graph's canonical Home webUrl after creates.
+    if created or not home_web_url:
+        try:
+            refreshed = list_channel_tabs(access_token, team_id, channel_id)
+            home_web_url = _find_home_tab_web_url(refreshed) or home_web_url
+            present = _existing_entity_ids(refreshed)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("refresh channel tabs after create failed: %s", exc)
 
     home_entity = AIDL_CHANNEL_TABS[0][0]
     return {
@@ -194,6 +220,7 @@ def ensure_aidl_channel_tabs(
         "channel_name": channel_name,
         "channel_id": channel_id,
         "home_entity_id": home_entity,
+        "home_web_url": home_web_url,
         "tabs_created": created,
         "tabs_failed": failed,
         "tabs_present": len(present) + len(created),
@@ -209,22 +236,32 @@ def build_channel_tab_deep_link(
     tenant_id: str = "",
     email: str = "",
     app_id: str = "",
+    label: str = "Home",
 ) -> str:
     """
     Deep link that opens a specific tab inside the AIDL channel
     (Home tab shows the welcome card + in-page menu).
+
+    Uses Teams entity deep-link + context JSON so the channel opens on Home,
+    not the Posts/chat tab.
     """
+    import json
     from urllib.parse import quote
 
     app = (app_id or WEBSITE_TAB_APP_ID).strip()
     tenant = (tenant_id or settings.MS_TENANT_ID or "").strip()
+    context = {
+        "channelId": channel_id,
+        "groupId": team_id,
+    }
+    if tenant and tenant.lower() != "common":
+        context["tenantId"] = tenant
+
     url = (
         f"https://teams.microsoft.com/l/entity/{quote(app, safe='')}/{quote(entity_id, safe='')}"
-        f"?groupId={quote(team_id, safe='')}"
-        f"&channelId={quote(channel_id, safe='')}"
+        f"?label={quote(label or 'Home', safe='')}"
+        f"&context={quote(json.dumps(context, separators=(',', ':')), safe='')}"
     )
-    if tenant and tenant.lower() != "common":
-        url += f"&tenantId={quote(tenant, safe='')}"
     email = (email or "").strip()
     if email:
         url += f"&login_hint={quote(email)}"
@@ -237,13 +274,26 @@ def build_home_tab_deep_link(
     channel_id: str,
     tenant_id: str = "",
     email: str = "",
+    home_web_url: str = "",
 ) -> str:
+    """Prefer Graph Home tab webUrl; else build entity deep link with context."""
+    graph_url = (home_web_url or "").strip()
+    if graph_url:
+        email = (email or "").strip()
+        if email and "login_hint=" not in graph_url:
+            sep = "&" if "?" in graph_url else "?"
+            from urllib.parse import quote
+
+            return f"{graph_url}{sep}login_hint={quote(email)}"
+        return graph_url
+
     return build_channel_tab_deep_link(
         entity_id=AIDL_CHANNEL_TABS[0][0],
         team_id=team_id,
         channel_id=channel_id,
         tenant_id=tenant_id,
         email=email,
+        label="Home",
     )
 
 
