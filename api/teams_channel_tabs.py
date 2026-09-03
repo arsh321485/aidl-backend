@@ -6,7 +6,7 @@ import time
 import requests
 from django.conf import settings
 
-from .microsoft_auth import GRAPH_BASE, _graph_headers
+from .graph_client import GRAPH_BASE, graph_headers
 from .teams_cards import TEAMS_TABS
 
 
@@ -48,7 +48,7 @@ def _tab_content_url(tab_slug: str) -> str:
 
 def list_channel_tabs(access_token: str, team_id: str, channel_id: str) -> list:
     url = f"{GRAPH_BASE}/teams/{team_id}/channels/{channel_id}/tabs"
-    response = requests.get(url, headers=_graph_headers(access_token), timeout=20)
+    response = requests.get(url, headers=graph_headers(access_token), timeout=20)
     response.raise_for_status()
     return response.json().get("value") or []
 
@@ -77,7 +77,7 @@ def create_channel_website_tab(
     try:
         response = requests.post(
             url,
-            headers=_graph_headers(access_token),
+            headers=graph_headers(access_token),
             json=payload,
             timeout=30,
         )

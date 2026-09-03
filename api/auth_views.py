@@ -303,7 +303,9 @@ def teams_callback(request):
         welcome_card_sent=welcome_card_sent,
         channel_name=(channel_info or {}).get("channel_name") or "",
         channel_tabs_created=channel_tabs_created,
-        channel_tabs_ok=bool((channel_info or {}).get("channel_tabs") or {}).get("ok"),
+        channel_tabs_ok=bool(
+            ((channel_info or {}).get("channel_tabs") or {}).get("ok")
+        ),
     )
 
 

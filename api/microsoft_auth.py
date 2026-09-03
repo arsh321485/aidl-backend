@@ -11,14 +11,14 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 
+from .graph_client import GRAPH_BASE, GRAPH_ME_URL, graph_headers
 from .models import OAuthState
-from .teams_channel_tabs import build_home_tab_deep_link
 
 
 logger = logging.getLogger(__name__)
 
-GRAPH_ME_URL = "https://graph.microsoft.com/v1.0/me"
-GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+# Back-compat aliases for older imports
+_graph_headers = graph_headers
 
 
 def microsoft_configured() -> bool:
@@ -40,11 +40,15 @@ def _msal_app() -> msal.ConfidentialClientApplication:
 
 def create_oauth_state(enroll_as: str) -> str:
     state = secrets.token_urlsafe(32)
-    OAuthState.objects.create(
-        state=state,
-        enroll_as=enroll_as,
-        expires_at=timezone.now() + timedelta(minutes=60),
-    )
+    try:
+        OAuthState.objects.create(
+            state=state,
+            enroll_as=enroll_as,
+            expires_at=timezone.now() + timedelta(minutes=60),
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Never block login if Mongo is slow/unavailable; state check is soft.
+        logger.warning("oauth state persist failed: %s", exc)
     return state
 
 
@@ -59,11 +63,20 @@ def consume_oauth_state(state: str):
         row = OAuthState.objects.get(state=state)
     except OAuthState.DoesNotExist:
         return None, "state_not_found"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("oauth state lookup failed: %s", exc)
+        return None, "state_lookup_failed"
     if row.expires_at < timezone.now():
-        row.delete()
+        try:
+            row.delete()
+        except Exception:  # noqa: BLE001
+            pass
         return None, "state_expired"
     enroll_as = row.enroll_as
-    row.delete()
+    try:
+        row.delete()
+    except Exception:  # noqa: BLE001
+        pass
     return enroll_as, None
 
 
@@ -135,13 +148,6 @@ def build_channel_deep_link(
     if email:
         url += f"&login_hint={quote(email)}"
     return url
-
-
-def _graph_headers(access_token: str) -> dict:
-    return {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-    }
 
 
 def _aidl_team_name() -> str:
@@ -453,6 +459,12 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             email=email,
         )
 
+        # Lazy import avoids circular dependency with teams_channel_tabs.
+        from .teams_channel_tabs import (
+            build_home_tab_deep_link,
+            ensure_aidl_channel_tabs,
+        )
+
         home_tab_url = build_home_tab_deep_link(
             team_id=team_id,
             channel_id=channel_id,
@@ -513,6 +525,8 @@ def resolve_teams_url(
     cid = (channel_id or "").strip()
 
     if tid and cid:
+        from .teams_channel_tabs import build_home_tab_deep_link
+
         return build_home_tab_deep_link(
             team_id=tid,
             channel_id=cid,

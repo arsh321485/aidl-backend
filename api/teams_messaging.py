@@ -6,7 +6,7 @@ import logging
 import requests
 from django.conf import settings
 
-from .microsoft_auth import GRAPH_BASE, _graph_headers
+from .graph_client import GRAPH_BASE, graph_headers
 from .teams_cards import build_home_card
 
 
@@ -43,7 +43,7 @@ def send_channel_adaptive_card(
     try:
         response = requests.post(
             url,
-            headers=_graph_headers(access_token),
+            headers=graph_headers(access_token),
             json=payload,
             timeout=30,
         )
