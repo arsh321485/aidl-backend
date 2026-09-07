@@ -94,11 +94,25 @@ MS_SEND_WELCOME_CARD = os.getenv("MS_SEND_WELCOME_CARD", "True").lower() in (
     "true",
     "yes",
 )
-MS_AIDL_INSTALL_CHANNEL_TABS = os.getenv("MS_AIDL_INSTALL_CHANNEL_TABS", "True").lower() in (
+MS_AIDL_INSTALL_CHANNEL_TABS = os.getenv("MS_AIDL_INSTALL_CHANNEL_TABS", "False").lower() in (
     "1",
     "true",
     "yes",
 )
+# Prefer landing on channel Posts (Adaptive Card UI) instead of website tab / browser.
+MS_AIDL_LAND_ON_POSTS = os.getenv("MS_AIDL_LAND_ON_POSTS", "True").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+MS_BOT_APP_ID = (os.getenv("MS_BOT_APP_ID") or os.getenv("MS_CLIENT_ID") or "").strip()
+MS_BOT_APP_PASSWORD = (
+    os.getenv("MS_BOT_APP_PASSWORD") or os.getenv("MS_CLIENT_SECRET") or ""
+).strip()
+MS_BOT_MESSAGING_ENDPOINT = (
+    os.getenv("MS_BOT_MESSAGING_ENDPOINT")
+    or "https://aidl-backend.onrender.com/api/teams/bot/messages/"
+).strip()
 AIDL_ORG_DISPLAY_NAME = (
     os.getenv("AIDL_ORG_DISPLAY_NAME") or "Northwind Logistics"
 ).strip() or "Northwind Logistics"

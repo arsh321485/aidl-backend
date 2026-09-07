@@ -1,159 +1,74 @@
-FRONTEND INTEGRATION PROMPT — Land on AIDL dashboard Home tab (NOT Chat/Posts)
+FRONTEND INTEGRATION PROMPT — Land on AIDL dashboard Posts (Adaptive Card UI)
 ==============================================================================
 Give this whole file to the frontend engineer.
 
 GOAL
 ----
-After Microsoft Teams login, open Microsoft Teams so the user lands on:
+After Microsoft Teams login, open:
 
   Team: AIDL
   Channel: aidl dashboard
-  Tab: Home   ← welcome card UI (NOT Posts / Chat)
+  Tab: Posts   ← Admin Center Adaptive Card lives HERE (like VaptFix)
 
-Backend already creates the channel + Home / Learner's Permit / Highway Code /
-Traffic Light Check tabs. Frontend must open the correct URL field.
+NOT:
+  - Website tabs that open HTML in a new browser window
+  - Generic Teams Chat home
+
+Backend posts a DYNAMIC Adaptive Card into Posts (user name, seats, licences,
+AUP, governance — all from DB). Nav buttons update the card inside Teams when
+the AIDL bot is installed.
 
 BASE URL
 --------
-Production backend: https://aidl-backend.onrender.com
+https://aidl-backend.onrender.com
 
 ============================================================================
-CRITICAL RULE (most common bug)
+CRITICAL RULE
 ============================================================================
-NEVER open `teams_platform_url` as the primary post-login action.
+ALWAYS open `teams_url` after login.
+NEVER open `teams_platform_url` as the primary action (that is Chat).
 
-| Field                 | What it opens                         | Use for primary open? |
-|-----------------------|---------------------------------------|------------------------|
-| teams_url             | AIDL aidl dashboard → Home tab        | YES — always           |
-| teams_home_tab_url    | Same as teams_url when Home ready     | YES (alias)            |
-| teams_channel_url     | Same Home/channel landing URL         | optional               |
-| teams_platform_url    | Generic Teams Chat/home               | NO (only if user clicks "Open chat") |
+Expected teams_url shape (Posts deep link):
+  https://teams.microsoft.com/l/channel/...?groupId=...
 
-If you open `teams_platform_url`, user lands on Chat — that is the bug.
-
-============================================================================
-STEP 1 — Sign in
-============================================================================
-GET /api/auth/teams/login/?enroll_as=individual|organization
-
-Frontend:
-  window.location.href = data.auth_url
+landed_on values:
+  posts     → Adaptive Card in aidl dashboard Posts  (CORRECT)
+  home_tab  → website tab (legacy — avoid)
+  channel   → channel link
+  chat      → Teams chat fallback
 
 ============================================================================
-STEP 2 — /auth/callback handler (MUST open teams_url)
+/auth/callback
 ============================================================================
-Backend 302-redirects browser to:
+  const teamsUrl =
+    params.get("teams_url") ||
+    params.get("teams_channel_url")
 
-  https://<frontend>/auth/callback?<params>
-
-Success query params:
-  access_token
-  refresh_token
-  enroll_as
-  mode
-  email
-  full_name
-  open_teams=1
-  teams_connected=true
-  teams_url              ← OPEN THIS (Home tab deep link when ready)
-  teams_home_tab_url     ← same as teams_url when Home tab available
-  teams_channel_url      ← present when channel/Home ready
-  teams_platform_url     ← Chat/home ONLY — do not open by default
-  teams_channel_name     ← e.g. "aidl dashboard"
-  landed_on              ← "home_tab" | "channel" | "chat"
-  teams_setup            ← "ok" | "failed"
-  channel_tabs_ok=1      ← tabs installed (optional)
-  channel_tabs_created   ← count (optional)
-  welcome_card_sent=1    ← optional
-  ms_access_token        ← optional Graph token
-
-Required callback logic (Vue / React — same idea):
-
-  const params = new URLSearchParams(window.location.search)
-  if (params.get("error")) { showError(...); return }
-
-  // 1) Save tokens FIRST
-  saveTokens(params.get("access_token"), params.get("refresh_token"))
-  saveUser({
-    email: params.get("email"),
-    fullName: params.get("full_name"),
-    enrollAs: params.get("enroll_as"),
-  })
-
-  // 2) Open Teams Home tab — NEVER teams_platform_url here
-  if (params.get("open_teams") === "1") {
-    const teamsUrl =
-      params.get("teams_home_tab_url") ||
-      params.get("teams_url") ||
-      params.get("teams_channel_url")
-
-    if (teamsUrl) {
-      // MUST be synchronous (no await before this) or browser blocks popup
-      window.open(teamsUrl, "_blank", "noopener,noreferrer")
-    }
-
-    const landed = params.get("landed_on")
-    if (landed === "home_tab") {
-      toast("Opened AIDL dashboard (Home) in Teams")
-    } else if (landed === "channel") {
-      toast("Opened AIDL channel in Teams")
-    } else {
-      toast("Opened Teams (AIDL Home tab not ready yet)")
-    }
+  if (params.get("open_teams") === "1" && teamsUrl) {
+    window.open(teamsUrl, "_blank", "noopener,noreferrer")  // sync, no await before
   }
 
-  // 3) Continue into app
-  router.replace("/home")  // or your dashboard route
+  if (params.get("landed_on") === "posts") {
+    toast("Opened AIDL dashboard Posts in Teams")
+  }
+
+Do NOT open teams_platform_url.
+Do NOT invent your own Teams URL.
 
 ============================================================================
-WRONG vs RIGHT
+WHAT THE USER SHOULD SEE IN TEAMS
 ============================================================================
-WRONG (lands on Chat):
-  window.open(params.get("teams_platform_url"))
+aidl dashboard → Posts → Adaptive Card:
+  - Nav: Home | Add Admin | Policy | Cards | AI Apps | IT Apps
+  - Welcome with REAL user name
+  - Live seats / licences / AUP / governance from backend
 
-WRONG (ignores Home tab URL):
-  window.open("https://teams.microsoft.com/v2/")
-
-RIGHT:
-  window.open(params.get("teams_url"))
-  // or teams_home_tab_url
-
-============================================================================
-STEP 3 — Later "Open in Teams" button
-============================================================================
-GET /api/auth/teams/launch/
-Authorization: Bearer <access_token>
-
-Response:
-{
-  "teams_url": "<Home tab or channel deep link>",
-  "teams_platform_url": "<chat — do not use as primary>",
-  "teams_channel_url": "...",
-  "landed_on": "home_tab" | "channel" | "chat",
-  "channel": { "team_id": "...", "channel_id": "...", "channel_name": "aidl dashboard" }
-}
-
-Button click:
-  window.open(data.teams_url, "_blank", "noopener,noreferrer")
+Clicks stay inside Teams (card refresh via bot) — no external HTML browser tab.
 
 ============================================================================
 CHECKLIST
 ============================================================================
-[ ] Primary open uses teams_url (or teams_home_tab_url), NEVER teams_platform_url
-[ ] window.open is synchronous in /auth/callback (no await before it)
-[ ] Tokens saved from callback query string
-[ ] Toast uses landed_on: home_tab / channel / chat
-[ ] Optional separate "Open Teams chat" can use teams_platform_url
-[ ] After deploy, verify callback URL contains landed_on=home_tab and
-    teams_url contains /l/entity/ (Home tab), not only teams.microsoft.com/v2/
-
-============================================================================
-EXPECTED RESULT IN TEAMS
-============================================================================
-User should see:
-  AIDL → aidl dashboard → Home tab selected
-  (Welcome card / menu UI)
-
-NOT:
-  Teams Chat list
-  OR aidl dashboard → Posts tab only
+[ ] window.open(teams_url) only
+[ ] teams_url contains /l/channel/
+[ ] landed_on=posts after deploy
+[ ] No dependency on Home / Learner's Permit website tabs for primary UX

@@ -145,11 +145,15 @@ def _redirect_with_tokens(
         "teams_platform_url": platform_url,
         "open_teams": "1",
         "teams_connected": "true",
-        # home_tab = aidl dashboard Home tab; channel = Posts; chat = Teams home
+        # posts = Adaptive Card in channel; home_tab = website tab; channel = posts fallback; chat = Teams home
         "landed_on": (
-            "home_tab"
-            if channel_url and "/l/entity/" in channel_url
-            else ("channel" if channel_url else "chat")
+            "posts"
+            if channel_url and "/l/channel/" in channel_url
+            else (
+                "home_tab"
+                if channel_url and "/l/entity/" in channel_url
+                else ("channel" if channel_url else "chat")
+            )
         ),
     }
     if teams_setup:
@@ -310,6 +314,8 @@ def teams_callback(request):
                 channel_id=channel_info.get("channel_id") or "",
                 full_name=user.full_name,
                 org_name=user.organization_name or org_display_name(),
+                email=user.email,
+                user=user,
             )
             welcome_card_sent = bool(welcome_result)
         tab_info = channel_info.get("channel_tabs") or {}

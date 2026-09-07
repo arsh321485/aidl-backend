@@ -484,17 +484,21 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             home_web_url=home_web_url,
         )
 
+        # VaptFix-style: land on channel Posts (Adaptive Card lives here),
+        # not website tabs that open HTML in an external browser.
+        land_on_posts = getattr(settings, "MS_AIDL_LAND_ON_POSTS", True)
+        primary_url = teams_url if land_on_posts else home_tab_url
+
         return {
             "team_id": team_id,
             "team_name": _aidl_team_name(),
             "channel_id": channel_id,
             "channel_name": channel_name,
-            # Primary landing: Home tab (NOT Posts/chat).
-            "teams_url": home_tab_url,
+            "teams_url": primary_url,
             "home_tab_url": home_tab_url,
             "channel_posts_url": teams_url,
             "channel_tabs": tab_info,
-            "landed_on": "home_tab",
+            "landed_on": "posts" if land_on_posts else "home_tab",
         }
     except requests.HTTPError as exc:
         detail = ""
@@ -528,6 +532,15 @@ def resolve_teams_url(
     cid = (channel_id or "").strip()
 
     if tid and cid:
+        # Prefer Posts deep link so Adaptive Card UI opens inside Teams.
+        if getattr(settings, "MS_AIDL_LAND_ON_POSTS", True):
+            return build_channel_deep_link(
+                team_id=tid,
+                channel_id=cid,
+                channel_name=name,
+                tenant_id=settings.MS_TENANT_ID or "",
+                email=email,
+            )
         from .teams_channel_tabs import build_home_tab_deep_link
 
         return build_home_tab_deep_link(
