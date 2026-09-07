@@ -26,6 +26,15 @@ urlpatterns = [
             "document_root": BASE_DIR / "api" / "static" / "aidl",
             "path": "logo.svg",
         },
+        name="aidl-logo-svg",
+    ),
+    path(
+        "static/aidl/logo.png",
+        serve,
+        {
+            "document_root": BASE_DIR / "api" / "static" / "aidl",
+            "path": "logo.png",
+        },
         name="aidl-logo",
     ),
 ]

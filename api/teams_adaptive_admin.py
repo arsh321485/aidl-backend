@@ -7,6 +7,53 @@ from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
 
 
+def _header(org_name: str) -> dict:
+    """Brand row with AIDL PNG logo (Teams does not reliably load SVG)."""
+    return {
+        "type": "ColumnSet",
+        "spacing": "None",
+        "columns": [
+            {
+                "type": "Column",
+                "width": "auto",
+                "items": [
+                    {
+                        "type": "Image",
+                        "url": logo_url(),
+                        "size": "Medium",
+                        "width": "48px",
+                        "height": "48px",
+                    }
+                ],
+                "verticalContentAlignment": "Center",
+            },
+            {
+                "type": "Column",
+                "width": "stretch",
+                "spacing": "Small",
+                "items": [
+                    {
+                        "type": "TextBlock",
+                        "text": "AIDL",
+                        "weight": "Bolder",
+                        "size": "Medium",
+                        "spacing": "None",
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": f"for {org_name}",
+                        "isSubtle": True,
+                        "size": "Small",
+                        "spacing": "None",
+                        "wrap": True,
+                    },
+                ],
+                "verticalContentAlignment": "Center",
+            },
+        ],
+    }
+
+
 def _nav_actions(active_tab: str, *, email: str = "", org_id: str = "") -> list[dict]:
     """Pill-style nav buttons — Action.Execute updates the card in-place via bot."""
     actions = []
@@ -32,6 +79,40 @@ def _nav_container(active_tab: str, *, email: str = "", org_id: str = "") -> dic
     return {
         "type": "ActionSet",
         "actions": _nav_actions(active_tab, email=email, org_id=org_id),
+    }
+
+
+def _stat_tile(label: str, value: str, sub: str, *, alert: bool = False) -> dict:
+    return {
+        "type": "Container",
+        "style": "emphasis",
+        "bleed": False,
+        "items": [
+            {
+                "type": "TextBlock",
+                "text": label,
+                "size": "Small",
+                "weight": "Bolder",
+                "isSubtle": True,
+                "spacing": "None",
+            },
+            {
+                "type": "TextBlock",
+                "text": value,
+                "size": "ExtraLarge",
+                "weight": "Bolder",
+                "color": "attention" if alert else "default",
+                "spacing": "Small",
+            },
+            {
+                "type": "TextBlock",
+                "text": sub,
+                "size": "Small",
+                "isSubtle": True,
+                "spacing": "None",
+                "wrap": True,
+            },
+        ],
     }
 
 
@@ -69,171 +150,153 @@ def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
         user=user,
     )
     org_id = dash.get("organization_id") or ""
+    org = dash.get("org_name") or org_name or "AIDL"
+
+    stats = dash.get("stats") or []
+    # 3 metric tiles in one row
     stats_cols = []
-    for s in dash.get("stats") or []:
-        color = "attention" if s.get("alert") else "default"
+    for s in stats[:3]:
         stats_cols.append(
             {
                 "type": "Column",
                 "width": "stretch",
                 "items": [
-                    {
-                        "type": "TextBlock",
-                        "text": s["label"],
-                        "size": "Small",
-                        "weight": "Bolder",
-                        "isSubtle": True,
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": s["value"],
-                        "size": "ExtraLarge",
-                        "weight": "Bolder",
-                        "color": color,
-                        "spacing": "None",
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": s["sub"],
-                        "size": "Small",
-                        "isSubtle": True,
-                        "spacing": "None",
-                    },
+                    _stat_tile(
+                        s.get("label", ""),
+                        s.get("value", "0"),
+                        s.get("sub", ""),
+                        alert=bool(s.get("alert")),
+                    )
                 ],
-                "style": "emphasis",
             }
         )
 
-    gov_cols = []
-    for g in dash.get("governance") or []:
-        gov_cols.append(
-            {
-                "type": "Column",
-                "width": "stretch",
-                "items": [
-                    {
-                        "type": "TextBlock",
-                        "text": g["label"],
-                        "size": "Small",
-                        "weight": "Bolder",
-                        "isSubtle": True,
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": g["value"],
-                        "size": "Large",
-                        "weight": "Bolder",
-                        "spacing": "None",
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": g["sub"],
-                        "size": "Small",
-                        "isSubtle": True,
-                        "spacing": "None",
-                    },
-                ],
-                "style": "emphasis",
-            }
-        )
+    gov = dash.get("governance") or []
+    # 2x2 governance grid (Teams handles narrow columns better this way)
+    gov_row_1 = []
+    gov_row_2 = []
+    for idx, g in enumerate(gov[:4]):
+        col = {
+            "type": "Column",
+            "width": "stretch",
+            "items": [
+                _stat_tile(
+                    g.get("label", ""),
+                    g.get("value", "0"),
+                    g.get("sub", ""),
+                )
+            ],
+        }
+        if idx < 2:
+            gov_row_1.append(col)
+        else:
+            gov_row_2.append(col)
 
-    return {
-        "type": "AdaptiveCard",
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "version": "1.5",
-        "body": [
-            {
-                "type": "ColumnSet",
-                "columns": [
-                    {
-                        "type": "Column",
-                        "width": "auto",
-                        "items": [
-                            {
-                                "type": "Image",
-                                "url": dash.get("logo_url") or logo_url(),
-                                "size": "Small",
-                                "style": "Person",
-                            }
-                        ],
-                    },
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": f"AIDL for {dash.get('org_name')}",
-                                "isSubtle": True,
-                                "size": "Small",
-                            }
-                        ],
-                        "verticalContentAlignment": "Center",
-                    },
-                ],
-            },
-            {
-                "type": "TextBlock",
-                "text": "Admin Center",
-                "size": "Small",
-                "weight": "Bolder",
-                "spacing": "Medium",
-            },
-            _nav_container("home", email=email, org_id=org_id),
-            {
-                "type": "TextBlock",
-                "text": dash["welcome_title"],
-                "size": "Large",
-                "weight": "Bolder",
-                "wrap": True,
-                "spacing": "Medium",
-            },
-            {
-                "type": "TextBlock",
-                "text": dash["welcome_body"],
-                "wrap": True,
-            },
+    body = [
+        _header(org),
+        {
+            "type": "TextBlock",
+            "text": "Shown the moment an admin opens your Admin Center",
+            "weight": "Bolder",
+            "size": "Medium",
+            "wrap": True,
+            "spacing": "Medium",
+        },
+        {
+            "type": "TextBlock",
+            "text": "Depot Overview",
+            "isSubtle": True,
+            "size": "Small",
+            "spacing": "None",
+        },
+        {
+            "type": "TextBlock",
+            "text": "Admin Center",
+            "size": "Small",
+            "weight": "Bolder",
+            "spacing": "Medium",
+        },
+        _nav_container("home", email=email, org_id=org_id),
+        {
+            "type": "Container",
+            "style": "default",
+            "spacing": "Medium",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": dash["welcome_title"],
+                    "size": "Large",
+                    "weight": "Bolder",
+                    "wrap": True,
+                },
+                {
+                    "type": "TextBlock",
+                    "text": dash["welcome_body"],
+                    "wrap": True,
+                    "spacing": "Small",
+                },
+            ],
+        },
+    ]
+
+    if stats_cols:
+        body.append(
             {
                 "type": "ColumnSet",
                 "spacing": "Medium",
                 "columns": stats_cols,
-            },
-            {
-                "type": "TextBlock",
-                "text": "GOVERNANCE SNAPSHOT",
-                "size": "Small",
-                "weight": "Bolder",
-                "isSubtle": True,
-                "spacing": "Medium",
-            },
-            {
-                "type": "ColumnSet",
-                "columns": gov_cols,
-            },
-            {
-                "type": "TextBlock",
-                "text": dash["progress_text"],
-                "size": "Small",
-                "isSubtle": True,
-                "spacing": "Medium",
-                "wrap": True,
-            },
-        ],
+            }
+        )
+
+    body.append(
+        {
+            "type": "TextBlock",
+            "text": "GOVERNANCE SNAPSHOT",
+            "size": "Small",
+            "weight": "Bolder",
+            "isSubtle": True,
+            "spacing": "Large",
+        }
+    )
+    if gov_row_1:
+        body.append({"type": "ColumnSet", "spacing": "Small", "columns": gov_row_1})
+    if gov_row_2:
+        body.append({"type": "ColumnSet", "spacing": "Small", "columns": gov_row_2})
+
+    body.append(
+        {
+            "type": "TextBlock",
+            "text": dash["progress_text"],
+            "size": "Small",
+            "isSubtle": True,
+            "spacing": "Medium",
+            "wrap": True,
+        }
+    )
+
+    export_url = (
+        "https://aidl-backend.onrender.com/api/teams/admin/export/"
+        f"?email={email}"
+        if email
+        else "https://aidl-backend.onrender.com/api/teams/admin/export/"
+    )
+
+    return {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.4",
+        "body": body,
         "actions": [
             {
-                "type": "Action.Execute",
+                "type": "Action.OpenUrl",
                 "title": "⬇ Export Coverage CSV",
-                "verb": "aidl.export",
-                "data": {
-                    "action": "export",
-                    "email": email,
-                    "organization_id": org_id,
-                },
+                "url": export_url,
             },
             {
                 "type": "Action.Execute",
-                "title": "Next: add another admin",
+                "title": "→ Next: add another admin",
                 "verb": "aidl.nav",
+                "style": "positive",
                 "data": {
                     "action": "nav",
                     "tab": "add-admin",
@@ -262,6 +325,7 @@ def _section_card(
         user=user,
     )
     org_id = payload.get("organization_id") or ""
+    org = payload.get("org_name") or org_name or "AIDL"
     items = payload.get("items") or []
     item_blocks = []
     for it in items[:12]:
@@ -270,16 +334,41 @@ def _section_card(
             str(x) for x in [it.get("email"), it.get("role"), it.get("status")] if x
         )
         desc = it.get("description") or ""
-        line = f"**{title}**"
-        if meta:
-            line += f"\n{meta}"
-        if desc:
-            line += f"\n_{desc}_"
-        item_blocks.append(
+        block_items = [
             {
                 "type": "TextBlock",
-                "text": line,
+                "text": title,
+                "weight": "Bolder",
                 "wrap": True,
+                "spacing": "None",
+            }
+        ]
+        if meta:
+            block_items.append(
+                {
+                    "type": "TextBlock",
+                    "text": meta,
+                    "size": "Small",
+                    "isSubtle": True,
+                    "wrap": True,
+                    "spacing": "None",
+                }
+            )
+        if desc:
+            block_items.append(
+                {
+                    "type": "TextBlock",
+                    "text": desc,
+                    "size": "Small",
+                    "wrap": True,
+                    "spacing": "None",
+                }
+            )
+        item_blocks.append(
+            {
+                "type": "Container",
+                "style": "emphasis",
+                "items": block_items,
                 "spacing": "Small",
             }
         )
@@ -300,6 +389,7 @@ def _section_card(
                 "type": "Action.OpenUrl",
                 "title": "Read full policy",
                 "url": payload["policy_url"],
+                "style": "positive",
             }
         )
     if tab == "add-admin":
@@ -318,17 +408,13 @@ def _section_card(
         )
 
     body = [
-        {
-            "type": "TextBlock",
-            "text": f"AIDL for {payload.get('org_name')}",
-            "isSubtle": True,
-            "size": "Small",
-        },
+        _header(org),
         {
             "type": "TextBlock",
             "text": "Admin Center",
             "size": "Small",
             "weight": "Bolder",
+            "spacing": "Medium",
         },
         _nav_container(tab, email=email, org_id=org_id),
         {
@@ -344,17 +430,12 @@ def _section_card(
             "text": payload.get("body") or "",
             "wrap": True,
         },
-        {
-            "type": "Container",
-            "style": "emphasis",
-            "items": item_blocks,
-            "spacing": "Medium",
-        },
+        *item_blocks,
     ]
     card = {
         "type": "AdaptiveCard",
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "version": "1.5",
+        "version": "1.4",
         "body": body,
         "msteams": {"width": "Full"},
     }

@@ -48,16 +48,17 @@ def policy_url() -> str:
 
 
 def logo_url() -> str:
+    # Prefer PNG — Teams Adaptive Cards often fail to load SVG images.
     return (
         getattr(settings, "AIDL_LOGO_URL", None)
-        or "https://aidl-backend.onrender.com/static/aidl/logo.svg"
+        or "https://aidl-backend.onrender.com/static/aidl/logo.png"
     ).strip()
 
 
 def _header_block(org_name: str) -> dict:
     return {
         "type": "ColumnSet",
-        "spacing": "Medium",
+        "spacing": "None",
         "columns": [
             {
                 "type": "Column",
@@ -66,10 +67,9 @@ def _header_block(org_name: str) -> dict:
                     {
                         "type": "Image",
                         "url": logo_url(),
-                        "size": "Small",
-                        "style": "Person",
-                        "width": "32px",
-                        "height": "32px",
+                        "size": "Medium",
+                        "width": "48px",
+                        "height": "48px",
                     }
                 ],
                 "verticalContentAlignment": "Center",
@@ -77,14 +77,23 @@ def _header_block(org_name: str) -> dict:
             {
                 "type": "Column",
                 "width": "stretch",
+                "spacing": "Small",
                 "items": [
                     {
                         "type": "TextBlock",
-                        "text": f"AIDL for {org_name}",
+                        "text": "AIDL",
+                        "weight": "Bolder",
+                        "size": "Medium",
+                        "spacing": "None",
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": f"for {org_name}",
                         "isSubtle": True,
                         "size": "Small",
+                        "spacing": "None",
                         "wrap": True,
-                    }
+                    },
                 ],
                 "verticalContentAlignment": "Center",
             },

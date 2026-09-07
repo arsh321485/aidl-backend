@@ -124,7 +124,7 @@ AIDL_POLICY_URL = (
 ).strip()
 AIDL_LOGO_URL = (
     os.getenv("AIDL_LOGO_URL")
-    or "https://aidl-backend.onrender.com/static/aidl/logo.svg"
+    or "https://aidl-backend.onrender.com/static/aidl/logo.png"
 ).strip()
 _default_policy_entities = (
     "SpinifexIT Global Pty Ltd,"
