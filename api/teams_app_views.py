@@ -346,14 +346,37 @@ def teams_send_welcome(request):
         team_id=team_id,
         channel_id=channel_id,
         full_name=user.full_name,
-        org_name=org_display_name(),
+        org_name=user.organization_name or org_display_name(),
+        email=user.email,
+        user=user,
     )
-    if not result:
+    if not result or not result.get("ok"):
         return Response(
-            {"error": "send_failed", "message": "Could not post welcome card to channel."},
+            {
+                "error": "send_failed",
+                "message": "Could not post Admin Center card to channel Posts.",
+                "details": result,
+                "hint": (
+                    "Ensure Azure delegated permission ChannelMessage.Send "
+                    "has admin consent, then re-login."
+                ),
+            },
             status=status.HTTP_502_BAD_GATEWAY,
         )
-    return Response({"ok": True, "message_id": result.get("id"), "tab": "home"})
+    return Response(
+        {
+            "ok": True,
+            "message_id": result.get("message_id")
+            or (result.get("message") or {}).get("id"),
+            "tab": "home",
+            "card_variant": result.get("card_variant"),
+            "channel": {
+                "team_id": team_id,
+                "channel_id": channel_id,
+                "channel_name": getattr(user, "teams_channel_name", "") or "aidl dashboard",
+            },
+        }
+    )
 
 
 @api_view(["POST"])
@@ -380,9 +403,19 @@ def teams_send_card(request, tab: str):
         channel_id=channel_id,
         card=card,
     )
-    if not result:
-        return Response({"error": "send_failed"}, status=status.HTTP_502_BAD_GATEWAY)
-    return Response({"ok": True, "tab": tab, "message_id": result.get("id")})
+    if not result or not result.get("ok"):
+        return Response(
+            {"error": "send_failed", "details": result},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    return Response(
+        {
+            "ok": True,
+            "tab": tab,
+            "message_id": result.get("message_id")
+            or (result.get("message") or {}).get("id"),
+        }
+    )
 
 
 @api_view(["GET"])

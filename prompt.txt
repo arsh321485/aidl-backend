@@ -37,6 +37,11 @@ landed_on values:
   channel   → channel link
   chat      → Teams chat fallback
 
+Also check after login:
+  welcome_card_sent=1     → Admin Adaptive Card was posted to Posts
+  welcome_card_sent=0 & welcome_card_error=... → Graph send failed
+    (usually missing ChannelMessage.Send admin consent — re-login after Azure fix)
+
 ============================================================================
 /auth/callback
 ============================================================================

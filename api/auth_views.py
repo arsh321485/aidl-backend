@@ -108,6 +108,7 @@ def _redirect_with_tokens(
     teams_channel_url: str = "",
     teams_setup: str = "",
     welcome_card_sent: bool = False,
+    welcome_card_error: str = "",
     channel_name: str = "",
     channel_tabs_created: int = 0,
     channel_tabs_ok: bool = False,
@@ -160,6 +161,9 @@ def _redirect_with_tokens(
         query["teams_setup"] = teams_setup
     if welcome_card_sent:
         query["welcome_card_sent"] = "1"
+    elif welcome_card_error:
+        query["welcome_card_sent"] = "0"
+        query["welcome_card_error"] = welcome_card_error[:160]
     if channel_url:
         query["teams_channel_url"] = channel_url
         query["teams_home_tab_url"] = channel_url
@@ -297,16 +301,23 @@ def teams_callback(request):
         logging.getLogger(__name__).warning("ensure organization failed: %s", exc)
 
     channel_url = (channel_info or {}).get("teams_url") or ""
-    home_tab_url = (channel_info or {}).get("home_tab_url") or channel_url
+    posts_url = (channel_info or {}).get("channel_posts_url") or channel_url
+    home_tab_url = (channel_info or {}).get("home_tab_url") or ""
+    # Prefer Posts deep link so Adaptive Card is visible in-channel.
+    landing_url = posts_url or channel_url or home_tab_url
 
     welcome_card_sent = False
+    welcome_card_error = ""
     channel_tabs_created = 0
     if channel_info:
+        # Phase 1: post Admin Center card on EVERY successful channel ensure
+        # (not only first signup) so Posts is never empty after login.
+        send_every_login = getattr(settings, "MS_SEND_ADMIN_CARD_EVERY_LOGIN", True)
         channel_recreated = (
             (channel_info.get("team_id") or "") != old_team_id
             or (channel_info.get("channel_id") or "") != old_channel_id
         )
-        should_send_welcome = is_new_signup or channel_recreated
+        should_send_welcome = bool(send_every_login) or is_new_signup or channel_recreated
         if should_send_welcome:
             welcome_result = send_welcome_card_after_signup(
                 ms_token,
@@ -317,7 +328,13 @@ def teams_callback(request):
                 email=user.email,
                 user=user,
             )
-            welcome_card_sent = bool(welcome_result)
+            welcome_card_sent = bool(welcome_result and welcome_result.get("ok"))
+            if not welcome_card_sent:
+                welcome_card_error = (
+                    (welcome_result or {}).get("error")
+                    or (welcome_result or {}).get("detail")
+                    or "send_failed"
+                )[:180]
         tab_info = channel_info.get("channel_tabs") or {}
         channel_tabs_created = len(tab_info.get("tabs_created") or [])
 
@@ -325,9 +342,10 @@ def teams_callback(request):
         user,
         mode="microsoft",
         ms_access_token=ms_token,
-        teams_channel_url=home_tab_url or channel_url,
+        teams_channel_url=landing_url,
         teams_setup="ok" if channel_info else "failed",
         welcome_card_sent=welcome_card_sent,
+        welcome_card_error=welcome_card_error,
         channel_name=(channel_info or {}).get("channel_name") or "",
         channel_tabs_created=channel_tabs_created,
         channel_tabs_ok=bool(

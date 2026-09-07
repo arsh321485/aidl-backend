@@ -17,9 +17,13 @@ MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback
 
 MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All
 MS_AIDL_CHANNEL_NAME=aidl dashboard
-MS_AIDL_INSTALL_CHANNEL_TABS=False
+MS_SEND_WELCOME_CARD=True
+MS_SEND_ADMIN_CARD_EVERY_LOGIN=True
 MS_AIDL_LAND_ON_POSTS=True
-# Bot messaging endpoint (Azure Bot → this URL) for in-card button clicks:
+MS_AIDL_INSTALL_CHANNEL_TABS=False
+# Azure delegated permission required for Posts card:
+#   ChannelMessage.Send (+ admin consent)
+# Bot messaging endpoint (Phase 2 clicks):
 # https://aidl-backend.onrender.com/api/teams/bot/messages/
 MS_AIDL_TEAM_NAME=AIDL
 MS_AIDL_CHANNEL_NAME=aidl dashboard

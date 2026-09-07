@@ -105,6 +105,9 @@ MS_AIDL_LAND_ON_POSTS = os.getenv("MS_AIDL_LAND_ON_POSTS", "True").lower() in (
     "true",
     "yes",
 )
+MS_SEND_ADMIN_CARD_EVERY_LOGIN = os.getenv(
+    "MS_SEND_ADMIN_CARD_EVERY_LOGIN", "True"
+).lower() in ("1", "true", "yes")
 MS_BOT_APP_ID = (os.getenv("MS_BOT_APP_ID") or os.getenv("MS_CLIENT_ID") or "").strip()
 MS_BOT_APP_PASSWORD = (
     os.getenv("MS_BOT_APP_PASSWORD") or os.getenv("MS_CLIENT_SECRET") or ""
