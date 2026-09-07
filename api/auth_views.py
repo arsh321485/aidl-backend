@@ -327,6 +327,9 @@ def teams_callback(request):
                 org_name=user.organization_name or org_display_name(),
                 email=user.email,
                 user=user,
+                channel_just_created=bool(
+                    channel_info.get("channel_just_created")
+                ),
             )
             welcome_card_sent = bool(welcome_result and welcome_result.get("ok"))
             if not welcome_card_sent:

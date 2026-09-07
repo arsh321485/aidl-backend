@@ -498,6 +498,7 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             "home_tab_url": home_tab_url,
             "channel_posts_url": teams_url,
             "channel_tabs": tab_info,
+            "channel_just_created": channel_just_created,
             "landed_on": "posts" if land_on_posts else "home_tab",
         }
     except requests.HTTPError as exc:

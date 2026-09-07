@@ -55,7 +55,7 @@ def _header(org_name: str) -> dict:
 
 
 def _nav_actions(active_tab: str, *, email: str = "", org_id: str = "") -> list[dict]:
-    """Pill-style nav buttons — Action.Execute updates the card in-place via bot."""
+    """Pill-style nav — Action.Execute needs the AIDL bot (Phase 2)."""
     actions = []
     for tab_id, label, _icon in ADMIN_TABS:
         action = {
@@ -75,18 +75,41 @@ def _nav_actions(active_tab: str, *, email: str = "", org_id: str = "") -> list[
     return actions
 
 
-def _nav_container(active_tab: str, *, email: str = "", org_id: str = "") -> dict:
+def _nav_text(active_tab: str) -> dict:
+    """Graph-safe nav row (no bot required) — active tab highlighted in text."""
+    parts = []
+    for tab_id, label, _icon in ADMIN_TABS:
+        if tab_id == active_tab:
+            parts.append(f"**{label}**")
+        else:
+            parts.append(label)
     return {
-        "type": "ActionSet",
-        "actions": _nav_actions(active_tab, email=email, org_id=org_id),
+        "type": "TextBlock",
+        "text": " · ".join(parts),
+        "wrap": True,
+        "spacing": "Small",
     }
+
+
+def _nav_container(
+    active_tab: str,
+    *,
+    email: str = "",
+    org_id: str = "",
+    interactive: bool = False,
+) -> dict:
+    if interactive:
+        return {
+            "type": "ActionSet",
+            "actions": _nav_actions(active_tab, email=email, org_id=org_id),
+        }
+    return _nav_text(active_tab)
 
 
 def _stat_tile(label: str, value: str, sub: str, *, alert: bool = False) -> dict:
     return {
         "type": "Container",
         "style": "emphasis",
-        "bleed": False,
         "items": [
             {
                 "type": "TextBlock",
@@ -123,8 +146,15 @@ def build_admin_adaptive_card(
     org_name: str = "",
     email: str = "",
     user=None,
+    interactive: bool = False,
 ) -> dict:
-    """Build the Adaptive Card shown in aidl dashboard Posts (dynamic from DB)."""
+    """
+    Build Admin Center Adaptive Card (dynamic from DB).
+
+    interactive=False (default for Graph channel posts): no Action.Execute —
+    Graph user posts reject / ignore bot verbs, which can leave Posts empty.
+    interactive=True: bot-driven in-place nav (Phase 2).
+    """
     tab = (tab or "home").strip().lower()
     if tab == "home":
         return _home_card(
@@ -132,6 +162,7 @@ def build_admin_adaptive_card(
             org_name=org_name,
             email=email,
             user=user,
+            interactive=interactive,
         )
     return _section_card(
         tab,
@@ -139,10 +170,18 @@ def build_admin_adaptive_card(
         org_name=org_name,
         email=email,
         user=user,
+        interactive=interactive,
     )
 
 
-def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
+def _home_card(
+    *,
+    full_name: str,
+    org_name: str,
+    email: str,
+    user,
+    interactive: bool = False,
+) -> dict:
     dash = build_admin_dashboard_from_db(
         full_name=full_name,
         org_name=org_name,
@@ -153,7 +192,6 @@ def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
     org = dash.get("org_name") or org_name or "AIDL"
 
     stats = dash.get("stats") or []
-    # 3 metric tiles in one row
     stats_cols = []
     for s in stats[:3]:
         stats_cols.append(
@@ -172,7 +210,6 @@ def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
         )
 
     gov = dash.get("governance") or []
-    # 2x2 governance grid (Teams handles narrow columns better this way)
     gov_row_1 = []
     gov_row_2 = []
     for idx, g in enumerate(gov[:4]):
@@ -196,10 +233,9 @@ def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
         _header(org),
         {
             "type": "TextBlock",
-            "text": "Shown the moment an admin opens your Admin Center",
-            "weight": "Bolder",
+            "text": "Admin Center",
             "size": "Medium",
-            "wrap": True,
+            "weight": "Bolder",
             "spacing": "Medium",
         },
         {
@@ -209,17 +245,14 @@ def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
             "size": "Small",
             "spacing": "None",
         },
-        {
-            "type": "TextBlock",
-            "text": "Admin Center",
-            "size": "Small",
-            "weight": "Bolder",
-            "spacing": "Medium",
-        },
-        _nav_container("home", email=email, org_id=org_id),
+        _nav_container(
+            "home",
+            email=email,
+            org_id=org_id,
+            interactive=interactive,
+        ),
         {
             "type": "Container",
-            "style": "default",
             "spacing": "Medium",
             "items": [
                 {
@@ -281,20 +314,18 @@ def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
         else "https://aidl-backend.onrender.com/api/teams/admin/export/"
     )
 
-    return {
-        "type": "AdaptiveCard",
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "version": "1.4",
-        "body": body,
-        "actions": [
-            {
-                "type": "Action.OpenUrl",
-                "title": "⬇ Export Coverage CSV",
-                "url": export_url,
-            },
+    actions: list[dict] = [
+        {
+            "type": "Action.OpenUrl",
+            "title": "Export Coverage CSV",
+            "url": export_url,
+        },
+    ]
+    if interactive:
+        actions.append(
             {
                 "type": "Action.Execute",
-                "title": "→ Next: add another admin",
+                "title": "Next: add another admin",
                 "verb": "aidl.nav",
                 "style": "positive",
                 "data": {
@@ -303,8 +334,24 @@ def _home_card(*, full_name: str, org_name: str, email: str, user) -> dict:
                     "email": email,
                     "organization_id": org_id,
                 },
-            },
-        ],
+            }
+        )
+    else:
+        actions.append(
+            {
+                "type": "Action.OpenUrl",
+                "title": "Refresh Admin Center",
+                "url": "https://aidl-backend.onrender.com/api/teams/",
+                "style": "positive",
+            }
+        )
+
+    return {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.4",
+        "body": body,
+        "actions": actions,
         "msteams": {"width": "Full"},
     }
 
@@ -316,6 +363,7 @@ def _section_card(
     org_name: str,
     email: str,
     user,
+    interactive: bool = False,
 ) -> dict:
     payload = build_admin_tab_payload(
         tab,
@@ -392,7 +440,7 @@ def _section_card(
                 "style": "positive",
             }
         )
-    if tab == "add-admin":
+    if interactive and tab == "add-admin":
         actions.append(
             {
                 "type": "Action.Execute",
@@ -416,7 +464,12 @@ def _section_card(
             "weight": "Bolder",
             "spacing": "Medium",
         },
-        _nav_container(tab, email=email, org_id=org_id),
+        _nav_container(
+            tab,
+            email=email,
+            org_id=org_id,
+            interactive=interactive,
+        ),
         {
             "type": "TextBlock",
             "text": payload.get("heading") or payload.get("title") or tab,

@@ -70,6 +70,7 @@ def _card_for_action(data: dict, activity: dict) -> dict:
         org_name=org_name or org_display_name(),
         email=email,
         user=user,
+        interactive=True,
     )
 
 
