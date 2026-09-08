@@ -49,6 +49,16 @@ urlpatterns = [
         name="teams-admin-issue-licence",
     ),
     path(
+        "teams/admin/cards/request-new/",
+        teams_app_views.teams_cards_request_new,
+        name="teams-cards-request-new",
+    ),
+    path(
+        "teams/admin/cards/<str:key>/action/",
+        teams_app_views.teams_cards_action,
+        name="teams-cards-action",
+    ),
+    path(
         "teams/admin/<str:tab>/",
         teams_app_views.teams_admin_json,
         name="teams-admin-json",

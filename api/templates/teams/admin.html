@@ -217,6 +217,65 @@
       .stats { grid-template-columns: 1fr; }
       .gov { grid-template-columns: 1fr 1fr; }
     }
+
+    /* ===== Send Cards tab ===== */
+    .quota-box { background: var(--aidl-beige); border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; }
+    .quota-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--aidl-muted); margin-bottom: 6px; }
+    .quota-num { font-size: 20px; font-weight: 800; }
+    .quota-num span { color: var(--aidl-purple); }
+    .quota-bar { height: 8px; border-radius: 4px; background: #e6ded0; margin-top: 8px; overflow: hidden; }
+    .quota-fill { height: 100%; background: var(--aidl-purple); }
+    .quota-avail { font-size: 11px; color: var(--aidl-muted); font-weight: 600; margin-top: 8px; }
+
+    .send-item { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; border-top: 1px solid var(--aidl-border); }
+    .send-item:first-of-type { border-top: none; }
+    .send-icon { font-size: 22px; flex-shrink: 0; width: 30px; text-align: center; }
+    .send-item-body { flex: 1; min-width: 0; }
+    .send-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .send-title { font-size: 14px; font-weight: 700; }
+    .send-item-action { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+    .send-sent-badge { font-size: 11px; font-weight: 800; color: #1a7f37; white-space: nowrap; }
+    .send-sent-badge.scheduled { color: #8f6a00; }
+    .send-kicker { font-size: 9.5px; font-weight: 800; letter-spacing: .3px; color: #8a8886; text-transform: uppercase; margin: 2px 0 3px; }
+    .send-desc { font-size: 12.5px; color: var(--aidl-muted); line-height: 1.4; }
+    .send-meta-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+    .send-price { font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; background: var(--aidl-beige); white-space: nowrap; }
+    .send-price.requested { background: #dff6dd; color: #1a7f37; }
+    .send-rating { font-size: 11.5px; font-weight: 700; color: #8a8d91; white-space: nowrap; }
+    .send-rating b { color: var(--aidl-text); }
+    .btn.sm { padding: 4px 10px; font-size: 12px; }
+    .btn.positive { background: var(--aidl-purple); border-color: var(--aidl-purple); color: #fff; }
+    .cards-empty { font-size: 13px; color: var(--aidl-muted); padding: 12px 0; }
+
+    .doc-modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(10,10,7,.55); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+    .doc-modal-backdrop.open { display: flex; }
+    .doc-modal { width: min(520px, 100%); max-height: 86vh; background: #fff; border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+    .doc-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px 12px; border-bottom: 1px solid var(--aidl-border); background: var(--aidl-beige); }
+    .doc-modal-eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .5px; color: var(--aidl-muted); text-transform: uppercase; margin-bottom: 4px; }
+    .doc-modal-head h3 { font-size: 17px; font-weight: 700; margin: 0; }
+    .doc-modal-close { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--aidl-text); background: #fff; cursor: pointer; font-size: 13px; flex-shrink: 0; }
+    .doc-modal-body { padding: 16px 20px; overflow-y: auto; font-size: 13px; line-height: 1.6; white-space: pre-line; }
+    .doc-modal-foot { display: flex; flex-direction: column; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--aidl-border); background: #fafafa; }
+    .doc-modal-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .doc-modal-status { font-size: 12px; font-weight: 700; color: var(--aidl-muted); }
+    .doc-modal-status.agreed { color: #1a7f37; }
+    .schedule-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12.5px; font-weight: 600; }
+    .schedule-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+    .sched-datetime { font-family: inherit; font-size: 12.5px; padding: 5px 8px; border-radius: 5px; border: 1px solid var(--aidl-border); }
+    .sched-datetime:disabled { opacity: .45; }
+
+    .light-picker { margin: 14px 0 4px; border: 1px solid var(--aidl-border); border-radius: 8px; padding: 10px 12px; }
+    .light-picker-label { font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: var(--aidl-muted); margin-bottom: 6px; }
+    .light-check { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .light-check + .light-check { border-top: 1px solid #f0f0f0; }
+    .light-check input { width: 15px; height: 15px; accent-color: var(--aidl-purple); margin-top: 3px; flex-shrink: 0; }
+    .light-check-desc { display: block; font-size: 11.5px; font-weight: 400; color: var(--aidl-muted); margin-top: 2px; line-height: 1.4; }
+    .light-picker-warning { display: none; font-size: 11.5px; font-weight: 700; color: #c0392b; margin-top: 4px; }
+    .light-picker-warning.show { display: block; }
+
+    .add-app-field { margin-bottom: 12px; }
+    .add-app-field label { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: var(--aidl-muted); margin-bottom: 4px; }
+    .add-app-field input, .add-app-field select { width: 100%; font-family: inherit; font-size: 13.5px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--aidl-border); }
   </style>
 </head>
 <body>
@@ -281,7 +340,15 @@
       </div>
       <h1 class="placeholder-title" id="phTitle">{{ placeholder.heading }}</h1>
       <p class="placeholder-body" id="phBody">{{ placeholder.body }}</p>
+      {% if active_tab == "cards" %}
+      <div class="quota-box" id="cardsQuotaBox"></div>
+      <div id="cardsList"></div>
+      <p style="font-size:13px;color:var(--aidl-muted);margin-top:16px;">Need something that's not listed? Request a brand-new reference card — we'll scope it and follow up.</p>
+      <div id="cardsCustomList" style="margin-bottom:12px;"></div>
+      <button type="button" class="btn" id="reqNewCardBtn">＋ Request a New Card</button>
+      {% else %}
       <div id="itemsHost" style="margin-top:16px;"></div>
+      {% endif %}
       {% if active_tab == "add-admin" %}
       <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
         <input id="inviteEmail" type="email" placeholder="admin@company.com"
@@ -294,6 +361,62 @@
       <p style="margin-top:12px;"><a class="next-link" id="policyLink" href="{{ placeholder.policy_url }}" target="_blank" rel="noopener">Read full policy</a></p>
       {% endif %}
       {% endif %}
+    </div>
+  </div>
+
+  <div class="doc-modal-backdrop" id="cardDocBackdrop">
+    <div class="doc-modal">
+      <div class="doc-modal-head">
+        <div>
+          <div class="doc-modal-eyebrow" id="cardDocKicker">Kicker</div>
+          <h3 id="cardDocTitle">Card title</h3>
+        </div>
+        <button type="button" class="doc-modal-close" id="cardDocCloseBtn" aria-label="Close">✕</button>
+      </div>
+      <div class="doc-modal-body" id="cardDocBody"></div>
+      <div class="doc-modal-foot">
+        <div class="doc-modal-foot-row" id="cardRequestRow">
+          <span class="doc-modal-status" id="cardPriceLabel">$0 · one-time</span>
+          <button type="button" class="btn positive" id="cardRequestBtn">Request Card</button>
+        </div>
+        <div class="schedule-row" id="cardScheduleRow" style="display:none;">
+          <label><input type="radio" name="sendWhen" value="now" checked /> Send now</label>
+          <label><input type="radio" name="sendWhen" value="later" /> Schedule for later</label>
+          <input type="datetime-local" id="cardScheduleAt" class="sched-datetime" disabled />
+        </div>
+        <div class="doc-modal-foot-row" id="cardSendRow" style="display:none;">
+          <span class="doc-modal-status" id="cardDocStatus">Not sent</span>
+          <button type="button" class="btn positive" id="cardSendBtn">Send Card</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="doc-modal-backdrop" id="reqCardBackdrop">
+    <div class="doc-modal">
+      <div class="doc-modal-head">
+        <div>
+          <div class="doc-modal-eyebrow">Custom Request</div>
+          <h3>Request a New Card</h3>
+        </div>
+        <button type="button" class="doc-modal-close" id="reqCardCloseBtn" aria-label="Close">✕</button>
+      </div>
+      <div class="doc-modal-body">
+        <div class="add-app-field"><label>Card Name</label><input type="text" id="reqCardName" placeholder="e.g. Vendor Risk Checklist" /></div>
+        <div class="add-app-field"><label>What should it cover?</label><input type="text" id="reqCardDesc" placeholder="Brief description of the topic or guidance needed" /></div>
+        <div class="add-app-field"><label>Priority</label>
+          <select id="reqCardPriority">
+            <option value="standard">Standard</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+      </div>
+      <div class="doc-modal-foot">
+        <div class="doc-modal-foot-row">
+          <span class="doc-modal-status">Counts toward your monthly quota</span>
+          <button type="button" class="btn positive" id="reqCardSubmitBtn">Submit Request</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -362,6 +485,197 @@
       applyUserToNav(data.full_name, data.org_name, data.email);
     }
 
+    /* ===== Send Cards tab — dynamic, server-persisted state ===== */
+    let CURRENT_CARDS = {};   // key -> card data, refreshed on every load
+    let CURRENT_CARD_KEY = null;
+
+    function authToken() {
+      return new URLSearchParams(window.location.search).get("access_token") || "";
+    }
+
+    async function cardApi(path, body) {
+      const token = authToken();
+      if (!token) {
+        alert("Open this tab after Teams login (JWT required).");
+        return null;
+      }
+      const resp = await fetch(BASE + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        alert(data.error || "Request failed");
+        return null;
+      }
+      return data;
+    }
+
+    function renderCardsTab(cards) {
+      CURRENT_CARDS = {};
+      (cards.items || []).forEach((it) => { CURRENT_CARDS[it.key] = it; });
+
+      const quotaBox = document.getElementById("cardsQuotaBox");
+      if (quotaBox) {
+        const pct = Math.min(100, (cards.quota_used / cards.quota_max) * 100);
+        quotaBox.innerHTML =
+          '<div class="quota-label">Monthly Card Quota</div>' +
+          '<div class="quota-num"><span>' + cards.quota_used + '</span> of ' + cards.quota_max + ' cards requested this month</div>' +
+          '<div class="quota-bar"><div class="quota-fill" style="width:' + pct + '%"></div></div>' +
+          '<div class="quota-avail">📅 ' + cards.quota_available_text + '</div>';
+      }
+
+      const list = document.getElementById("cardsList");
+      if (list) {
+        list.innerHTML = (cards.items || []).map((it) => {
+          const badge = it.status === "sent" ? '<span class="send-sent-badge">✓ Sent</span>'
+            : it.status === "scheduled" ? '<span class="send-sent-badge scheduled">🕒 Scheduled</span>'
+            : "";
+          const priceClass = it.purchased ? "send-price requested" : "send-price";
+          const priceText = it.purchased ? "✓ Requested" : it.price + " · one-time";
+          return (
+            '<div class="send-item">' +
+              '<span class="send-icon">' + it.icon + '</span>' +
+              '<div class="send-item-body">' +
+                '<div class="send-item-head">' +
+                  '<div class="send-title">' + it.title + '</div>' +
+                  '<div class="send-item-action">' +
+                    '<button type="button" class="btn sm" data-card-view="' + it.key + '">View</button>' +
+                    badge +
+                  '</div>' +
+                '</div>' +
+                '<div class="send-kicker">' + it.kicker + '</div>' +
+                '<div class="send-desc">' + it.desc + '</div>' +
+                '<div class="send-meta-row">' +
+                  '<span class="' + priceClass + '">' + priceText + '</span>' +
+                  '<span class="send-rating">★ <b>' + it.rating + '</b> (' + it.votes + ')</span>' +
+                '</div>' +
+              '</div>' +
+            '</div>'
+          );
+        }).join("") || '<div class="cards-empty">No cards in the catalog.</div>';
+        list.querySelectorAll("[data-card-view]").forEach((btn) => {
+          btn.addEventListener("click", () => openCardDoc(btn.getAttribute("data-card-view")));
+        });
+      }
+
+      const customList = document.getElementById("cardsCustomList");
+      if (customList) {
+        const reqs = cards.custom_requests || [];
+        customList.innerHTML = reqs.map((r) => (
+          '<div class="send-item">' +
+            '<span class="send-icon">🆕</span>' +
+            '<div class="send-item-body">' +
+              '<div class="send-item-head">' +
+                '<div class="send-title">' + r.name + '</div>' +
+                '<div class="send-item-action"><span class="send-sent-badge" style="color:#616161;">⏳ ' +
+                  (r.status === "pending" ? "Pending Review" : r.status) + '</span></div>' +
+              '</div>' +
+              '<div class="send-kicker">Custom Request · ' + r.priority + '</div>' +
+              '<div class="send-desc">' + r.description + '</div>' +
+            '</div>' +
+          '</div>'
+        )).join("");
+      }
+    }
+
+    function openCardDoc(key) {
+      const it = CURRENT_CARDS[key];
+      if (!it) return;
+      CURRENT_CARD_KEY = key;
+      document.getElementById("cardDocKicker").textContent = it.kicker;
+      document.getElementById("cardDocTitle").textContent = it.icon + " " + it.title;
+      let body = it.body;
+      if (it.has_lights) {
+        body += "\n\nChoose which lights to send: Green (Go), Amber (Caution), Red (Stop).";
+      }
+      document.getElementById("cardDocBody").textContent = body;
+      document.getElementById("cardPriceLabel").textContent = it.price + " · one-time";
+
+      const alreadySent = it.status === "sent";
+      const statusEl = document.getElementById("cardDocStatus");
+      statusEl.textContent = alreadySent ? "✓ Sent" : (it.status === "scheduled" ? "🕒 Scheduled" : "Not sent");
+      statusEl.classList.toggle("agreed", alreadySent);
+
+      document.getElementById("cardRequestRow").style.display = it.purchased ? "none" : "";
+      document.getElementById("cardScheduleRow").style.display = (it.purchased && !alreadySent) ? "" : "none";
+      document.getElementById("cardSendRow").style.display = it.purchased ? "" : "none";
+      document.querySelector('input[name="sendWhen"][value="now"]').checked = true;
+      document.getElementById("cardScheduleAt").value = "";
+      document.getElementById("cardScheduleAt").disabled = true;
+      document.getElementById("cardSendBtn").textContent = "Send Card";
+
+      document.getElementById("cardDocBackdrop").classList.add("open");
+    }
+
+    function closeCardDoc() {
+      document.getElementById("cardDocBackdrop").classList.remove("open");
+    }
+
+    document.getElementById("cardDocCloseBtn").addEventListener("click", closeCardDoc);
+    document.querySelectorAll('input[name="sendWhen"]').forEach((r) => {
+      r.addEventListener("change", () => {
+        const later = document.querySelector('input[name="sendWhen"]:checked').value === "later";
+        document.getElementById("cardScheduleAt").disabled = !later;
+        document.getElementById("cardSendBtn").textContent = later ? "Schedule Card" : "Send Card";
+      });
+    });
+
+    document.getElementById("cardRequestBtn").addEventListener("click", async () => {
+      if (!CURRENT_CARD_KEY) return;
+      const result = await cardApi("/admin/cards/" + CURRENT_CARD_KEY + "/action/", { action: "request" });
+      if (result) { await loadDynamic(); openCardDoc(CURRENT_CARD_KEY); }
+    });
+
+    document.getElementById("cardSendBtn").addEventListener("click", async () => {
+      if (!CURRENT_CARD_KEY) return;
+      const later = document.querySelector('input[name="sendWhen"]:checked').value === "later";
+      const body = { action: later ? "schedule" : "send" };
+      const it = CURRENT_CARDS[CURRENT_CARD_KEY];
+      if (it && it.has_lights) body.lights = ["green", "amber", "red"];
+      if (later) {
+        const dt = document.getElementById("cardScheduleAt").value;
+        if (!dt) { document.getElementById("cardScheduleAt").focus(); return; }
+        body.scheduled_at = dt;
+      }
+      const result = await cardApi("/admin/cards/" + CURRENT_CARD_KEY + "/action/", body);
+      if (result) { await loadDynamic(); closeCardDoc(); }
+    });
+
+    const reqNewCardBtn = document.getElementById("reqNewCardBtn");
+    if (reqNewCardBtn) {
+      reqNewCardBtn.addEventListener("click", () => {
+        document.getElementById("reqCardName").value = "";
+        document.getElementById("reqCardDesc").value = "";
+        document.getElementById("reqCardPriority").value = "standard";
+        document.getElementById("reqCardBackdrop").classList.add("open");
+      });
+    }
+    const reqCardCloseBtn = document.getElementById("reqCardCloseBtn");
+    if (reqCardCloseBtn) {
+      reqCardCloseBtn.addEventListener("click", () => {
+        document.getElementById("reqCardBackdrop").classList.remove("open");
+      });
+    }
+    const reqCardSubmitBtn = document.getElementById("reqCardSubmitBtn");
+    if (reqCardSubmitBtn) {
+      reqCardSubmitBtn.addEventListener("click", async () => {
+        const nameInput = document.getElementById("reqCardName");
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        const result = await cardApi("/admin/cards/request-new/", {
+          name,
+          description: document.getElementById("reqCardDesc").value.trim(),
+          priority: document.getElementById("reqCardPriority").value,
+        });
+        if (result) {
+          document.getElementById("reqCardBackdrop").classList.remove("open");
+          await loadDynamic();
+        }
+      });
+    }
+
     function renderItems(items) {
       const host = document.getElementById("itemsHost");
       if (!host) return;
@@ -394,7 +708,11 @@
       if (title) title.textContent = data.heading;
       const body = document.getElementById("phBody");
       if (body) body.textContent = data.body;
-      renderItems(data.items || []);
+      if (ACTIVE_TAB === "cards" && data.cards) {
+        renderCardsTab(data.cards);
+      } else {
+        renderItems(data.items || []);
+      }
       const policy = document.getElementById("policyLink");
       if (policy && data.policy_url) policy.href = data.policy_url;
       applyUserToNav(data.full_name, data.org_name, data.email || "");

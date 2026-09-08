@@ -65,4 +65,6 @@ def build_admin_placeholder(
         "admin_seat_limit": payload.get("admin_seat_limit"),
         "can_add": payload.get("can_add"),
         "email": payload.get("email") or email,
+        "cards": payload.get("cards"),
+        "organization_id": payload.get("organization_id") or "",
     }

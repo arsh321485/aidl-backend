@@ -287,8 +287,9 @@ def teams_callback(request):
     _save_channel_on_user(user, channel_info)
     # Refresh user after channel ids saved
     user.refresh_from_db()
+    org = None
     try:
-        ensure_organization_for_login(
+        org = ensure_organization_for_login(
             user,
             channel_info=channel_info or {},
             org_name=org_display_name(),
@@ -310,19 +311,32 @@ def teams_callback(request):
     welcome_card_error = ""
     channel_tabs_created = 0
     if channel_info:
-        # Phase 1: post Admin Center card on EVERY successful channel ensure
-        # (not only first signup) so Posts is never empty after login.
-        send_every_login = getattr(settings, "MS_SEND_ADMIN_CARD_EVERY_LOGIN", True)
         channel_recreated = (
             (channel_info.get("team_id") or "") != old_team_id
             or (channel_info.get("channel_id") or "") != old_channel_id
         )
-        should_send_welcome = bool(send_every_login) or is_new_signup or channel_recreated
+        current_channel_id = channel_info.get("channel_id") or ""
+        # If the channel itself changed (recreated after deletion, etc.) the
+        # old card is gone too — clear the flag so a fresh one is allowed.
+        if org is not None and org.admin_card_channel_id != current_channel_id:
+            org.admin_card_sent = False
+
+        # Explicit opt-in for the old "post on every login" behaviour; off by
+        # default because that's exactly what was spamming duplicate Admin
+        # Center cards into the channel for the same person re-logging in.
+        force_every_login = getattr(settings, "MS_SEND_ADMIN_CARD_EVERY_LOGIN", False)
+        already_posted = bool(org and org.admin_card_sent)
+        should_send_welcome = (
+            bool(force_every_login)
+            or is_new_signup
+            or channel_recreated
+            or not already_posted
+        )
         if should_send_welcome:
             welcome_result = send_welcome_card_after_signup(
                 ms_token,
                 team_id=channel_info.get("team_id") or "",
-                channel_id=channel_info.get("channel_id") or "",
+                channel_id=current_channel_id,
                 full_name=user.full_name,
                 org_name=user.organization_name or org_display_name(),
                 email=user.email,
@@ -332,12 +346,31 @@ def teams_callback(request):
                 ),
             )
             welcome_card_sent = bool(welcome_result and welcome_result.get("ok"))
-            if not welcome_card_sent:
+            if welcome_card_sent and org is not None:
+                org.admin_card_sent = True
+                org.admin_card_channel_id = current_channel_id
+                org.admin_card_message_id = (
+                    welcome_result.get("message_id")
+                    or (welcome_result.get("message") or {}).get("id")
+                    or org.admin_card_message_id
+                )
+                org.save(
+                    update_fields=[
+                        "admin_card_sent",
+                        "admin_card_channel_id",
+                        "admin_card_message_id",
+                        "updated_at",
+                    ]
+                )
+            elif not welcome_card_sent:
                 welcome_card_error = (
                     (welcome_result or {}).get("error")
                     or (welcome_result or {}).get("detail")
                     or "send_failed"
                 )[:180]
+        elif org is not None and org.admin_card_channel_id != current_channel_id:
+            # Nothing sent this time, but persist the "cleared" flag above.
+            org.save(update_fields=["admin_card_sent", "updated_at"])
         tab_info = channel_info.get("channel_tabs") or {}
         channel_tabs_created = len(tab_info.get("tabs_created") or [])
 

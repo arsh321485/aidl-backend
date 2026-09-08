@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AIDL — Teams Admin Cards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --sign-yellow: #FFCC00;
+    --signal-green: #2EC866;
+    --signal-red: #E23A2E;
+    --asphalt: #14140F;
+    --cream: #F5ECD2;
+    --muted: #6A624A;
+    --teams-purple: #5B5FC7;
+  }
+
+  body {
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    background: #f5f5f5;
+    padding: 20px 16px 80px;
+  }
+
+  /* ===== tab bar — pick any card, no scrolling required ===== */
+  .card-tabs {
+    max-width: 520px; margin: 0 auto 22px; display: flex; gap: 8px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 10; background: #f5f5f5; padding: 10px 0 14px;
+  }
+  .tab-btn {
+    font-family: inherit; font-size: 13px; font-weight: 700; padding: 8px 14px;
+    border-radius: 20px; border: 1px solid #d1d1d1; background: #fff; color: #444;
+    cursor: pointer; white-space: nowrap;
+  }
+  .tab-btn:hover { background: #ececec; }
+  .tab-btn.active { background: var(--teams-purple); border-color: var(--teams-purple); color: #fff; }
+
+  .card-section { display: none; }
+  .card-section.active { display: block; }
+
+  .section-label {
+    max-width: 520px;
+    margin: 0 auto 14px;
+    color: #201f1f;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .section-label span { color: #8a8886; font-weight: 400; font-size: 12px; margin-left: 8px; }
+
+  .card {
+    max-width: 520px;
+    margin: 0 auto 28px;
+    background: #fff;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    box-shadow: 0 1.6px 3.6px rgba(0,0,0,0.13);
+    overflow: hidden;
+  }
+  .card-body { padding: 16px; }
+
+  .app-line { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #616161; margin-bottom: 10px; }
+  .app-line .app-icon {
+    width: 28px; height: 28px; border-radius: 5px; overflow: hidden; flex-shrink: 0;
+    background: var(--asphalt); display: flex; align-items: center; justify-content: center;
+  }
+  .app-line .app-icon img { width: 100%; height: 100%; object-fit: cover; }
+  .app-line .bot-name { font-weight: 700; color: #201f1f; font-size: 13px; }
+  .app-line .org-tag { color: #616161; font-size: 12px; }
+
+  .title-block { font-size: 18px; font-weight: 600; color: #201f1f; margin-bottom: 6px; }
+  .body-text { font-size: 14px; color: #201f1f; line-height: 1.5; margin: 6px 0; }
+
+  .actions-row {
+    display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #f0f0f0; flex-wrap: wrap;
+  }
+  .teams-btn {
+    font-family: inherit; font-size: 13px; padding: 7px 14px; border-radius: 4px;
+    border: 1px solid #8a8886; background: #fff; color: #201f1f; cursor: pointer;
+  }
+  .teams-btn.positive { background: var(--teams-purple); border-color: var(--teams-purple); color: #fff; }
+  .teams-btn.sm { padding: 4px 10px; font-size: 12px; }
+
+  .meta-line { font-size: 12px; color: #616161; padding: 0 16px 14px; }
+  .next-hint {
+    font-size: 12.5px; font-weight: 700; color: var(--teams-purple);
+    padding: 10px 16px; border-top: 1px solid #f0f0f0;
+  }
+  .next-hint.done { color: #616161; }
+
+  /* ===== stat mini strip ===== */
+  .stat-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+  .stat-strip.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .stat-strip-label { font-size: 10px; font-weight: 800; letter-spacing: 0.3px; color: #616161; text-transform: uppercase; margin: 14px 0 6px; }
+  .stat-mini { background: var(--cream); border-radius: 6px; padding: 10px 8px; text-align: center; }
+  .stat-mini .k { font-size: 8.5px; font-weight: 800; letter-spacing: 0.3px; color: var(--muted); text-transform: uppercase; }
+  .stat-mini .v { font-size: 20px; font-weight: 900; color: #201f1f; margin: 3px 0; }
+  .stat-mini .d { font-size: 8.5px; color: #616161; }
+  .stat-mini.warn .v { color: #c0392b; }
+
+  /* ===== key result box ===== */
+  .key-box {
+    background: var(--asphalt); color: #fff; border-radius: 6px; padding: 12px 14px; margin: 10px 0;
+  }
+  .key-label { font-size: 10px; font-weight: 800; letter-spacing: 0.4px; color: var(--sign-yellow); text-transform: uppercase; margin-bottom: 8px; }
+  .key-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-family: "JetBrains Mono", monospace; font-size: 10px; }
+  .key-meta span { display: block; opacity: 0.7; margin-bottom: 2px; }
+  .key-meta b { font-size: 11px; }
+  .key-label .app-pill { margin-left: 6px; vertical-align: middle; }
+
+  /* ===== AUP drop zone (matches the Acceptable Use tab in FleetOfficeView.vue) ===== */
+  .aup-drop {
+    border: 2px dashed #8a8886; border-radius: 8px; padding: 18px 12px;
+    text-align: center; color: #616161; font-weight: 700; font-size: 11px;
+    letter-spacing: 0.3px; text-transform: uppercase; margin: 10px 0; line-height: 1.5;
+  }
+
+  /* ===== send cards list ===== */
+  .send-item { display: flex; gap: 12px; align-items: flex-start; padding: 11px 0; border-top: 1px solid #f0f0f0; }
+  .send-item:first-of-type { border-top: none; }
+  .send-icon { font-size: 22px; flex-shrink: 0; width: 30px; text-align: center; }
+  .icon-tile { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .icon-tile svg { width: 22px; height: 22px; }
+  .icon-tile.sm { width: 20px; height: 20px; display: inline-flex; vertical-align: -6px; }
+  .icon-tile.sm svg { width: 16px; height: 16px; }
+  .send-title { font-size: 14px; font-weight: 700; color: #201f1f; }
+  .send-kicker { font-size: 9.5px; font-weight: 800; letter-spacing: 0.3px; color: #8a8886; text-transform: uppercase; margin: 2px 0 3px; }
+  .send-desc { font-size: 12.5px; color: #616161; line-height: 1.4; }
+  .send-item-body { flex: 1; min-width: 0; }
+  .send-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .send-item-action { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; padding-top: 1px; }
+  .send-sent-badge { display: none; font-size: 11px; font-weight: 800; color: #1a7f37; white-space: nowrap; }
+  .send-sent-badge.show { display: inline; }
+  .send-sent-badge.pending { color: #616161; }
+  .send-meta-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+  .send-price {
+    font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 3px; background: var(--cream); color: var(--asphalt); white-space: nowrap;
+  }
+  .send-price.requested { background: #dff6dd; color: #1a7f37; }
+  .send-rating { font-size: 11.5px; font-weight: 700; color: #8a8d91; white-space: nowrap; }
+  .send-rating b { color: #1d1c1d; }
+  .send-rating .star { color: var(--sign-yellow); }
+
+  /* ===== monthly card quota ===== */
+  .quota-box { background: var(--cream); border-radius: 8px; padding: 14px; margin: 12px 0; }
+  .quota-label { font-size: 10px; font-weight: 800; letter-spacing: 0.3px; color: #616161; text-transform: uppercase; margin-bottom: 6px; }
+  .quota-num { font-size: 20px; font-weight: 900; color: #201f1f; font-family: "JetBrains Mono", monospace; }
+  .quota-num span { color: var(--teams-purple); }
+  .quota-bar { height: 8px; border-radius: 4px; background: #e3dcc2; margin-top: 8px; overflow: hidden; }
+  .quota-fill { height: 100%; background: var(--teams-purple); width: 0%; transition: width .3s ease; }
+  .quota-avail { font-size: 11px; color: #616161; font-weight: 700; margin-top: 8px; }
+
+  /* ===== cards-sent tracker ===== */
+  .sent-count-box { background: var(--cream); border-radius: 8px; padding: 14px; margin: 12px 0; }
+  .sent-count-num { font-size: 22px; font-weight: 900; color: #201f1f; font-family: "JetBrains Mono", monospace; }
+  .sent-count-num span { color: var(--teams-purple); }
+  .sent-count-bar { height: 8px; border-radius: 4px; background: #e3dcc2; margin-top: 8px; overflow: hidden; }
+  .sent-count-fill { height: 100%; background: var(--teams-purple); width: 0%; transition: width .3s ease; }
+  .sent-list { margin: 4px 0 0; }
+  .sent-row {
+    display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid #f0f0f0;
+    font-size: 13.5px; font-weight: 700; color: #201f1f;
+  }
+  .sent-row:first-of-type { border-top: none; }
+  .sent-row .sr-icon { font-size: 17px; width: 24px; text-align: center; }
+  .sent-row .sr-name { flex: 1; }
+  .sent-row .sr-status { font-size: 11.5px; font-weight: 800; color: #616161; text-transform: uppercase; }
+  .sent-row.sent .sr-status { color: #1a7f37; }
+
+  /* ===== app table ===== */
+  .app-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #f0f0f0;
+    cursor: pointer;
+  }
+  .app-row:first-of-type { border-top: none; }
+  .app-row:hover { background: #fafafa; }
+  .app-name-col { flex: 1; min-width: 0; }
+  .app-name { font-size: 13.5px; font-weight: 700; color: #201f1f; }
+  .app-meta { font-size: 11px; color: #616161; margin-top: 2px; }
+  .app-pill {
+    font-size: 9.5px; font-weight: 800; letter-spacing: 0.3px; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 3px; flex-shrink: 0; white-space: nowrap;
+  }
+  .app-pill.approved { background: #dff6dd; color: #1a7f37; }
+  .app-pill.prohibited { background: #fde7e9; color: #c0392b; }
+
+  /* ===== permission chips ===== */
+  .perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+  .perm-chip { border: 1px solid #8a8886; border-radius: 6px; padding: 8px 10px; }
+  .perm-chip.on { background: var(--sign-yellow); border-color: var(--asphalt); }
+  .perm-chip b { display: block; font-size: 11.5px; font-weight: 700; color: #201f1f; }
+  .perm-chip span { font-size: 9.5px; color: #616161; }
+
+  /* ===== shared document / form modal ===== */
+  .doc-modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(10,10,7,.6);
+    z-index: 100; align-items: center; justify-content: center; padding: 20px;
+  }
+  .doc-modal-backdrop.open { display: flex; }
+  .doc-modal {
+    width: min(520px, 100%); max-height: 86vh; background: #fff; border-radius: 10px;
+    display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.4);
+  }
+  .doc-modal-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 16px 20px 12px; border-bottom: 1px solid #e5e1d0; background: var(--cream);
+  }
+  .doc-modal-eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .5px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .doc-modal-head h3 { font-size: 17px; font-weight: 700; color: var(--asphalt); }
+  .doc-modal-close {
+    width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--asphalt);
+    background: #fff; cursor: pointer; font-size: 13px; flex-shrink: 0;
+  }
+  .doc-modal-meta {
+    font-size: 11px; color: #616061; padding: 10px 20px; border-bottom: 1px solid #eee;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .doc-modal-body { padding: 16px 20px; overflow-y: auto; }
+  .doc-modal-body p { font-size: 13px; line-height: 1.6; color: #3a3626; }
+  .doc-modal-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 14px 20px; border-top: 1px solid #eee; background: #fafafa;
+  }
+  .doc-modal-status { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .doc-modal-status.agreed { color: #1a7f37; }
+
+  .add-app-field { margin-bottom: 12px; }
+  .add-app-field label {
+    display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .3px;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 4px;
+  }
+  .add-app-field input, .add-app-field select {
+    width: 100%; font-family: inherit; font-size: 13.5px; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid #8a8886; background: #fff; color: #201f1f;
+  }
+
+  /* ===== traffic-light icon — used wherever traffic-light colours are referenced ===== */
+  .tl-icon {
+    display: inline-flex; flex-direction: column; gap: 2px; flex-shrink: 0;
+    background: var(--asphalt); border-radius: 4px; padding: 3px; vertical-align: middle;
+  }
+  .tl-icon .tl-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.18); display: block; }
+  .tl-icon .tl-dot.on.r { background: var(--signal-red); box-shadow: 0 0 5px 1px rgba(226,58,46,.85); }
+  .tl-icon .tl-dot.on.a { background: #f2b301; box-shadow: 0 0 5px 1px rgba(242,179,1,.85); }
+  .tl-icon .tl-dot.on.g { background: var(--signal-green); box-shadow: 0 0 5px 1px rgba(46,200,102,.85); }
+  .tl-icon.lg { padding: 4px; gap: 3px; }
+  .tl-icon.lg .tl-dot { width: 9px; height: 9px; }
+
+  /* ===== light picker — choose which Traffic Light Check colours to send ===== */
+  .light-picker { margin: 14px 0 4px; border: 1px solid #e1e1e1; border-radius: 8px; padding: 10px 12px; }
+  .light-picker-label {
+    font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase;
+    color: #616161; margin-bottom: 6px;
+  }
+  .light-check { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; font-size: 13px; font-weight: 600; color: #201f1f; cursor: pointer; }
+  .light-check + .light-check { border-top: 1px solid #f0f0f0; }
+  .light-check input { width: 15px; height: 15px; accent-color: var(--teams-purple); cursor: pointer; margin-top: 3px; flex-shrink: 0; }
+  .light-check .tl-icon { margin-top: 1px; }
+  .light-check-text { display: block; }
+  .light-check-text b { display: block; font-size: 13px; }
+  .light-check-desc { display: block; font-size: 11.5px; font-weight: 400; color: #616161; margin-top: 2px; line-height: 1.4; }
+  .light-picker-warning { display: none; font-size: 11.5px; font-weight: 700; color: #c0392b; margin-top: 4px; }
+  .light-picker-warning.show { display: block; }
+
+  /* ===== schedule controls in the send-card modal footer ===== */
+  .doc-modal-foot.stacked { flex-direction: column; align-items: stretch; gap: 10px; }
+  .schedule-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12.5px; font-weight: 600; color: #201f1f; }
+  .schedule-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; font-weight: 600; }
+  .schedule-row input[type="radio"] { accent-color: var(--teams-purple); cursor: pointer; }
+  .sched-datetime {
+    font-family: inherit; font-size: 12.5px; padding: 5px 8px; border-radius: 5px;
+    border: 1px solid #8a8886; background: #fff; color: #201f1f;
+  }
+  .sched-datetime:disabled { opacity: .45; }
+  .doc-modal-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+  .sent-row.scheduled .sr-status { color: #8f6a00; }
+  .send-sent-badge.scheduled { color: #8f6a00; }
+
+  /* ===== data-sensitivity dot — same traffic-light colour language, used inline in app meta lines ===== */
+  .data-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .data-dot.g { background: var(--signal-green); }
+  .data-dot.a { background: #f2b301; }
+  .data-dot.r { background: var(--signal-red); }
+
+  .data-allowed-row { display: flex; align-items: center; gap: 10px; }
+  .data-allowed-row select { flex: 1; }
+</style>
+</head>
+<body>
+
+  <div class="card-tabs">
+    <button class="tab-btn active" data-target="card-home">🏠 Home</button>
+    <button class="tab-btn" data-target="card-admin">🧑‍💼 Add Admin</button>
+    <button class="tab-btn" data-target="card-aup">📄 Policy</button>
+    <button class="tab-btn" data-target="card-send">📬 Cards</button>
+    <button class="tab-btn" data-target="card-ai">🤖 AI Apps</button>
+    <button class="tab-btn" data-target="card-it">💻 IT Apps</button>
+  </div>
+
+  <!-- ================= HOME — INTRO ================= -->
+  <div class="card-section active" id="card-home">
+    <div class="section-label">Shown the moment an admin opens your Admin Center <span>Depot Overview</span></div>
+    <div class="card">
+      <div class="card-body">
+        <div class="app-line"><span class="app-icon"><img src="aidl-logo.png" alt="AIDL" /></span><span class="bot-name">AIDL</span><span class="org-tag">for Northwind Logistics</span></div>
+        <div class="title-block">👋 Welcome to your Admin Center, Priya</div>
+        <div class="body-text">You provision the seats, set the house rules, and keep everything running smoothly. Your team does the driving.</div>
+
+        <div class="stat-strip">
+          <div class="stat-mini"><div class="k">Seats Purchased</div><div class="v">50</div><div class="d">renews 01 Mar</div></div>
+          <div class="stat-mini"><div class="k">Licences Issued</div><div class="v">18</div><div class="d">56% of enrolled</div></div>
+          <div class="stat-mini warn"><div class="k">AUP Unsigned</div><div class="v">6</div><div class="d">blocks ethics gate</div></div>
+        </div>
+
+        <div class="stat-strip-label">Governance Snapshot</div>
+        <div class="stat-strip cols-4">
+          <div class="stat-mini"><div class="k">Total Admins</div><div class="v">2</div><div class="d">of 3 seats</div></div>
+          <div class="stat-mini"><div class="k">Total Approved</div><div class="v">9</div><div class="d">of 12 apps</div></div>
+          <div class="stat-mini"><div class="k">AI Applications</div><div class="v">6</div><div class="d">in registry</div></div>
+          <div class="stat-mini"><div class="k">IT Applications</div><div class="v">6</div><div class="d">in registry</div></div>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="teams-btn">⬇ Export Coverage CSV</button>
+      </div>
+      <div class="meta-line">3 of 4 rollout steps done · Northwind Logistics</div>
+      <div class="next-hint">→ Next: bring in another admin to help run this</div>
+    </div>
+  </div>
+
+  <!-- ================= ADD ANOTHER ADMIN ================= -->
+  <div class="card-section" id="card-admin">
+    <div class="section-label">Optional, whenever you need a hand <span>Admin Team · Add more admins</span></div>
+    <div class="card">
+      <div class="card-body">
+        <div class="app-line"><span class="app-icon"><img src="aidl-logo.png" alt="AIDL" /></span><span class="bot-name">AIDL</span><span class="org-tag">for Northwind Logistics</span></div>
+        <div class="title-block">🧑‍💼 Add another admin</div>
+        <div class="body-text">Give a colleague access to your Admin Center — choose exactly what they can see and do.</div>
+
+        <div class="stat-strip-label">Permissions</div>
+        <div class="perm-grid">
+          <div class="perm-chip on"><b>Approve Apps</b><span>Governance</span></div>
+          <div class="perm-chip"><b>Access Cards</b><span>Reference cards</span></div>
+          <div class="perm-chip"><b>Create Card</b><span>Add new cards</span></div>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="teams-btn positive">Send Admin Invite</button>
+      </div>
+      <div class="meta-line">2 of 3 admin seats used · name@northwind.co</div>
+      <div class="next-hint">→ Next: upload your Acceptable Use Policy</div>
+    </div>
+  </div>
+
+  <!-- ================= ACCEPTABLE USE POLICY ================= -->
+  <div class="card-section" id="card-aup">
+    <div class="section-label">Governance, set once and re-publish anytime <span>Acceptable Use · Upload</span></div>
+    <div class="card">
+      <div class="card-body">
+        <div class="app-line"><span class="app-icon"><img src="aidl-logo.png" alt="AIDL" /></span><span class="bot-name">AIDL</span><span class="org-tag">for Northwind Logistics</span></div>
+        <div class="title-block">📄 Acceptable Use Policy</div>
+        <div class="body-text">The AUP policy will be uploaded by any client and this can and will be different. We need to have a system which reads this policy and displays it.</div>
+
+        <div class="key-box">
+          <div class="key-label">Current Live Policy <span class="app-pill approved">Live</span></div>
+          <div class="key-meta">
+            <div><span>FILE</span><b>northwind-aup-v3.1.pdf</b></div>
+            <div><span>VERSION</span><b>v3.1</b></div>
+            <div><span>EFFECTIVE</span><b>01 Aug 2026</b></div>
+            <div><span>UPLOADED BY</span><b>Priya Raman</b></div>
+          </div>
+        </div>
+
+        <div class="aup-drop">📎 Drop your policy PDF here — or click to browse</div>
+      </div>
+      <div class="actions-row">
+        <button class="teams-btn positive">Publish New Version</button>
+        <button class="teams-btn">View Current Policy</button>
+      </div>
+      <div class="meta-line">26 of 32 team members signed · 6 unsigned</div>
+      <div class="next-hint">→ Next: send your team the reference cards they'll need</div>
+    </div>
+  </div>
+
+  <!-- ================= SEND CARDS (5 in 1) ================= -->
+  <div class="card-section" id="card-send">
+    <div class="section-label">Send once your first team members are enrolled <span>Send Cards · 10 in 1</span></div>
+    <div class="card">
+      <div class="card-body">
+        <div class="app-line"><span class="app-icon"><img src="aidl-logo.png" alt="AIDL" /></span><span class="bot-name">AIDL</span><span class="org-tag">for Northwind Logistics</span></div>
+        <div class="title-block">📬 Send Cards to your team</div>
+        <div class="body-text">Pick the reference cards your team needs at the wheel — view one, request it, then send it into the channel where they already work.</div>
+
+        <div class="quota-box">
+          <div class="quota-label">Monthly Card Quota</div>
+          <div class="quota-num"><span id="quotaVal">0</span> of <span id="quotaMax">10</span> cards requested this month</div>
+          <div class="quota-bar"><div class="quota-fill" id="quotaFill"></div></div>
+          <div class="quota-avail">📅 All cards available 01 Aug 2026 – 30 Sep 2026</div>
+        </div>
+
+        <div class="send-item">
+          <span class="send-icon">📄</span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Acceptable Use v3.1</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('aup')">View</button>
+                <span class="send-sent-badge" id="sentBadge-aup">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Policy · Signature Required</div>
+            <div class="send-desc">Your live AUP with the summary your team actually reads.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-aup">$29 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.1</b> (39)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="send-icon"><span class="tl-icon lg"><span class="tl-dot on r"></span><span class="tl-dot on a"></span><span class="tl-dot on g"></span></span></span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Traffic Light Check</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('traffic')">View</button>
+                <span class="send-sent-badge" id="sentBadge-traffic">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Decision Aid</div>
+            <div class="send-desc">Green, amber or red before you hand a task to AI. The three-second gut check.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-traffic">$49 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.8</b> (52)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="send-icon">🧩</span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Approved Apps Registry</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('apps')">View</button>
+                <span class="send-sent-badge" id="sentBadge-apps">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Registry · 12 Entries</div>
+            <div class="send-desc">Which AI and IT tools are approved or prohibited, and for what data.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-apps">$59 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.4</b> (27)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="send-icon">⚖️</span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Data Ethics Gate</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('ethics')">View</button>
+                <span class="send-sent-badge" id="sentBadge-ethics">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Gate Briefing</div>
+            <div class="send-desc">What blocks a licence: unsigned policy, unlogged agents, unreviewed output.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-ethics">$39 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.6</b> (31)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="send-icon">🏛️</span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Mistake Museum</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('museum')">View</button>
+                <span class="send-sent-badge" id="sentBadge-museum">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Worked Examples</div>
+            <div class="send-desc">Real failures from the team, de-identified, with what should have happened.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-museum">$79 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.9</b> (44)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="icon-tile"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v4h4"></path><line x1="8" y1="12.3" x2="16" y2="12.3"></line><line x1="8" y1="15.7" x2="16" y2="15.7"></line><line x1="8" y1="19" x2="13" y2="19"></line></svg></span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Data Classification Cheat Sheet</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('classification')">View</button>
+                <span class="send-sent-badge" id="sentBadge-classification">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Reference Card</div>
+            <div class="send-desc">Four data classes, four different answers about what you may submit.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-classification">$25 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.5</b> (19)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="icon-tile"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="1.5"></rect><rect x="9" y="2.3" width="6" height="3" rx="1"></rect><polyline points="8.3 12.5 10.3 14.5 15.2 10"></polyline></svg></span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Redaction Before Submission</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('redaction')">View</button>
+                <span class="send-sent-badge" id="sentBadge-redaction">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Checklist</div>
+            <div class="send-desc">Before a document goes into a chat window, strip what the model doesn't need.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-redaction">$35 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.3</b> (15)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="icon-tile"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="20.5" x2="5" y2="9.5"></line><circle cx="5" cy="9" r="1.3" fill="#14140F" stroke="none"></circle><line x1="6.4" y1="7.6" x2="19.5" y2="3.2"></line><line x1="8.9" y1="7.7" x2="10.2" y2="4.1"></line><line x1="12.2" y1="6.5" x2="13.5" y2="2.9"></line><line x1="15.5" y1="5.3" x2="16.8" y2="1.7"></line></svg></span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Customer Data in Prompts</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('customerdata')">View</button>
+                <span class="send-sent-badge" id="sentBadge-customerdata">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Gate Briefing</div>
+            <div class="send-desc">Customer data in a prompt is where the conversation stops.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-customerdata">$69 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.7</b> (22)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="icon-tile"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="1.5"></rect><rect x="9" y="2.3" width="6" height="3" rx="1"></rect><polyline points="8.3 12.5 10.3 14.5 15.2 10"></polyline></svg></span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">The Verification Pass</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('verification')">View</button>
+                <span class="send-sent-badge" id="sentBadge-verification">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Checklist</div>
+            <div class="send-desc">Three checks before AI output leaves your desk. Every time.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-verification">$45 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.4</b> (17)</span>
+            </div>
+          </div>
+        </div>
+        <div class="send-item">
+          <span class="icon-tile"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.6" stroke-linecap="round"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5" stroke-dasharray="3 2.3"></rect><circle cx="8" cy="8" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="12" cy="8" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="16" cy="8" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="8" cy="12" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="12" cy="12" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="16" cy="12" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="8" cy="16" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="12" cy="16" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="16" cy="16" r="0.9" fill="#14140F" stroke="none"></circle></svg></span>
+          <div class="send-item-body">
+            <div class="send-item-head">
+              <div class="send-title">Reporting an AI Mistake</div>
+              <div class="send-item-action">
+                <button class="teams-btn sm" onclick="openCardDoc('reporting')">View</button>
+                <span class="send-sent-badge" id="sentBadge-reporting">✓ Sent</span>
+              </div>
+            </div>
+            <div class="send-kicker">Template</div>
+            <div class="send-desc">When something goes wrong, the first hour matters more than the blame.</div>
+            <div class="send-meta-row">
+              <span class="send-price" id="sendPrice-reporting">$19 · one-time</span>
+              <span class="send-rating"><span class="star">★</span> <b>4.2</b> (11)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="stat-strip-label">Need something that's not listed?</div>
+        <div class="body-text" style="margin-top: 0;">Request a brand-new reference card for your team — we'll scope it and follow up with pricing.</div>
+        <div id="reqCardList"></div>
+      </div>
+      <div class="actions-row">
+        <button class="teams-btn" onclick="openReqCard()">＋ Request a New Card</button>
+      </div>
+      <div class="next-hint">→ Next: set which AI tools your team is allowed to use</div>
+    </div>
+  </div>
+
+  <!-- ================= APPROVED APPS: AI ================= -->
+  <div class="card-section" id="card-ai">
+    <div class="section-label">Governance, set anytime · click a row to view its guidance <span>Approved Applications · AI</span></div>
+    <div class="card">
+      <div class="card-body">
+        <div class="app-line"><span class="app-icon"><img src="aidl-logo.png" alt="AIDL" /></span><span class="bot-name">AIDL</span><span class="org-tag">for Northwind Logistics</span></div>
+        <div class="title-block">🤖 AI Applications</div>
+        <div class="body-text">The AI tools your team is allowed to use.</div>
+
+        <div id="aiAppList">
+          <div class="app-row" onclick="openAppDoc('Claude Enterprise', 'Assistant · Agents · Internal + Confidential · Platform Eng', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Claude Enterprise</div><div class="app-meta">Assistant · Agents · Internal + Confidential · Platform Eng</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('GitHub Copilot', 'Code assistant · Internal · Platform Eng', 'Approved')">
+            <div class="app-name-col"><div class="app-name">GitHub Copilot</div><div class="app-meta">Code assistant · Internal · Platform Eng</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Notion AI', 'Docs summarisation · Internal · Ops', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Notion AI</div><div class="app-meta">Docs summarisation · Internal · Ops</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Otter.ai', 'Meeting transcription · Public only · Ops', 'Prohibited')">
+            <div class="app-name-col"><div class="app-name">Otter.ai</div><div class="app-meta">Meeting transcription · Public only · Ops</div></div>
+            <span class="app-pill prohibited">Prohibited</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Midjourney', 'Image generation · Public only · Brand', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Midjourney</div><div class="app-meta">Image generation · Public only · Brand</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Consumer free-tier chatbots', 'Assistant · None · InfoSec', 'Prohibited')">
+            <div class="app-name-col"><div class="app-name">Consumer free-tier chatbots</div><div class="app-meta">Assistant · None · InfoSec</div></div>
+            <span class="app-pill prohibited">Prohibited</span>
+          </div>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="teams-btn" onclick="openAddApp('ai')">＋ Add AI Application</button>
+      </div>
+      <div class="next-hint">→ Next: do the same for your IT systems</div>
+    </div>
+  </div>
+
+  <!-- ================= APPROVED APPS: IT ================= -->
+  <div class="card-section" id="card-it">
+    <div class="section-label">Same tab, second list · click a row to view its guidance <span>Approved Applications · IT</span></div>
+    <div class="card">
+      <div class="card-body">
+        <div class="app-line"><span class="app-icon"><img src="aidl-logo.png" alt="AIDL" /></span><span class="bot-name">AIDL</span><span class="org-tag">for Northwind Logistics</span></div>
+        <div class="title-block">💻 IT Applications</div>
+        <div class="body-text">The IT systems your team is allowed to use alongside AI.</div>
+
+        <div id="itAppList">
+          <div class="app-row" onclick="openAppDoc('Okta SSO', 'Identity · Internal + Confidential · IT', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Okta SSO</div><div class="app-meta">Identity · Internal + Confidential · IT</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Google Workspace', 'Productivity · Internal + Confidential · IT', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Google Workspace</div><div class="app-meta">Productivity · Internal + Confidential · IT</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Slack (Enterprise Grid)', 'Messaging · Internal · IT', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Slack (Enterprise Grid)</div><div class="app-meta">Messaging · Internal · IT</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Jira + Confluence', 'Delivery · Internal · PMO', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Jira + Confluence</div><div class="app-meta">Delivery · Internal · PMO</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Snowflake', 'Data warehouse · Internal + Confidential · Data', 'Approved')">
+            <div class="app-name-col"><div class="app-name">Snowflake</div><div class="app-meta">Data warehouse · Internal + Confidential · Data</div></div>
+            <span class="app-pill approved">Approved</span>
+          </div>
+          <div class="app-row" onclick="openAppDoc('Personal cloud drives', 'Storage · None · InfoSec', 'Prohibited')">
+            <div class="app-name-col"><div class="app-name">Personal cloud drives</div><div class="app-meta">Storage · None · InfoSec</div></div>
+            <span class="app-pill prohibited">Prohibited</span>
+          </div>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="teams-btn" onclick="openAddApp('it')">＋ Add IT Application</button>
+      </div>
+      <div class="next-hint done">✓ That's the full admin setup flow</div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: individual send-card document ================= -->
+  <div class="doc-modal-backdrop" id="cardDocBackdrop">
+    <div class="doc-modal">
+      <div class="doc-modal-head">
+        <div>
+          <div class="doc-modal-eyebrow" id="cardDocKicker">Decision Aid</div>
+          <h3 id="cardDocTitle">🚦 Traffic Light Check</h3>
+        </div>
+        <button class="doc-modal-close" onclick="closeCardDoc()" aria-label="Close">✕</button>
+      </div>
+      <div class="doc-modal-body" id="cardDocBody"></div>
+      <div class="doc-modal-foot stacked">
+        <div class="doc-modal-foot-row" id="cardRequestRow">
+          <span class="doc-modal-status" id="cardPriceLabel">$49 · one-time</span>
+          <button class="teams-btn positive" id="cardRequestBtn" onclick="requestCurrentCard()">Request Card</button>
+        </div>
+        <div class="schedule-row">
+          <label><input type="radio" name="sendWhen" value="now" checked> Send now</label>
+          <label><input type="radio" name="sendWhen" value="later"> Schedule for later</label>
+          <input type="datetime-local" id="cardScheduleAt" class="sched-datetime" disabled />
+        </div>
+        <div class="doc-modal-foot-row">
+          <span class="doc-modal-status" id="cardDocStatus">Not sent</span>
+          <button class="teams-btn positive" id="cardSendBtn" onclick="sendCurrentCard()">Send Card</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: app usage document (for AI + IT rows) ================= -->
+  <div class="doc-modal-backdrop" id="appDocBackdrop">
+    <div class="doc-modal">
+      <div class="doc-modal-head">
+        <div>
+          <div class="doc-modal-eyebrow" id="appDocEyebrow">Application</div>
+          <h3 id="appDocTitle">Claude Enterprise</h3>
+        </div>
+        <button class="doc-modal-close" onclick="closeAppDoc()" aria-label="Close">✕</button>
+      </div>
+      <div class="doc-modal-meta" id="appDocMeta">Assistant · Internal · Platform Eng</div>
+      <div class="doc-modal-body" id="appDocBody"></div>
+      <div class="doc-modal-foot">
+        <span class="doc-modal-status" id="appDocStatus">Approved</span>
+        <button class="teams-btn" onclick="closeAppDoc()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: add AI/IT application (mirrors the Approved Apps tab in Fleet Office) ================= -->
+  <div class="doc-modal-backdrop" id="addAppBackdrop">
+    <div class="doc-modal">
+      <div class="doc-modal-head">
+        <div>
+          <div class="doc-modal-eyebrow">Governance · New Entry</div>
+          <h3 id="addAppTitle">Add AI Application</h3>
+        </div>
+        <button class="doc-modal-close" onclick="closeAddApp()" aria-label="Close">✕</button>
+      </div>
+      <div class="doc-modal-body">
+        <div class="add-app-field"><label>Application Name</label><input type="text" id="addAppName" placeholder="e.g. Claude Enterprise" /></div>
+        <div class="add-app-field"><label>Category</label><select id="addAppCat"></select></div>
+        <div class="add-app-field"><label>Data Allowed</label>
+          <div class="data-allowed-row">
+            <select id="addAppData" onchange="updateDataPreview()">
+              <option value="Public only">🟢 Public only</option>
+              <option value="Internal">🟡 Internal</option>
+              <option value="Internal + Confidential">🔴 Internal + Confidential</option>
+              <option value="None">🔴 None</option>
+            </select>
+            <span class="tl-icon" id="dataPreviewIcon"><span class="tl-dot r"></span><span class="tl-dot a"></span><span class="tl-dot g"></span></span>
+          </div>
+        </div>
+        <div class="add-app-field"><label>Status</label>
+          <select id="addAppStatus">
+            <option>Approved</option>
+            <option>Prohibited</option>
+          </select>
+        </div>
+      </div>
+      <div class="doc-modal-foot">
+        <span class="doc-modal-status">Status drives whether your team can use this application</span>
+        <button class="teams-btn positive" onclick="submitAddApp()">＋ Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: request a new card that isn't in the catalog yet ================= -->
+  <div class="doc-modal-backdrop" id="reqCardBackdrop">
+    <div class="doc-modal">
+      <div class="doc-modal-head">
+        <div>
+          <div class="doc-modal-eyebrow">Custom Request</div>
+          <h3>Request a New Card</h3>
+        </div>
+        <button class="doc-modal-close" onclick="closeReqCard()" aria-label="Close">✕</button>
+      </div>
+      <div class="doc-modal-body">
+        <div class="add-app-field"><label>Card Name</label><input type="text" id="reqCardName" placeholder="e.g. Vendor Risk Checklist" /></div>
+        <div class="add-app-field"><label>What should it cover?</label><input type="text" id="reqCardDesc" placeholder="Brief description of the topic or guidance needed" /></div>
+        <div class="add-app-field"><label>Priority</label>
+          <select id="reqCardPriority">
+            <option>Standard</option>
+            <option>Urgent</option>
+          </select>
+        </div>
+      </div>
+      <div class="doc-modal-foot">
+        <span class="doc-modal-status">Counts toward your monthly quota · pricing scoped after review</span>
+        <button class="teams-btn positive" onclick="submitReqCard()">Submit Request</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var tabButtons = document.querySelectorAll('.tab-btn');
+    var cardSections = document.querySelectorAll('.card-section');
+
+    function showCard(id) {
+      cardSections.forEach(function (el) { el.classList.toggle('active', el.id === id); });
+      tabButtons.forEach(function (btn) { btn.classList.toggle('active', btn.dataset.target === id); });
+    }
+
+    tabButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () { showCard(btn.dataset.target); });
+    });
+
+    /* ---- send-cards documents + sent tracker ---- */
+    var TL_ICON_ALL = '<span class="tl-icon"><span class="tl-dot on r"></span><span class="tl-dot on a"></span><span class="tl-dot on g"></span></span>';
+    var ICON_GATE = '<span class="icon-tile sm"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="20.5" x2="5" y2="9.5"></line><circle cx="5" cy="9" r="1.3" fill="#14140F" stroke="none"></circle><line x1="6.4" y1="7.6" x2="19.5" y2="3.2"></line><line x1="8.9" y1="7.7" x2="10.2" y2="4.1"></line><line x1="12.2" y1="6.5" x2="13.5" y2="2.9"></line><line x1="15.5" y1="5.3" x2="16.8" y2="1.7"></line></svg></span>';
+    var ICON_DOC = '<span class="icon-tile sm"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v4h4"></path><line x1="8" y1="12.3" x2="16" y2="12.3"></line><line x1="8" y1="15.7" x2="16" y2="15.7"></line><line x1="8" y1="19" x2="13" y2="19"></line></svg></span>';
+    var ICON_CHECKLIST = '<span class="icon-tile sm"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="1.5"></rect><rect x="9" y="2.3" width="6" height="3" rx="1"></rect><polyline points="8.3 12.5 10.3 14.5 15.2 10"></polyline></svg></span>';
+    var ICON_TEMPLATE = '<span class="icon-tile sm"><svg viewBox="0 0 24 24" fill="none" stroke="#14140F" stroke-width="1.6" stroke-linecap="round"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5" stroke-dasharray="3 2.3"></rect><circle cx="8" cy="8" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="12" cy="8" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="16" cy="8" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="8" cy="12" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="12" cy="12" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="16" cy="12" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="8" cy="16" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="12" cy="16" r="0.9" fill="#14140F" stroke="none"></circle><circle cx="16" cy="16" r="0.9" fill="#14140F" stroke="none"></circle></svg></span>';
+    var CARD_DOCS = {
+      traffic: { icon: TL_ICON_ALL, kicker: 'Decision Aid', title: 'Traffic Light Check', price: '$49',
+        body: '<p>Green, amber or red before you hand a task to AI — the three-second gut check every team member runs before pasting anything into a tool. Green is public, non-personal data. Amber needs a placeholder or a strip-down first. Red never goes in, no exceptions.</p>' +
+          '<div class="light-picker">' +
+            '<div class="light-picker-label">Choose which lights to send — and what each one tells your team</div>' +
+            '<label class="light-check"><input type="checkbox" class="light-cb" value="green" checked><span class="tl-icon"><span class="tl-dot r"></span><span class="tl-dot a"></span><span class="tl-dot on g"></span></span><span class="light-check-text"><b>Green — Go</b><span class="light-check-desc">Public, non-personal prompts — general questions, public articles, story or recipe ideas. Selecting this tells your team: any tool is fine, just check facts after.</span></span></label>' +
+            '<label class="light-check"><input type="checkbox" class="light-cb" value="amber" checked><span class="tl-icon"><span class="tl-dot r"></span><span class="tl-dot on a"></span><span class="tl-dot g"></span></span><span class="light-check-text"><b>Amber — Caution</b><span class="light-check-desc">A little personal — first name, city, rough plans. Selecting this tells your team: use a placeholder or strip it out first.</span></span></label>' +
+            '<label class="light-check"><input type="checkbox" class="light-cb" value="red" checked><span class="tl-icon"><span class="tl-dot on r"></span><span class="tl-dot a"></span><span class="tl-dot g"></span></span><span class="light-check-text"><b>Red — Stop</b><span class="light-check-desc">Private, keep it out — passwords, bank or ID numbers, home address, other people\'s data. Selecting this tells your team: never paste it, anonymise and retry.</span></span></label>' +
+            '<div class="light-picker-warning" id="lightPickerWarning">Select at least one light to send.</div>' +
+          '</div>' },
+      aup: { icon: '📄', kicker: 'Policy · Signature Required', title: 'Acceptable Use v3.1', price: '$29',
+        body: '<p>Your live AUP (northwind-aup-v3.1.pdf, effective 01 Aug 2026) with the plain-language summary your team actually reads. Signing this is required before the Data Ethics Gate unlocks a licence upgrade.</p>' },
+      apps: { icon: '🧩', kicker: 'Registry · 12 Entries', title: 'Approved Apps Registry', price: '$59',
+        body: '<p>The full list of AI and IT tools your org has marked Approved or Prohibited, and what class of data each one is allowed to touch. Pulled live from the Approved Apps tab.</p>' },
+      ethics: { icon: '⚖️', kicker: 'Gate Briefing', title: 'Data Ethics Gate', price: '$39',
+        body: '<p>What blocks a licence upgrade: an unsigned Acceptable Use Policy, an unlogged AI agent run, or AI output that went out without a human review. Clearing all three re-opens the gate.</p>' },
+      museum: { icon: '🏛️', kicker: 'Worked Examples', title: 'Mistake Museum', price: '$79',
+        body: '<p>Real, de-identified failures from across the fleet — what went wrong, and what should have happened instead. Updated as new incidents are reviewed and cleared for sharing.</p>' },
+      classification: { icon: ICON_DOC, kicker: 'Reference Card', title: 'Data Classification Cheat Sheet', price: '$25',
+        body: '<p>Four data classes, four different answers about what you may submit. Public: anything goes. Internal: approved tools only. Confidential: approved enterprise tools, no training, logged. Restricted: not in a prompt at all, in any tool, for any reason.</p>' +
+          '<p><b>Do this:</b> classify the data before you classify the task. Keep the card visible.</p>' },
+      redaction: { icon: ICON_CHECKLIST, kicker: 'Checklist', title: 'Redaction Before Submission', price: '$35',
+        body: '<p>Before a document goes into a chat window, strip what the model doesn\'t need. Names, account numbers, addresses, internal system identifiers, pricing, and anything in the headers, footers and comments you forgot were there. The tracked changes usually contain more than the document.</p>' +
+          '<p><b>Do this:</b> save a redacted copy and upload that. Never the original.</p>' },
+      customerdata: { icon: ICON_GATE, kicker: 'Gate Briefing', title: 'Customer Data in Prompts', price: '$69',
+        body: '<p>Customer data in a prompt is where the conversation stops. It doesn\'t matter that the tool is approved, the task is small, or you\'ll delete the chat afterwards. Identifiable customer information does not go into a general-purpose AI tool without a documented, approved pathway.</p>' +
+          '<p><b>Do this:</b> if you need to work with customer data, request the approved route. Don\'t improvise one.</p>' },
+      verification: { icon: ICON_CHECKLIST, kicker: 'Checklist', title: 'The Verification Pass', price: '$45',
+        body: '<p>Three checks before AI output leaves your desk. Every time. One: is every factual claim and number verified against a source you opened? Two: is anything here confidential that shouldn\'t be? Three: would you defend this if challenged in detail?</p>' +
+          '<p><b>Do this:</b> run all three. If you can\'t do the first, you can\'t send it.</p>' },
+      reporting: { icon: ICON_TEMPLATE, kicker: 'Template', title: 'Reporting an AI Mistake', price: '$19',
+        body: '<p>When something goes wrong, the first hour matters more than the blame. Tell us what you asked, what came back, what you did with it, and who might be affected. We\'re looking for the pattern, not the culprit. Fast reporting has never cost anyone here.</p>' +
+          '<p><b>Do this:</b> use the report template. Send it before you\'ve worked out the whole story.</p>' }
+    };
+    var CARD_IDS = ['aup', 'traffic', 'apps', 'ethics', 'museum', 'classification', 'redaction', 'customerdata', 'verification', 'reporting'];
+    var CARD_STATE = {};
+    CARD_IDS.forEach(function (id) {
+      CARD_STATE[id] = { status: 'not_sent', when: null, lights: ['green', 'amber', 'red'], purchased: false };
+    });
+    var QUOTA_MAX = 10;
+    var quotaUsed = 0;
+
+    function updateQuota() {
+      document.getElementById('quotaVal').textContent = quotaUsed;
+      document.getElementById('quotaMax').textContent = QUOTA_MAX;
+      document.getElementById('quotaFill').style.width = Math.min(100, (quotaUsed / QUOTA_MAX) * 100) + '%';
+    }
+    updateQuota();
+    var currentCardId = null;
+
+    var LIGHT_DOT = { green: '🟢', amber: '🟡', red: '🔴' };
+    function lightsAbbrev(lights) {
+      return lights.map(function (c) { return LIGHT_DOT[c]; }).join('');
+    }
+
+    function statusLabel(state) {
+      if (state.status === 'sent') {
+        return '✓ Sent' + (state.lights ? ' · ' + lightsAbbrev(state.lights) : '');
+      }
+      if (state.status === 'scheduled') {
+        return '🕒 Scheduled — ' + state.when + (state.lights ? ' · ' + lightsAbbrev(state.lights) : '');
+      }
+      return 'Not sent';
+    }
+
+    function formatSchedule(value) {
+      var d = new Date(value);
+      if (isNaN(d.getTime())) return value;
+      return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+
+    function updateSendButtonLabel() {
+      var checkedRadio = document.querySelector('input[name="sendWhen"]:checked');
+      var later = checkedRadio && checkedRadio.value === 'later';
+      document.getElementById('cardScheduleAt').disabled = !later;
+      document.getElementById('cardSendBtn').textContent = later ? 'Schedule Card' : 'Send Card';
+    }
+
+    document.querySelectorAll('input[name="sendWhen"]').forEach(function (r) {
+      r.addEventListener('change', updateSendButtonLabel);
+    });
+    document.getElementById('cardDocBody').addEventListener('change', function (e) {
+      if (e.target.classList.contains('light-cb')) {
+        var warn = document.getElementById('lightPickerWarning');
+        if (warn) warn.classList.remove('show');
+      }
+    });
+
+    function renderCardFoot(state) {
+      var purchased = state.purchased;
+      var alreadySent = state.status === 'sent';
+      document.getElementById('cardRequestRow').style.display = purchased ? 'none' : '';
+      document.querySelector('.schedule-row').style.display = (purchased && !alreadySent) ? '' : 'none';
+      document.getElementById('cardSendBtn').style.display = (purchased && !alreadySent) ? '' : 'none';
+      document.getElementById('cardDocStatus').closest('.doc-modal-foot-row').style.display = purchased ? '' : 'none';
+    }
+
+    function openCardDoc(id) {
+      var d = CARD_DOCS[id];
+      currentCardId = id;
+      document.getElementById('cardDocKicker').textContent = d.kicker;
+      document.getElementById('cardDocTitle').innerHTML = d.icon + ' ' + d.title;
+      document.getElementById('cardDocBody').innerHTML = d.body;
+      document.getElementById('cardPriceLabel').textContent = d.price + ' · one-time';
+
+      var statusEl = document.getElementById('cardDocStatus');
+      var state = CARD_STATE[id];
+      statusEl.textContent = statusLabel(state);
+      statusEl.classList.toggle('agreed', state.status === 'sent');
+
+      var alreadySent = state.status === 'sent';
+      if (state.purchased && !alreadySent) {
+        document.querySelector('input[name="sendWhen"][value="now"]').checked = true;
+        document.getElementById('cardScheduleAt').value = '';
+        updateSendButtonLabel();
+      }
+
+      renderCardFoot(state);
+      document.getElementById('cardDocBackdrop').classList.add('open');
+    }
+
+    function closeCardDoc() {
+      document.getElementById('cardDocBackdrop').classList.remove('open');
+    }
+
+    function requestCurrentCard() {
+      if (!currentCardId) return;
+      var state = CARD_STATE[currentCardId];
+      if (state.purchased) return;
+      state.purchased = true;
+      quotaUsed++;
+      updateQuota();
+
+      var priceBadge = document.getElementById('sendPrice-' + currentCardId);
+      if (priceBadge) {
+        priceBadge.textContent = '✓ Requested';
+        priceBadge.classList.add('requested');
+      }
+
+      document.querySelector('input[name="sendWhen"][value="now"]').checked = true;
+      document.getElementById('cardScheduleAt').value = '';
+      updateSendButtonLabel();
+      renderCardFoot(state);
+    }
+
+    function sendCurrentCard() {
+      if (!currentCardId) return;
+      var state = CARD_STATE[currentCardId];
+
+      if (currentCardId === 'traffic') {
+        var checked = Array.prototype.slice.call(document.querySelectorAll('#cardDocBody .light-cb:checked')).map(function (cb) { return cb.value; });
+        if (checked.length === 0) {
+          var warn = document.getElementById('lightPickerWarning');
+          if (warn) warn.classList.add('show');
+          return;
+        }
+        state.lights = checked;
+      }
+
+      var checkedRadio = document.querySelector('input[name="sendWhen"]:checked');
+      var later = checkedRadio && checkedRadio.value === 'later';
+
+      if (later) {
+        var dtInput = document.getElementById('cardScheduleAt');
+        if (!dtInput.value) { dtInput.focus(); return; }
+        state.status = 'scheduled';
+        state.when = formatSchedule(dtInput.value);
+      } else {
+        state.status = 'sent';
+        state.when = null;
+      }
+
+      var statusEl = document.getElementById('cardDocStatus');
+      statusEl.textContent = statusLabel(state);
+      statusEl.classList.toggle('agreed', state.status === 'sent');
+      updateSentTracker();
+    }
+
+    function updateSentTracker() {
+      CARD_IDS.forEach(function (id) {
+        var state = CARD_STATE[id];
+        var badge = document.getElementById('sentBadge-' + id);
+        if (badge) {
+          badge.textContent = state.status === 'sent' ? '✓ Sent' : (state.status === 'scheduled' ? '🕒 Scheduled' : '');
+          badge.classList.toggle('show', state.status !== 'not_sent');
+          badge.classList.toggle('scheduled', state.status === 'scheduled');
+        }
+      });
+    }
+
+    /* ---- app usage documents ---- */
+    function openAppDoc(name, meta, status) {
+      document.getElementById('appDocEyebrow').textContent = status === 'Approved' ? 'Approved Application' : 'Prohibited Application';
+      document.getElementById('appDocTitle').textContent = name;
+      document.getElementById('appDocMeta').textContent = meta;
+      var statusEl = document.getElementById('appDocStatus');
+      statusEl.textContent = status;
+      statusEl.className = 'doc-modal-status' + (status === 'Approved' ? ' agreed' : '');
+      document.getElementById('appDocBody').innerHTML =
+        '<p>This is a demo usage document for <strong>' + name + '</strong>. In production this shows your organisation\'s guidelines for this tool — what data it can touch, links to internal setup docs, and any conditions attached to using it.</p>';
+      document.getElementById('appDocBackdrop').classList.add('open');
+    }
+
+    function closeAppDoc() {
+      document.getElementById('appDocBackdrop').classList.remove('open');
+    }
+
+    /* ---- add AI/IT application (mirrors Fleet Office's Approved Apps tab) ---- */
+    var addAppMode = 'ai';
+    var AI_APP_CATEGORIES = [
+      'Assistant / Chatbot', 'Coding Assistant', 'Writing & Content', 'Image Generation',
+      'Video Generation', 'Audio / Voice', 'Meeting Transcription', 'Data Analysis',
+      'Research & Search', 'Automation / Agents', 'Translation', 'Customer Support', 'Other'
+    ];
+    var IT_APP_CATEGORIES = [
+      'Identity & Access (SSO)', 'Productivity Suite', 'Messaging & Collaboration', 'Project & Delivery',
+      'Data & Storage', 'CRM', 'HR & Payroll', 'Finance & Billing',
+      'Security & Compliance', 'Cloud Infrastructure', 'Other'
+    ];
+
+    function populateCatOptions(mode) {
+      var select = document.getElementById('addAppCat');
+      var list = mode === 'ai' ? AI_APP_CATEGORIES : IT_APP_CATEGORIES;
+      select.innerHTML = list.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+    }
+
+    var DATA_ALLOWED_COLOR = { 'Public only': 'g', 'Internal': 'a', 'Internal + Confidential': 'r', 'None': 'r' };
+
+    function updateDataPreview() {
+      var color = DATA_ALLOWED_COLOR[document.getElementById('addAppData').value] || 'a';
+      var icon = document.getElementById('dataPreviewIcon');
+      icon.querySelectorAll('.tl-dot').forEach(function (dot) { dot.classList.remove('on'); });
+      icon.querySelector('.tl-dot.' + color).classList.add('on');
+    }
+
+    function colorizeAppMeta(el) {
+      var parts = el.textContent.split(' · ');
+      el.innerHTML = parts.map(function (part) {
+        var color = DATA_ALLOWED_COLOR[part];
+        return color ? '<span class="data-dot ' + color + '"></span>' + part : part;
+      }).join(' · ');
+    }
+
+    document.querySelectorAll('.app-meta').forEach(colorizeAppMeta);
+
+    function openAddApp(mode) {
+      addAppMode = mode;
+      document.getElementById('addAppTitle').textContent = mode === 'ai' ? 'Add AI Application' : 'Add IT Application';
+      document.getElementById('addAppName').value = '';
+      populateCatOptions(mode);
+      document.getElementById('addAppData').value = 'Public only';
+      document.getElementById('addAppStatus').value = 'Approved';
+      updateDataPreview();
+      document.getElementById('addAppBackdrop').classList.add('open');
+    }
+
+    function closeAddApp() {
+      document.getElementById('addAppBackdrop').classList.remove('open');
+    }
+
+    function submitAddApp() {
+      var nameInput = document.getElementById('addAppName');
+      var name = nameInput.value.trim();
+      if (!name) { nameInput.focus(); return; }
+      var cat = document.getElementById('addAppCat').value || 'Other';
+      var data = document.getElementById('addAppData').value;
+      var status = document.getElementById('addAppStatus').value;
+      var owner = addAppMode === 'ai' ? 'Platform Eng' : 'IT';
+      var meta = cat + ' · ' + data + ' · ' + owner;
+      var pillClass = status === 'Approved' ? 'approved' : 'prohibited';
+
+      var row = document.createElement('div');
+      row.className = 'app-row';
+      row.onclick = function () { openAppDoc(name, meta, status); };
+      row.innerHTML =
+        '<div class="app-name-col"><div class="app-name"></div><div class="app-meta"></div></div>' +
+        '<span class="app-pill ' + pillClass + '">' + status + '</span>';
+      row.querySelector('.app-name').textContent = name;
+      row.querySelector('.app-meta').textContent = meta;
+      colorizeAppMeta(row.querySelector('.app-meta'));
+
+      document.getElementById(addAppMode === 'ai' ? 'aiAppList' : 'itAppList').appendChild(row);
+      closeAddApp();
+    }
+
+    /* ---- request a brand-new card not yet in the catalog ---- */
+    function openReqCard() {
+      document.getElementById('reqCardName').value = '';
+      document.getElementById('reqCardDesc').value = '';
+      document.getElementById('reqCardPriority').value = 'Standard';
+      document.getElementById('reqCardBackdrop').classList.add('open');
+    }
+
+    function closeReqCard() {
+      document.getElementById('reqCardBackdrop').classList.remove('open');
+    }
+
+    function submitReqCard() {
+      var nameInput = document.getElementById('reqCardName');
+      var name = nameInput.value.trim();
+      if (!name) { nameInput.focus(); return; }
+      var desc = document.getElementById('reqCardDesc').value.trim() || 'No additional details provided.';
+      var priority = document.getElementById('reqCardPriority').value;
+
+      quotaUsed++;
+      updateQuota();
+
+      var row = document.createElement('div');
+      row.className = 'send-item';
+      row.innerHTML =
+        '<span class="send-icon">🆕</span>' +
+        '<div class="send-item-body">' +
+          '<div class="send-item-head">' +
+            '<div class="send-title"></div>' +
+            '<div class="send-item-action"><span class="send-sent-badge show pending">⏳ Pending Review</span></div>' +
+          '</div>' +
+          '<div class="send-kicker">Custom Request · ' + priority + '</div>' +
+          '<div class="send-desc"></div>' +
+        '</div>';
+      row.querySelector('.send-title').textContent = name;
+      row.querySelector('.send-desc').textContent = desc;
+      document.getElementById('reqCardList').appendChild(row);
+
+      closeReqCard();
+    }
+  </script>
+
+</body>
+</html>

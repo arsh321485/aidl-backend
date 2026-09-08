@@ -350,6 +350,28 @@ def teams_send_welcome(request):
         email=user.email,
         user=user,
     )
+    if result and result.get("ok"):
+        # Manual refresh — keep the "already posted" flag in sync so the
+        # next login doesn't also repost on top of this one.
+        from .org_service import get_organization_for_user
+
+        org = get_organization_for_user(user)
+        if org is not None:
+            org.admin_card_sent = True
+            org.admin_card_channel_id = channel_id
+            org.admin_card_message_id = (
+                result.get("message_id")
+                or (result.get("message") or {}).get("id")
+                or org.admin_card_message_id
+            )
+            org.save(
+                update_fields=[
+                    "admin_card_sent",
+                    "admin_card_channel_id",
+                    "admin_card_message_id",
+                    "updated_at",
+                ]
+            )
     if not result or not result.get("ok"):
         return Response(
             {
@@ -519,6 +541,106 @@ def teams_admin_sign_aup(request):
     user.aup_signed_at = timezone.now()
     user.save(update_fields=["aup_signed", "aup_signed_at", "updated_at"])
     return Response({"ok": True, "aup_signed": True, "aup_signed_at": user.aup_signed_at})
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_cards_action(request, key: str):
+    """
+    Persist a Send-Cards action (request / send / schedule) for the caller's
+    organisation. Backed by CardDelivery, so reopening the Cards tab (or the
+    same person logging in again) always reflects this — no more resetting
+    to "not sent" on every visit.
+    """
+    from django.utils import timezone as dj_timezone
+    from django.utils.dateparse import parse_datetime
+
+    from .card_catalog import CARD_CATALOG
+    from .card_service import act_on_card
+    from .org_service import get_organization_for_user
+
+    if key not in CARD_CATALOG:
+        return Response({"error": "unknown_card"}, status=status.HTTP_404_NOT_FOUND)
+
+    action = (request.data.get("action") or "").strip().lower()
+    if action not in {"request", "send", "schedule"}:
+        return Response(
+            {"error": "invalid_action", "allowed": ["request", "send", "schedule"]},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    org = get_organization_for_user(request.user)
+    if org is None:
+        return Response({"error": "no_organization"}, status=status.HTTP_400_BAD_REQUEST)
+
+    lights = request.data.get("lights") or None
+    if lights and not isinstance(lights, list):
+        return Response({"error": "lights_must_be_list"}, status=status.HTTP_400_BAD_REQUEST)
+
+    scheduled_at = None
+    if action == "schedule":
+        raw = (request.data.get("scheduled_at") or "").strip()
+        parsed = parse_datetime(raw) if raw else None
+        if not parsed:
+            return Response(
+                {"error": "scheduled_at_required", "format": "ISO 8601 datetime"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        scheduled_at = dj_timezone.make_aware(parsed) if dj_timezone.is_naive(parsed) else parsed
+
+    try:
+        row = act_on_card(org, key, action, lights=lights, scheduled_at=scheduled_at)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(
+        {
+            "ok": True,
+            "key": key,
+            "status": row.status,
+            "purchased": row.purchased,
+            "lights": row.lights.split(",") if row.lights else [],
+            "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+            "scheduled_at": row.scheduled_at.isoformat() if row.scheduled_at else None,
+        }
+    )
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_cards_request_new(request):
+    """Log a custom reference-card request that isn't in the fixed catalog."""
+    from .card_service import create_card_request
+    from .org_service import get_organization_for_user
+
+    name = (request.data.get("name") or "").strip()
+    if not name:
+        return Response({"error": "name_required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    org = get_organization_for_user(request.user)
+    if org is None:
+        return Response({"error": "no_organization"}, status=status.HTTP_400_BAD_REQUEST)
+
+    req = create_card_request(
+        org,
+        name=name,
+        description=(request.data.get("description") or "").strip(),
+        priority=(request.data.get("priority") or "standard").strip().lower(),
+        requested_by_email=getattr(request.user, "email", ""),
+    )
+    return Response(
+        {
+            "ok": True,
+            "name": req.name,
+            "description": req.description,
+            "priority": req.priority,
+            "status": req.status,
+            "created_at": req.created_at.isoformat(),
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["POST"])

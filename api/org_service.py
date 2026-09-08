@@ -428,23 +428,27 @@ def build_admin_tab_payload(
         }
 
     if tab == "cards":
+        from .card_service import build_cards_payload
+
+        cards = build_cards_payload(org)
         return {
             **base,
             "title": "Cards",
-            "body": "Teams Adaptive Cards configured for this organisation.",
+            "body": (
+                "Pick the reference cards your team needs — view one, request it, "
+                "then send it into the channel where they already work."
+            ),
+            "heading": f"Send Cards — {org.name}",
+            "cards": cards,
+            # Kept for the generic placeholder renderer / older API consumers.
             "items": [
                 {
-                    "name": "Admin Center Home",
-                    "status": "active",
-                    "description": "Shown when an admin opens AIDL dashboard Home.",
-                },
-                {
-                    "name": "Learner welcome",
-                    "status": "active",
-                    "description": "Sent on signup / channel recreate.",
-                },
+                    "name": item["title"],
+                    "status": item["status"],
+                    "description": item["desc"],
+                }
+                for item in cards["items"]
             ],
-            "heading": f"Cards — {org.name}",
         }
 
     if tab == "ai-apps":

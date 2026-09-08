@@ -35,6 +35,12 @@ class Organization(models.Model):
     )
     policy_url = models.URLField(blank=True, default="")
     is_active = models.BooleanField(default=True)
+    # Guards the Teams channel "Admin Center" Adaptive Card against being
+    # re-posted (duplicated) on every login — set True once it has been
+    # posted for this channel; cleared when the channel is recreated.
+    admin_card_sent = models.BooleanField(default=False)
+    admin_card_channel_id = models.CharField(max_length=255, blank=True, default="")
+    admin_card_message_id = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -126,6 +132,76 @@ class RegisteredApp(models.Model):
 
     class Meta:
         ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class CardDelivery(models.Model):
+    """
+    Per-organisation state for one catalog card (see api/card_catalog.py).
+    One row per (organization_id, card_key) — re-fetched on every tab load
+    so re-opening the Cards tab (or the same person logging in again) shows
+    the real current state instead of resetting to "not sent".
+    """
+
+    class Status(models.TextChoices):
+        NOT_SENT = "not_sent", "Not sent"
+        SENT = "sent", "Sent"
+        SCHEDULED = "scheduled", "Scheduled"
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    card_key = models.CharField(max_length=64, db_index=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.NOT_SENT,
+    )
+    purchased = models.BooleanField(default=False)
+    lights = models.CharField(max_length=32, blank=True, default="")  # csv: green,amber,red
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["card_key"]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.card_key}={self.status}"
+
+
+class CardRequest(models.Model):
+    """A custom reference card requested by an org admin (not in the fixed catalog)."""
+
+    class Priority(models.TextChoices):
+        STANDARD = "standard", "Standard"
+        URGENT = "urgent", "Urgent"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        SCOPED = "scoped", "Scoped"
+        DONE = "done", "Delivered"
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    priority = models.CharField(
+        max_length=16,
+        choices=Priority.choices,
+        default=Priority.STANDARD,
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    requested_by_email = models.EmailField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
     def __str__(self):
         return self.name
