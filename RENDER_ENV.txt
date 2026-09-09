@@ -20,7 +20,18 @@ MS_AIDL_CHANNEL_NAME=aidl dashboard
 MS_SEND_WELCOME_CARD=True
 MS_SEND_ADMIN_CARD_EVERY_LOGIN=True
 MS_AIDL_LAND_ON_POSTS=True
-MS_AIDL_INSTALL_CHANNEL_TABS=False
+MS_AIDL_INSTALL_CHANNEL_TABS=True
+# Native channel tabs (Home/Add Admin/Policy/Cards/AI Apps/IT Apps) next to
+# Posts/Shared/Notes. Uses TeamsTab.Create/TeamsTab.ReadWrite.All above,
+# which do NOT need admin consent — safe to enable independently.
+#
+# In-card Action.Execute pills additionally need AppCatalog.Submit +
+# TeamsAppInstallation.ReadWriteForTeam in MS_SCOPES to auto-install the app
+# on the team — those DO need tenant admin consent. Do not add them here
+# until an admin has granted consent, or every login will start failing
+# with "Need admin approval". Until then, leave MS_AIDL_INSTALL_APP unset
+# (defaults True but the Graph calls just fail silently without the scope).
+MS_AIDL_INSTALL_APP=False
 # Azure delegated permission required for Posts card:
 #   ChannelMessage.Send (+ admin consent)
 # Bot messaging endpoint (Phase 2 clicks):
