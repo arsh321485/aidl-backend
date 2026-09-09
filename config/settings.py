@@ -58,6 +58,8 @@ _DEFAULT_MS_SCOPES = (
     "ChannelMessage.Send,"
     "TeamsTab.Create,"
     "TeamsTab.ReadWrite.All,"
+    "AppCatalog.Submit,"
+    "TeamsAppInstallation.ReadWriteForTeam,"
     "Group.ReadWrite.All"
 )
 MS_SCOPES = [
@@ -95,6 +97,15 @@ MS_SEND_WELCOME_CARD = os.getenv("MS_SEND_WELCOME_CARD", "True").lower() in (
     "yes",
 )
 MS_AIDL_INSTALL_CHANNEL_TABS = os.getenv("MS_AIDL_INSTALL_CHANNEL_TABS", "False").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Publish teams/manifest.json to the tenant app catalog and install it on the
+# AIDL team so Adaptive Card Action.Execute (in-card nav pills) can route to
+# our bot. Requires AppCatalog.Submit + TeamsAppInstallation.ReadWriteForTeam
+# in MS_SCOPES, and the tenant must allow custom/unpublished app uploads.
+MS_AIDL_INSTALL_APP = os.getenv("MS_AIDL_INSTALL_APP", "True").lower() in (
     "1",
     "true",
     "yes",

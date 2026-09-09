@@ -464,6 +464,14 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             build_home_tab_deep_link,
             ensure_aidl_channel_tabs,
         )
+        from .teams_app_install import ensure_aidl_app_installed
+
+        # Best-effort: install the AIDL app on the team so Adaptive Card
+        # Action.Execute (in-card nav pills) can route to our bot instead of
+        # Teams showing "That action isn't supported here."
+        app_install_info = ensure_aidl_app_installed(access_token, team_id=team_id)
+        if not app_install_info.get("ok") and not app_install_info.get("skipped"):
+            logger.warning("AIDL app install failed: %s", app_install_info.get("error"))
 
         tab_info = None
         if getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
@@ -498,6 +506,7 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             "home_tab_url": home_tab_url,
             "channel_posts_url": teams_url,
             "channel_tabs": tab_info,
+            "app_install": app_install_info,
             "channel_just_created": channel_just_created,
             "landed_on": "posts" if land_on_posts else "home_tab",
         }
