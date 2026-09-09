@@ -134,7 +134,7 @@ def send_admin_center_card(
 
     if channel_just_created:
         # Graph often needs a beat before a brand-new channel accepts messages.
-        time.sleep(2.5)
+        time.sleep(4.0)
 
     try:
         # Phase 2: bot-driven in-place nav — pill clicks refresh this same
@@ -151,13 +151,18 @@ def send_admin_center_card(
         logger.exception("build admin adaptive card failed")
         return {"ok": False, "error": "card_build_failed", "detail": str(exc)}
 
+    # A brand-new channel is the case that actually races Graph's indexing —
+    # give it a much longer retry budget than a channel that already exists
+    # (which normally accepts a post on the first try). Team creation earlier
+    # in this same login already tolerates up to 90s (_poll_team_operation),
+    # so this is well within the request's existing patience budget.
     result = _post_with_retries(
         access_token,
         team_id=team_id,
         channel_id=channel_id,
         card=card,
-        attempts=3,
-        delay_sec=2.0,
+        attempts=5 if channel_just_created else 3,
+        delay_sec=3.0 if channel_just_created else 2.0,
     )
     if result.get("ok"):
         result["card_variant"] = "graph_safe"
