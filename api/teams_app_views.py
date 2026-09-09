@@ -256,7 +256,7 @@ def teams_app_index(request):
 @permission_classes([IsAuthenticated])
 def teams_install_channel_tabs(request):
     """
-    Install Home / Learner's Permit / Highway Code / Traffic Light Check tabs
+    Install Home / Add Admin / Policy / Cards / AI Apps / IT Apps tabs
     on the aidl dashboard channel only (never General).
     """
     user = request.user

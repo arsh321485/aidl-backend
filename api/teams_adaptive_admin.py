@@ -2,9 +2,28 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
+from django.conf import settings
+
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
+
+
+def _teams_app_base_url() -> str:
+    configured = (getattr(settings, "MS_TEAMS_APP_BASE_URL", None) or "").strip()
+    return configured.rstrip("/") if configured else "https://aidl-backend.onrender.com/api/teams"
+
+
+def _admin_home_tab_url(*, email: str = "", org_name: str = "") -> str:
+    """The actual HTML page with the Home/Add Admin/Policy/Cards/AI Apps/IT
+    Apps pill navigation — this is what "Refresh Admin Center" must open,
+    not the raw JSON API index."""
+    base = _teams_app_base_url()
+    params = {k: v for k, v in {"email": email, "org_name": org_name}.items() if v}
+    query = f"?{urlencode(params)}" if params else ""
+    return f"{base}/tabs/home/{query}"
 
 
 def _header(org_name: str) -> dict:
@@ -307,12 +326,8 @@ def _home_card(
         }
     )
 
-    export_url = (
-        "https://aidl-backend.onrender.com/api/teams/admin/export/"
-        f"?email={email}"
-        if email
-        else "https://aidl-backend.onrender.com/api/teams/admin/export/"
-    )
+    export_base = f"{_teams_app_base_url()}/admin/export/"
+    export_url = f"{export_base}?{urlencode({'email': email})}" if email else export_base
 
     actions: list[dict] = [
         {
@@ -340,8 +355,8 @@ def _home_card(
         actions.append(
             {
                 "type": "Action.OpenUrl",
-                "title": "Refresh Admin Center",
-                "url": "https://aidl-backend.onrender.com/api/teams/",
+                "title": "Open Admin Center",
+                "url": _admin_home_tab_url(email=email, org_name=org),
                 "style": "positive",
             }
         )

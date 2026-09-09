@@ -90,13 +90,15 @@ def _save_channel_on_user(user: AIDLUser, channel_info: dict | None) -> None:
         user.teams_team_id = channel_info.get("team_id") or ""
         user.teams_channel_id = channel_info.get("channel_id") or ""
         user.teams_channel_name = channel_info.get("channel_name") or ""
-    user.save(
-        update_fields=[
-            "teams_team_id",
-            "teams_channel_id",
-            "teams_channel_name",
-            "updated_at",
-        ]
+    # Queryset .update() instead of instance .save(update_fields=[...]) —
+    # the mongodb backend raises NotUpdated when the values being written
+    # are identical to what's already stored (e.g. re-login, same channel),
+    # since Mongo reports 0 modified even though the filter matched.
+    AIDLUser.objects.filter(pk=user.pk).update(
+        teams_team_id=user.teams_team_id,
+        teams_channel_id=user.teams_channel_id,
+        teams_channel_name=user.teams_channel_name,
+        updated_at=timezone.now(),
     )
 
 

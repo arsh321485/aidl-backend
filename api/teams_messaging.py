@@ -137,14 +137,15 @@ def send_admin_center_card(
         time.sleep(2.5)
 
     try:
-        # Phase 1: Graph-safe card (no Action.Execute) so Posts is never empty.
+        # Phase 2: bot-driven in-place nav — pill clicks refresh this same
+        # card via /api/teams/bot/messages/ instead of opening a browser tab.
         card = build_admin_adaptive_card(
             tab,
             full_name=full_name,
             org_name=org_name,
             email=email,
             user=user,
-            interactive=False,
+            interactive=True,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("build admin adaptive card failed")

@@ -7,7 +7,7 @@ import requests
 from django.conf import settings
 
 from .graph_client import GRAPH_BASE, graph_headers
-from .teams_cards import TEAMS_TABS
+from .teams_admin import ADMIN_TABS
 
 
 logger = logging.getLogger(__name__)
@@ -15,9 +15,12 @@ logger = logging.getLogger(__name__)
 # Built-in Teams "Website" tab — works without uploading a custom app manifest.
 WEBSITE_TAB_APP_ID = "com.microsoft.teamspace.tab.web"
 
+# One native Teams channel tab per Admin Center section — Home / Add Admin /
+# Policy / Cards / AI Apps / IT Apps — so clicking a tab shows only that
+# section instead of the in-card text nav.
 AIDL_CHANNEL_TABS = tuple(
     (f"aidl-{tab_id}", label, tab_id)
-    for tab_id, label, _icon in TEAMS_TABS
+    for tab_id, label, _icon in ADMIN_TABS
 )
 
 
@@ -135,7 +138,7 @@ def ensure_aidl_channel_tabs(
     channel_just_created: bool = False,
 ) -> dict | None:
     """
-    Add Home / Learner's Permit / Highway Code / Traffic Light Check tabs
+    Add Home / Add Admin / Policy / Cards / AI Apps / IT Apps tabs
     ONLY on the configured aidl dashboard channel (never General).
     """
     if not getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
