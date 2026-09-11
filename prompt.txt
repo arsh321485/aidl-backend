@@ -1,0 +1,2 @@
+when i pushed this changes on git by giving command why it shows 
+every thing up to dated check in my terminal where i pushed gthe code
