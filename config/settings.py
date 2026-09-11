@@ -248,7 +248,9 @@ CORS_ALLOWED_ORIGINS = [
             "http://localhost:3000,"
             "http://localhost:5173,"
             "http://localhost:5184,"
-            "https://aidl-frontend-8owk.vercel.app"
+            "https://aidl-frontend-8owk.vercel.app,"
+            "https://vaptbackend.secureitlab.com,"
+            "https://aidl-backend.onrender.com"
         ),
     ).split(",")
     if origin.strip()

@@ -316,8 +316,12 @@ def teams_install_channel_tabs(request):
 @permission_classes([IsAuthenticated])
 def teams_send_welcome(request):
     """
-    Manually post the Home welcome Adaptive Card to the user's AIDL channel.
+    Post the Home welcome Adaptive Card to the user's AIDL channel.
     Requires a valid AIDL JWT and stored team/channel ids from login.
+
+    No-op if the card was already posted to this channel — pass
+    force=true (query string or body) to repost anyway (e.g. after
+    manually deleting the card from Teams).
     """
     user = request.user
     team_id = getattr(user, "teams_team_id", "") or ""
@@ -341,6 +345,30 @@ def teams_send_welcome(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    from .org_service import get_organization_for_user
+
+    org = get_organization_for_user(user)
+    force = str(
+        request.data.get("force") or request.query_params.get("force") or ""
+    ).strip().lower() in ("1", "true", "yes")
+    already_posted = bool(
+        org and org.admin_card_sent and org.admin_card_channel_id == channel_id
+    )
+    if already_posted and not force:
+        return Response(
+            {
+                "ok": True,
+                "already_sent": True,
+                "message_id": org.admin_card_message_id,
+                "tab": "home",
+                "channel": {
+                    "team_id": team_id,
+                    "channel_id": channel_id,
+                    "channel_name": getattr(user, "teams_channel_name", "") or "aidl dashboard",
+                },
+            }
+        )
+
     result = send_welcome_card_after_signup(
         ms_token,
         team_id=team_id,
@@ -351,11 +379,8 @@ def teams_send_welcome(request):
         user=user,
     )
     if result and result.get("ok"):
-        # Manual refresh — keep the "already posted" flag in sync so the
-        # next login doesn't also repost on top of this one.
-        from .org_service import get_organization_for_user
-
-        org = get_organization_for_user(user)
+        # Keep the "already posted" flag in sync so the next call
+        # (or the next login) doesn't also repost on top of this one.
         if org is not None:
             org.admin_card_sent = True
             org.admin_card_channel_id = channel_id
