@@ -340,7 +340,6 @@ CARD_CATALOG = (
         "price": "",
         "rating": "4.1 (39)",
         "requested": True,
-        "lights": False,
     },
     {
         "id": "c1",
@@ -351,7 +350,6 @@ CARD_CATALOG = (
         "price": "$49 · one-time",
         "rating": "4.8 (52)",
         "requested": False,
-        "lights": True,
     },
     {
         "id": "c2",
@@ -362,7 +360,6 @@ CARD_CATALOG = (
         "price": "$59 · one-time",
         "rating": "4.4 (27)",
         "requested": False,
-        "lights": False,
     },
     {
         "id": "c3",
@@ -373,7 +370,6 @@ CARD_CATALOG = (
         "price": "$39 · one-time",
         "rating": "4.6 (31)",
         "requested": False,
-        "lights": False,
     },
     {
         "id": "c4",
@@ -384,7 +380,6 @@ CARD_CATALOG = (
         "price": "$79 · one-time",
         "rating": "4.9 (44)",
         "requested": False,
-        "lights": False,
     },
     {
         "id": "c5",
@@ -395,7 +390,6 @@ CARD_CATALOG = (
         "price": "$25 · one-time",
         "rating": "4.5 (19)",
         "requested": False,
-        "lights": False,
     },
     {
         "id": "c6",
@@ -406,7 +400,6 @@ CARD_CATALOG = (
         "price": "$35 · one-time",
         "rating": "4.3 (15)",
         "requested": False,
-        "lights": False,
     },
     {
         "id": "c7",
@@ -417,7 +410,6 @@ CARD_CATALOG = (
         "price": "$69 · one-time",
         "rating": "4.7 (22)",
         "requested": False,
-        "lights": False,
     },
     {
         "id": "c8",
@@ -428,7 +420,6 @@ CARD_CATALOG = (
         "price": "$45 · one-time",
         "rating": "4.4 (17)",
         "requested": False,
-        "lights": False,
     },
     {
         "id": "c9",
@@ -439,101 +430,24 @@ CARD_CATALOG = (
         "price": "$19 · one-time",
         "rating": "4.2 (11)",
         "requested": False,
-        "lights": False,
     },
 )
 
-_TRAFFIC_LIGHTS = (
-    ("Green — Go", "Public, non-personal prompts — general questions, public articles, story or recipe ideas. Any tool is fine, just check facts after."),
-    ("Amber — Caution", "A little personal — first name, city, rough plans. Use a placeholder or strip it out first."),
-    ("Red — Stop", "Private, keep it out — passwords, bank or ID numbers, home address, other people's data. Never paste it, anonymise and retry."),
-)
-
-
-def _card_view_block(card: dict) -> dict:
-    # One collapsed block per card, not two (view + a separate schedule
-    # panel) — a bot-less Graph card can't submit a real request anywhere,
-    # and every extra nested Container/Action costs bytes 10x over across
-    # the catalog (Teams caps card size around 28KB).
-    card_id = card["id"]
-    items: list[dict] = [
-        {"type": "TextBlock", "text": card["desc"], "wrap": True, "spacing": "Small"},
-    ]
-    if card["lights"]:
-        items.append(
-            {
-                "type": "TextBlock",
-                "text": "Lights sent: " + "; ".join(t for t, _d in _TRAFFIC_LIGHTS),
-                "size": "Small",
-                "isSubtle": True,
-                "wrap": True,
-                "spacing": "Small",
-            }
-        )
-    items.append(
-        {
-            "type": "TextBlock",
-            "id": f"card-notsent-{card_id}",
-            "text": "Not requested yet.",
-            "size": "Small",
-            "isSubtle": True,
-            "spacing": "Small",
-        }
-    )
-    items.append(
-        {
-            "type": "TextBlock",
-            "id": f"card-confirmed-{card_id}",
-            "text": "✓ Requested — it'll land in your channel",
-            "size": "Small",
-            "weight": "Bolder",
-            "color": "good",
-            "isVisible": False,
-            "spacing": "Small",
-        }
-    )
-    items.append(
-        {
-            "type": "ActionSet",
-            "spacing": "Small",
-            "actions": [
-                {
-                    "type": "Action.ToggleVisibility",
-                    "title": f"Request Card{(' — ' + card['price']) if card['price'] else ''}",
-                    "style": "positive",
-                    "targetElements": [
-                        {"elementId": f"card-notsent-{card_id}", "isVisible": False},
-                        {"elementId": f"card-confirmed-{card_id}", "isVisible": True},
-                    ],
-                }
-            ],
-        }
-    )
-    return {
-        "type": "Container",
-        "id": f"card-view-{card_id}",
-        "isVisible": False,
-        "spacing": "Small",
-        "items": items,
-    }
-
-
 def _card_row(card: dict) -> list[dict]:
+    # No per-card expand/request block here — 10 of them pushed the whole
+    # combined card close to (and once, over) the ~28KB size Graph/Teams
+    # will accept for a single Adaptive Card, which made Graph reject it
+    # outright and fall back to the plain-text card. This list still matches
+    # the reference design; "View"/"Request Card" belongs on the full
+    # admin.html webpage where there's no such size ceiling.
     status_prefix = "✓ REQUESTED · " if card["requested"] else ""
     meta = f"{card['category']} · {status_prefix}★ {card['rating']}"
     if card["price"]:
         meta = f"{meta} · {card['price']}"
     return [
         {
-            # Whole row is the tap target (selectAction) instead of a
-            # separate View button — one less nested Action per card, which
-            # adds up across a 10-item catalog against the ~28KB card cap.
             "type": "Container",
             "spacing": "Small",
-            "selectAction": {
-                "type": "Action.ToggleVisibility",
-                "targetElements": [f"card-view-{card['id']}"],
-            },
             "items": [
                 {
                     "type": "TextBlock",
@@ -553,7 +467,6 @@ def _card_row(card: dict) -> list[dict]:
                 },
             ],
         },
-        _card_view_block(card),
     ]
 
 
@@ -721,7 +634,7 @@ def _nav_pill_rows(active_tab: str) -> list[dict]:
                         "type": "Container",
                         "id": _pill_id(tab_id, active=True),
                         "isVisible": tab_id == active_tab,
-                        "style": "accent",
+                        "style": "emphasis",
                         "spacing": "None",
                         "items": [
                             {
