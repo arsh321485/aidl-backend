@@ -40,10 +40,7 @@ def send_channel_adaptive_card(
         "subject": "AIDL Admin Center",
         "body": {
             "contentType": "html",
-            "content": (
-                "<p><strong>AIDL Admin Center</strong></p>"
-                f'<attachment id="{attachment_id}"></attachment>'
-            ),
+            "content": f'<attachment id="{attachment_id}"></attachment>',
         },
         "attachments": [
             {
