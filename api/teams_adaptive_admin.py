@@ -2,20 +2,9 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlencode
-
-from django.conf import settings
-
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
-
-
-def _nav_base_url() -> str:
-    configured = (getattr(settings, "MS_TEAMS_APP_BASE_URL", None) or "").strip()
-    if configured:
-        return configured.rstrip("/")
-    return "https://aidl-backend.onrender.com/api/teams"
 
 
 def _header(org_name: str) -> dict:
@@ -86,49 +75,168 @@ def _nav_actions(active_tab: str, *, email: str = "", org_id: str = "") -> list[
     return actions
 
 
-def _nav_open_url_actions(
+def _section_body_blocks(
+    tab: str,
+    *,
+    full_name: str = "",
+    org_name: str = "",
+    email: str = "",
+    user=None,
+) -> list[dict]:
+    """Heading + body + item list + tab-specific extras for one section, with
+    no header/nav — used to fill an Action.ShowCard nested card so a pill
+    click expands its content in place instead of leaving the Posts card."""
+    payload = build_admin_tab_payload(
+        tab,
+        full_name=full_name,
+        org_name=org_name,
+        email=email,
+        user=user,
+    )
+    items = payload.get("items") or []
+    item_blocks = []
+    for it in items[:12]:
+        title = it.get("name") or it.get("email") or "Item"
+        meta = " · ".join(
+            str(x) for x in [it.get("email"), it.get("role"), it.get("status")] if x
+        )
+        desc = it.get("description") or ""
+        block_items = [
+            {
+                "type": "TextBlock",
+                "text": title,
+                "weight": "Bolder",
+                "wrap": True,
+                "spacing": "None",
+            }
+        ]
+        if meta:
+            block_items.append(
+                {
+                    "type": "TextBlock",
+                    "text": meta,
+                    "size": "Small",
+                    "isSubtle": True,
+                    "wrap": True,
+                    "spacing": "None",
+                }
+            )
+        if desc:
+            block_items.append(
+                {
+                    "type": "TextBlock",
+                    "text": desc,
+                    "size": "Small",
+                    "wrap": True,
+                    "spacing": "None",
+                }
+            )
+        item_blocks.append(
+            {
+                "type": "Container",
+                "style": "emphasis",
+                "items": block_items,
+                "spacing": "Small",
+            }
+        )
+    if not item_blocks:
+        item_blocks.append(
+            {
+                "type": "TextBlock",
+                "text": "No records yet for this organisation.",
+                "isSubtle": True,
+                "wrap": True,
+            }
+        )
+
+    blocks = [
+        {
+            "type": "TextBlock",
+            "text": payload.get("heading") or payload.get("title") or tab,
+            "size": "Medium",
+            "weight": "Bolder",
+            "wrap": True,
+        },
+        {
+            "type": "TextBlock",
+            "text": payload.get("body") or "",
+            "wrap": True,
+            "spacing": "Small",
+        },
+        *item_blocks,
+    ]
+
+    if tab == "policy" and payload.get("policy_url"):
+        blocks.append(
+            {
+                "type": "ActionSet",
+                "spacing": "Small",
+                "actions": [
+                    {
+                        "type": "Action.OpenUrl",
+                        "title": "Read full policy",
+                        "url": payload["policy_url"],
+                        "style": "positive",
+                    }
+                ],
+            }
+        )
+    if tab == "add-admin":
+        blocks.append(
+            {
+                "type": "TextBlock",
+                "text": "Open the AIDL Admin Center tab in Teams to add a new admin by email.",
+                "size": "Small",
+                "isSubtle": True,
+                "wrap": True,
+                "spacing": "Small",
+            }
+        )
+
+    return blocks
+
+
+def _nav_showcard_actions(
     active_tab: str,
     *,
     full_name: str = "",
     org_name: str = "",
     email: str = "",
-    team_id: str = "",
-    channel_id: str = "",
+    user=None,
 ) -> list[dict]:
     """
-    Graph-safe clickable nav — Action.OpenUrl needs no bot, so it works on
-    every Posts card. When the AIDL team/channel ids are known, each button
-    deep-links to that section's own Teams tab (entity "aidl-<tab>", the same
-    ones ensure_aidl_channel_tabs installs) so it opens in-app next to Home
-    instead of popping an external browser tab. Falls back to the plain
-    admin.html URL only when the ids aren't available yet.
+    Graph-safe clickable nav — each pill is an Action.ShowCard, so clicking it
+    expands that section's content directly below the nav row inside the same
+    Posts card. Purely client-side (no bot round-trip needed), so it never
+    pops a new browser tab/window the way Action.OpenUrl did.
     """
-    from .teams_channel_tabs import build_channel_tab_deep_link
-
-    base = _nav_base_url()
-    query = urlencode(
-        {k: v for k, v in {"full_name": full_name, "org_name": org_name, "email": email}.items() if v}
-    )
-    suffix = f"?{query}" if query else ""
-    tenant_id = getattr(settings, "MS_TENANT_ID", "") or ""
-
     actions = []
     for tab_id, label, icon in ADMIN_TABS:
-        if team_id and channel_id:
-            url = build_channel_tab_deep_link(
-                entity_id=f"aidl-{tab_id}",
-                team_id=team_id,
-                channel_id=channel_id,
-                tenant_id=tenant_id,
-                email=email,
-                label=label,
-            )
+        title = f"{icon} {label}" if icon else label
+        if tab_id == "home":
+            nested_body = [
+                {
+                    "type": "TextBlock",
+                    "text": "You're viewing Home ↓",
+                    "isSubtle": True,
+                    "wrap": True,
+                }
+            ]
         else:
-            url = f"{base}/tabs/{tab_id}/{suffix}"
+            nested_body = _section_body_blocks(
+                tab_id,
+                full_name=full_name,
+                org_name=org_name,
+                email=email,
+                user=user,
+            )
         action = {
-            "type": "Action.OpenUrl",
-            "title": f"{icon} {label}" if icon else label,
-            "url": url,
+            "type": "Action.ShowCard",
+            "title": title,
+            "card": {
+                "type": "AdaptiveCard",
+                "body": nested_body,
+            },
         }
         if tab_id == active_tab:
             action["style"] = "positive"
@@ -143,8 +251,7 @@ def _nav_container(
     org_id: str = "",
     full_name: str = "",
     org_name: str = "",
-    team_id: str = "",
-    channel_id: str = "",
+    user=None,
     interactive: bool = False,
 ) -> dict:
     if interactive:
@@ -154,13 +261,12 @@ def _nav_container(
         }
     return {
         "type": "ActionSet",
-        "actions": _nav_open_url_actions(
+        "actions": _nav_showcard_actions(
             active_tab,
             full_name=full_name,
             org_name=org_name,
             email=email,
-            team_id=team_id,
-            channel_id=channel_id,
+            user=user,
         ),
     }
 
@@ -249,8 +355,6 @@ def _home_card(
     )
     org_id = dash.get("organization_id") or ""
     org = dash.get("org_name") or org_name or "AIDL"
-    team_id = getattr(user, "teams_team_id", "") or ""
-    channel_id = getattr(user, "teams_channel_id", "") or ""
 
     stats = dash.get("stats") or []
     stats_cols = []
@@ -312,8 +416,7 @@ def _home_card(
             org_id=org_id,
             full_name=full_name,
             org_name=org,
-            team_id=team_id,
-            channel_id=channel_id,
+            user=user,
             interactive=interactive,
         ),
         {
@@ -439,8 +542,6 @@ def _section_card(
     )
     org_id = payload.get("organization_id") or ""
     org = payload.get("org_name") or org_name or "AIDL"
-    team_id = getattr(user, "teams_team_id", "") or ""
-    channel_id = getattr(user, "teams_channel_id", "") or ""
     items = payload.get("items") or []
     item_blocks = []
     for it in items[:12]:
@@ -537,8 +638,7 @@ def _section_card(
             org_id=org_id,
             full_name=full_name,
             org_name=org,
-            team_id=team_id,
-            channel_id=channel_id,
+            user=user,
             interactive=interactive,
         ),
         {
