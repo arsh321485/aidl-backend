@@ -113,6 +113,31 @@ def _post_with_retries(
     return last
 
 
+def delete_channel_message(
+    access_token: str,
+    *,
+    team_id: str,
+    channel_id: str,
+    message_id: str,
+) -> bool:
+    """
+    Soft-delete a previously posted channel message (Graph leaves a small
+    "This message has been deleted" placeholder, but that's far less
+    disruptive than a fresh, full Admin Center card stacking on top of the
+    last one every time someone logs in). Best-effort: a missing/already
+    -deleted message must never block posting the new welcome card.
+    """
+    if not access_token or not team_id or not channel_id or not message_id:
+        return False
+    url = f"{GRAPH_BASE}/teams/{team_id}/channels/{channel_id}/messages/{message_id}/softDelete"
+    try:
+        response = requests.post(url, headers=graph_headers(access_token), timeout=20)
+        return response.status_code < 400
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("delete channel message %s failed: %s", message_id, exc)
+        return False
+
+
 def send_admin_center_card(
     access_token: str,
     *,

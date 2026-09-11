@@ -25,8 +25,7 @@ from .microsoft_auth import (
 )
 from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
-from .teams_messaging import send_welcome_card_after_signup
-from .org_service import ensure_organization_for_login
+from .org_service import ensure_organization_for_login, replace_welcome_card
 from .models import AIDLUser
 from .serializers import AIDLUserSerializer
 
@@ -319,7 +318,7 @@ def teams_callback(request):
         )
         should_send_welcome = bool(send_every_login) or is_new_signup or channel_recreated
         if should_send_welcome:
-            welcome_result = send_welcome_card_after_signup(
+            welcome_result = replace_welcome_card(
                 ms_token,
                 team_id=channel_info.get("team_id") or "",
                 channel_id=channel_info.get("channel_id") or "",

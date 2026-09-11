@@ -20,7 +20,8 @@ from .teams_admin import (
 )
 from .teams_cards import CARD_BUILDERS, TEAMS_TABS, build_card, org_display_name
 from .teams_channel_tabs import ensure_aidl_channel_tabs, is_aidl_dashboard_channel, target_channel_name
-from .teams_messaging import send_channel_adaptive_card, send_welcome_card_after_signup
+from .teams_messaging import send_channel_adaptive_card
+from .org_service import replace_welcome_card
 
 
 def _teams_base_url(request) -> str:
@@ -341,7 +342,7 @@ def teams_send_welcome(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    result = send_welcome_card_after_signup(
+    result = replace_welcome_card(
         ms_token,
         team_id=team_id,
         channel_id=channel_id,

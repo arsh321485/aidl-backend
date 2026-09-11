@@ -18,6 +18,7 @@ def _nav_base_url() -> str:
 
 def _header(org_name: str) -> dict:
     """Brand row with AIDL PNG logo (Teams does not reliably load SVG)."""
+    org_name = _clip(org_name, 60)
     return {
         "type": "ColumnSet",
         "spacing": "None",
@@ -110,38 +111,29 @@ def _status_badge(status: str) -> dict:
     return badge
 
 
+def _clip(text: str, limit: int = 90) -> str:
+    """Defend the combined card's size cap against free-text org data (an
+    admin can type an arbitrarily long app description) — item counts are
+    capped elsewhere, but a single very long field could still do damage."""
+    text = text or ""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def _item_row(title: str, meta: str, desc: str, *, badge: dict | None = None) -> dict:
-    text_items = [
+    # One TextBlock (markdown bold + newline) instead of up to three — this
+    # renders per row of every list in the combined card, so trimming it
+    # matters for staying under Graph's ~28KB Adaptive Card size cap.
+    lines = [f"**{_clip(title, 60)}**"]
+    sub = " · ".join(_clip(x, 90) for x in [meta, desc] if x)
+    if sub:
+        lines.append(sub)
+    columns = [
         {
-            "type": "TextBlock",
-            "text": title,
-            "weight": "Bolder",
-            "wrap": True,
-            "spacing": "None",
+            "type": "Column",
+            "width": "stretch",
+            "items": [{"type": "TextBlock", "text": "\n\n".join(lines), "wrap": True, "spacing": "None"}],
         }
     ]
-    if meta:
-        text_items.append(
-            {
-                "type": "TextBlock",
-                "text": meta,
-                "size": "Small",
-                "isSubtle": True,
-                "wrap": True,
-                "spacing": "None",
-            }
-        )
-    if desc:
-        text_items.append(
-            {
-                "type": "TextBlock",
-                "text": desc,
-                "size": "Small",
-                "wrap": True,
-                "spacing": "None",
-            }
-        )
-    columns = [{"type": "Column", "width": "stretch", "items": text_items}]
     if badge:
         columns.append({"type": "Column", "width": "auto", "verticalContentAlignment": "Center", "items": [badge]})
     return {
@@ -149,6 +141,28 @@ def _item_row(title: str, meta: str, desc: str, *, badge: dict | None = None) ->
         "style": "emphasis",
         "spacing": "Small",
         "items": [{"type": "ColumnSet", "columns": columns}],
+    }
+
+
+# Hard cap on rows rendered inline per list in the combined (Graph) card —
+# admin/policy/app-registry lists grow with the organisation (more seats,
+# more registered apps) with no upper bound, unlike CARD_CATALOG below, so
+# a fixed slice (unlike items[:12]) is the only way to guarantee this card
+# never crosses Graph's ~28KB size cap regardless of how large the org gets.
+_INLINE_LIST_CAP = 5
+
+
+def _overflow_note(tab: str, total: int, shown: int) -> dict | None:
+    remaining = total - shown
+    if remaining <= 0:
+        return None
+    return {
+        "type": "TextBlock",
+        "text": f"+{remaining} more — open the [{tab.replace('-', ' ').title()} tab]({_nav_base_url()}/tabs/{tab}/) to see the full list.",
+        "size": "Small",
+        "isSubtle": True,
+        "wrap": True,
+        "spacing": "Small",
     }
 
 
@@ -165,7 +179,7 @@ def _heading_block(payload: dict, tab: str, subtitle: str = "") -> list[dict]:
     blocks.append(
         {
             "type": "TextBlock",
-            "text": payload.get("heading") or payload.get("title") or tab,
+            "text": _clip(payload.get("heading") or payload.get("title") or tab, 80),
             "size": "Medium",
             "weight": "Bolder",
             "wrap": True,
@@ -173,7 +187,7 @@ def _heading_block(payload: dict, tab: str, subtitle: str = "") -> list[dict]:
         }
     )
     if payload.get("body"):
-        blocks.append({"type": "TextBlock", "text": payload["body"], "wrap": True, "spacing": "Small"})
+        blocks.append({"type": "TextBlock", "text": _clip(payload["body"], 220), "wrap": True, "spacing": "Small"})
     return blocks
 
 
@@ -434,38 +448,22 @@ CARD_CATALOG = (
 )
 
 def _card_row(card: dict) -> list[dict]:
-    # No per-card expand/request block here — 10 of them pushed the whole
-    # combined card close to (and once, over) the ~28KB size Graph/Teams
-    # will accept for a single Adaptive Card, which made Graph reject it
-    # outright and fall back to the plain-text card. This list still matches
-    # the reference design; "View"/"Request Card" belongs on the full
-    # admin.html webpage where there's no such size ceiling.
-    status_prefix = "✓ REQUESTED · " if card["requested"] else ""
-    meta = f"{card['category']} · {status_prefix}★ {card['rating']}"
+    # One TextBlock per card (title bold, meta as a markdown newline below)
+    # instead of a Container wrapping two TextBlocks — every byte here is
+    # repeated 10x, and the combined card (all 6 tabs + nav) sits close to
+    # Graph/Teams' ~28KB Adaptive Card size cap; over it, Graph rejects the
+    # card outright and Posts shows nothing. "View"/"Request Card" belongs
+    # on the full admin.html webpage where there's no such size ceiling.
+    status_prefix = "✓ · " if card["requested"] else ""
+    meta = f"{card['category']} · {status_prefix}★{card['rating'].split(' ')[0]}"
     if card["price"]:
         meta = f"{meta} · {card['price']}"
     return [
         {
-            "type": "Container",
+            "type": "TextBlock",
+            "text": f"**{card['icon']} {card['title']}**\n\n{meta}",
+            "wrap": True,
             "spacing": "Small",
-            "items": [
-                {
-                    "type": "TextBlock",
-                    "text": f"{card['icon']} {card['title']}",
-                    "weight": "Bolder",
-                    "wrap": True,
-                    "spacing": "None",
-                },
-                {
-                    "type": "TextBlock",
-                    "text": meta,
-                    "size": "Small",
-                    "isSubtle": True,
-                    "color": "good" if card["requested"] else "default",
-                    "wrap": True,
-                    "spacing": "None",
-                },
-            ],
         },
     ]
 
@@ -499,8 +497,12 @@ def _cards_blocks(payload: dict) -> list[dict]:
             ],
         },
     ]
-    for card in CARD_CATALOG:
+    shown_cards = CARD_CATALOG[:_INLINE_LIST_CAP]
+    for card in shown_cards:
         blocks.extend(_card_row(card))
+    overflow = _overflow_note("cards", len(CARD_CATALOG), len(shown_cards))
+    if overflow:
+        blocks.append(overflow)
     blocks.append(
         {
             "type": "TextBlock",
@@ -516,24 +518,28 @@ def _cards_blocks(payload: dict) -> list[dict]:
 
 def _app_list_blocks(tab: str, payload: dict) -> list[dict]:
     items = payload.get("items") or []
+    shown = items[:_INLINE_LIST_CAP]
     rows = [
         _item_row(it.get("name") or "App", "", it.get("description") or "", badge=_status_badge(it.get("status") or ""))
-        for it in items[:12]
+        for it in shown
     ] or [{"type": "TextBlock", "text": "No applications registered yet.", "isSubtle": True, "wrap": True}]
-    return [*_heading_block(payload, tab), *rows]
+    overflow = _overflow_note(tab, len(items), len(shown))
+    return [*_heading_block(payload, tab), *rows, *([overflow] if overflow else [])]
 
 
 def _generic_blocks(tab: str, payload: dict) -> list[dict]:
     items = payload.get("items") or []
+    shown = items[:_INLINE_LIST_CAP]
     rows = [
         _item_row(
             it.get("name") or it.get("email") or "Item",
             " · ".join(str(x) for x in [it.get("email"), it.get("role"), it.get("status")] if x),
             it.get("description") or "",
         )
-        for it in items[:12]
+        for it in shown
     ] or [{"type": "TextBlock", "text": "No records yet for this organisation.", "isSubtle": True, "wrap": True}]
-    return [*_heading_block(payload, tab), *rows]
+    overflow = _overflow_note(tab, len(items), len(shown))
+    return [*_heading_block(payload, tab), *rows, *([overflow] if overflow else [])]
 
 
 def _section_body_blocks(
@@ -576,48 +582,84 @@ def _section_element_id(tab_id: str) -> str:
     return f"s{_TAB_INDEX[tab_id]}"
 
 
-def _nav_link_pills(active_tab: str, *, email: str = "") -> dict:
+def _pill_id(tab_id: str, *, active: bool) -> str:
+    return f"{'pa' if active else 'pi'}{_TAB_INDEX[tab_id]}"
+
+
+def _nav_toggle_targets(clicked_tab: str) -> list[dict]:
+    """Every element a pill click must force to a specific state: the clicked
+    tab's section + coloured pill show, every other section + coloured pill
+    hide (and every other plain pill comes back)."""
+    targets: list[dict] = []
+    for tab_id, _label, _icon in ADMIN_TABS:
+        targets.append({"elementId": _section_element_id(tab_id), "isVisible": tab_id == clicked_tab})
+        targets.append({"elementId": _pill_id(tab_id, active=True), "isVisible": tab_id == clicked_tab})
+        targets.append({"elementId": _pill_id(tab_id, active=False), "isVisible": tab_id != clicked_tab})
+    return targets
+
+
+def _nav_pill_rows(active_tab: str) -> dict:
     """
-    Graph-safe nav for the combined welcome card: plain Action.OpenUrl pills
-    to each tab's admin.html webpage (unlimited size, already rendered
-    correctly there) instead of inlining every tab's section + the
-    Action.ToggleVisibility target lists that go with it. Those toggle
-    targets alone ran ~8KB for just 6 tabs, and together with all 5 other
-    sections pushed the combined card to ~28.7KB — over Graph's ~28KB
-    Adaptive Card limit, which made Graph reject the whole card and Posts
-    show nothing at all. Home stays inline (below) since that's the one
-    view this card actually needs to carry.
+    In-Teams clickable nav, no bot, no browser tab — each tab is TWO
+    overlapping pills (a coloured "active" one, a plain "inactive" one, only
+    one ever isVisible), both wired to the same Action.ToggleVisibility.
+    Clicking one force-shows its own section + its own coloured pill and
+    force-hides every other section and every other coloured pill, so the
+    highlight colour actually moves to whichever pill was just clicked and
+    the previous section's content actually disappears — a real tab strip
+    entirely client-side, inside the one posted message.
     """
     columns = []
     for tab_id, label, icon in ADMIN_TABS:
         title = f"{icon} {label}" if icon else label
-        is_active = tab_id == active_tab
-        container: dict = {
-            "type": "Container",
-            "style": "emphasis" if is_active else "default",
-            "spacing": "None",
-            "items": [
-                {
-                    "type": "TextBlock",
-                    "text": title,
-                    "weight": "Bolder",
-                    "wrap": False,
-                    "spacing": "None",
-                    "horizontalAlignment": "Center",
-                }
-            ],
+        toggle_action = {
+            "type": "Action.ToggleVisibility",
+            "targetElements": _nav_toggle_targets(tab_id),
         }
-        if not is_active:
-            url = f"{_nav_base_url()}/tabs/{tab_id}/"
-            if email:
-                url += f"?email={email}"
-            container["selectAction"] = {
-                "type": "Action.OpenUrl",
-                "title": label,
-                "url": url,
+        columns.append(
+            {
+                "type": "Column",
+                "width": "auto",
+                "selectAction": toggle_action,
+                "items": [
+                    {
+                        "type": "Container",
+                        "id": _pill_id(tab_id, active=True),
+                        "isVisible": tab_id == active_tab,
+                        "style": "accent",
+                        "spacing": "None",
+                        "items": [
+                            {
+                                "type": "TextBlock",
+                                "text": title,
+                                "weight": "Bolder",
+                                "wrap": False,
+                                "spacing": "None",
+                                "horizontalAlignment": "Center",
+                            }
+                        ],
+                    },
+                    {
+                        "type": "Container",
+                        "id": _pill_id(tab_id, active=False),
+                        "isVisible": tab_id != active_tab,
+                        "spacing": "None",
+                        "items": [
+                            {
+                                "type": "TextBlock",
+                                "text": title,
+                                "weight": "Bolder",
+                                "wrap": False,
+                                "spacing": "None",
+                                "horizontalAlignment": "Center",
+                            }
+                        ],
+                    },
+                ],
             }
-        columns.append({"type": "Column", "width": "auto", "items": [container]})
+        )
 
+    # Two rows so the six pills wrap the same way as the reference design.
     return {
         "type": "Container",
         "spacing": "Small",
@@ -640,7 +682,7 @@ def _nav_container(
             "type": "ActionSet",
             "actions": _nav_actions(active_tab, email=email, org_id=org_id),
         }
-    return _nav_link_pills(active_tab, email=email)
+    return _nav_pill_rows(active_tab)
 
 
 def _stat_tile(label: str, value: str, sub: str, *, alert: bool = False) -> dict:
@@ -688,12 +730,14 @@ def build_admin_adaptive_card(
     """
     Build Admin Center Adaptive Card (dynamic from DB).
 
-    interactive=False (default for Graph channel posts): the Home card with
-    plain Action.OpenUrl nav pills to the other tabs' admin.html webpages —
-    no Action.Execute (Graph user posts reject / ignore bot verbs, which can
-    leave Posts empty) and no inlined Action.ToggleVisibility sections
-    (those pushed the combined card over Graph's ~28KB Adaptive Card limit,
-    which made Graph reject it outright and left Posts empty).
+    interactive=False (default for Graph channel posts): a single combined
+    card with every tab's section pre-built and Action.ToggleVisibility nav —
+    no Action.Execute, since Graph user posts reject / ignore bot verbs
+    (which can leave Posts empty), but still a real in-place tab switch (old
+    section hides the moment another one is opened) with no bot and no
+    browser tab. Kept lean (CARD_CATALOG, per-card markup) to stay under
+    Graph's ~28KB Adaptive Card limit — over it, Graph rejects the card
+    outright and Posts shows nothing.
     interactive=True: bot-driven in-place nav (Phase 2) — one section per
     message, replaced wholesale by the bot on each click.
     """
@@ -779,14 +823,14 @@ def _home_body_items(dash: dict) -> list[dict]:
             "items": [
                 {
                     "type": "TextBlock",
-                    "text": dash["welcome_title"],
+                    "text": _clip(dash["welcome_title"], 120),
                     "size": "Large",
                     "weight": "Bolder",
                     "wrap": True,
                 },
                 {
                     "type": "TextBlock",
-                    "text": dash["welcome_body"],
+                    "text": _clip(dash["welcome_body"], 220),
                     "wrap": True,
                     "spacing": "Small",
                 },
@@ -815,7 +859,7 @@ def _home_body_items(dash: dict) -> list[dict]:
     items.append(
         {
             "type": "TextBlock",
-            "text": dash["progress_text"],
+            "text": _clip(dash["progress_text"], 140),
             "size": "Small",
             "isSubtle": True,
             "spacing": "Medium",
@@ -834,10 +878,11 @@ def _combined_card(
     active_tab: str = "home",
 ) -> dict:
     """
-    One AdaptiveCard for the Home view (welcome + stats + governance),
-    posted into channel Posts on login/signup. The nav pills are plain
-    Action.OpenUrl links to each tab's admin.html webpage rather than every
-    tab's section inlined here — see _nav_link_pills for why.
+    One AdaptiveCard holding every tab's section as a Container keyed
+    "s<index>", with only the active one visible at a time. Nav pills use
+    Action.ToggleVisibility to force-show the clicked section and
+    force-hide every other one, so switching tabs behaves like a real tab
+    strip, entirely inside the one posted message — no bot, no browser tab.
     """
     active_tab = (active_tab or "home").strip().lower()
     dash = build_admin_dashboard_from_db(
@@ -853,10 +898,27 @@ def _combined_card(
         {
             "type": "Container",
             "id": _section_element_id("home"),
-            "isVisible": True,
+            "isVisible": active_tab == "home",
             "items": _home_body_items(dash),
         }
     ]
+    for tab_id, _label, _icon in ADMIN_TABS:
+        if tab_id == "home":
+            continue
+        sections.append(
+            {
+                "type": "Container",
+                "id": _section_element_id(tab_id),
+                "isVisible": active_tab == tab_id,
+                "items": _section_body_blocks(
+                    tab_id,
+                    full_name=full_name,
+                    org_name=org_name,
+                    email=email,
+                    user=user,
+                ),
+            }
+        )
 
     body = [
         _header(org),
@@ -977,14 +1039,14 @@ def _home_card(
             "items": [
                 {
                     "type": "TextBlock",
-                    "text": dash["welcome_title"],
+                    "text": _clip(dash["welcome_title"], 120),
                     "size": "Large",
                     "weight": "Bolder",
                     "wrap": True,
                 },
                 {
                     "type": "TextBlock",
-                    "text": dash["welcome_body"],
+                    "text": _clip(dash["welcome_body"], 220),
                     "wrap": True,
                     "spacing": "Small",
                 },
@@ -1019,7 +1081,7 @@ def _home_card(
     body.append(
         {
             "type": "TextBlock",
-            "text": dash["progress_text"],
+            "text": _clip(dash["progress_text"], 140),
             "size": "Small",
             "isSubtle": True,
             "spacing": "Medium",

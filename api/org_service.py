@@ -106,6 +106,58 @@ def ensure_default_apps(org: Organization) -> None:
         RegisteredApp.objects.bulk_create(to_create)
 
 
+def replace_welcome_card(
+    access_token: str,
+    *,
+    team_id: str,
+    channel_id: str,
+    full_name: str = "",
+    org_name: str = "",
+    email: str = "",
+    user: AIDLUser | None = None,
+    channel_just_created: bool = False,
+) -> dict:
+    """
+    Post the Admin Center welcome card, first deleting whichever copy was
+    posted last time (Graph has no way to edit an existing message's
+    Adaptive Card attachment, so "refresh" means delete-then-repost) — so a
+    fresh login updates the one card already in Posts instead of stacking a
+    new one on top every time.
+    """
+    from .teams_messaging import delete_channel_message, send_welcome_card_after_signup
+
+    org = get_organization_for_user(user, org_name=org_name)
+    if org and org.teams_welcome_message_id and org.teams_welcome_channel_id == channel_id:
+        delete_channel_message(
+            access_token,
+            team_id=team_id,
+            channel_id=channel_id,
+            message_id=org.teams_welcome_message_id,
+        )
+
+    result = send_welcome_card_after_signup(
+        access_token,
+        team_id=team_id,
+        channel_id=channel_id,
+        full_name=full_name,
+        org_name=org_name,
+        email=email,
+        user=user,
+        channel_just_created=channel_just_created,
+    )
+
+    if org is not None and result and result.get("ok"):
+        new_message_id = result.get("message_id") or (result.get("message") or {}).get("id") or ""
+        if new_message_id and (
+            new_message_id != org.teams_welcome_message_id
+            or channel_id != org.teams_welcome_channel_id
+        ):
+            org.teams_welcome_channel_id = channel_id
+            org.teams_welcome_message_id = new_message_id
+            org.save(update_fields=["teams_welcome_channel_id", "teams_welcome_message_id", "updated_at"])
+    return result
+
+
 def ensure_organization_for_login(
     user: AIDLUser,
     *,
