@@ -149,7 +149,7 @@ def _item_row(title: str, meta: str, desc: str, *, badge: dict | None = None) ->
 # more registered apps) with no upper bound, unlike CARD_CATALOG below, so
 # a fixed slice (unlike items[:12]) is the only way to guarantee this card
 # never crosses Graph's ~28KB size cap regardless of how large the org gets.
-_INLINE_LIST_CAP = 5
+_INLINE_LIST_CAP = 4
 
 
 def _overflow_note(tab: str, total: int, shown: int) -> dict | None:
@@ -643,6 +643,7 @@ def _nav_pill_rows(active_tab: str) -> dict:
                         "type": "Container",
                         "id": _pill_id(tab_id, active=False),
                         "isVisible": tab_id != active_tab,
+                        "style": "emphasis",
                         "spacing": "None",
                         "items": [
                             {
@@ -660,6 +661,10 @@ def _nav_pill_rows(active_tab: str) -> dict:
         )
 
     # Two rows so the six pills wrap the same way as the reference design.
+    # Every pill (active or not) carries a "style" so Teams always draws a
+    # visible pill box — a Container with no style renders as bare text with
+    # no border/background at all, which is why only the active tab used to
+    # look like a button and the rest read as plain inline words.
     return {
         "type": "Container",
         "spacing": "Small",
