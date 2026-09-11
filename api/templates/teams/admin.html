@@ -16,6 +16,7 @@
       --aidl-beige: #f3ede2;
       --aidl-alert: #c4314b;
       --aidl-link: #5b5fc7;
+      --aidl-active: #1f2937;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -51,8 +52,8 @@
       cursor: pointer;
     }
     .nav a.active {
-      background: var(--aidl-purple);
-      border-color: var(--aidl-purple);
+      background: var(--aidl-active);
+      border-color: var(--aidl-active);
       color: #fff;
     }
     .section-label {
@@ -249,6 +250,7 @@
     const INITIAL_TAB = "{{ active_tab }}";
     let activeTab = INITIAL_TAB;
     let currentUser = { fullName: "", orgName: "", email: "" };
+    let sessionToken = new URLSearchParams(window.location.search).get("access_token") || "";
 
     function qsWithUser(extra) {
       const params = new URLSearchParams(window.location.search);
@@ -416,6 +418,29 @@
       currentUser = { fullName, orgName, email };
     }
 
+    // The Teams tab has no browser SPA login to hand this page a token, so
+    // once the caller's email is known (from Teams SSO context or the ?email=
+    // query param), ask the backend for one — issued only if that email is
+    // already on record as an org admin, same check the invite call itself
+    // makes. A non-admin viewer simply gets no token, and the "Add admin"
+    // button explains why instead of silently doing nothing.
+    async function fetchSessionToken() {
+      if (sessionToken || !currentUser.email) return;
+      try {
+        const resp = await fetch(BASE + "/admin/session/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: currentUser.email }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.access_token) sessionToken = data.access_token;
+        }
+      } catch (e) {
+        console.warn("Admin session token fetch failed", e);
+      }
+    }
+
     async function loadTab(tab, { pushState } = {}) {
       activeTab = tab;
       const q = qsWithUser({
@@ -483,17 +508,21 @@
       }
       if (e.target.id === "inviteBtn") {
         const msg = document.getElementById("inviteMsg");
-        const email = (document.getElementById("inviteEmail") || {}).value || "";
-        const token = new URLSearchParams(window.location.search).get("access_token") || "";
-        if (!token) {
-          if (msg) msg.textContent = "Open this tab after Teams login (JWT required to invite).";
+        const email = ((document.getElementById("inviteEmail") || {}).value || "").trim().toLowerCase();
+        if (!email) {
+          if (msg) msg.textContent = "Enter the new admin's Teams email address.";
           return;
         }
+        if (!sessionToken) {
+          if (msg) msg.textContent = "Only an existing admin can add another admin — sign in via Teams as an admin first.";
+          return;
+        }
+        if (msg) msg.textContent = "Adding…";
         fetch(BASE + "/admin/invite/", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + token,
+            "Authorization": "Bearer " + sessionToken,
           },
           body: JSON.stringify({ email }),
         })
@@ -504,7 +533,11 @@
                 ? ("Added admin: " + (data.admin && data.admin.email))
                 : (data.message || data.error || "Invite failed");
             }
-            if (ok) loadTab("add-admin", { pushState: false });
+            if (ok) {
+              const inviteInput = document.getElementById("inviteEmail");
+              if (inviteInput) inviteInput.value = "";
+              loadTab("add-admin", { pushState: false });
+            }
           })
           .catch(() => {
             if (msg) msg.textContent = "Invite failed";
@@ -515,6 +548,7 @@
     (async function init() {
       renderTab(activeTab, activeTab === "home" ? SERVER_DASHBOARD : SERVER_PLACEHOLDER);
       await resolveUserFromTeams();
+      await fetchSessionToken();
       loadTab(activeTab, { pushState: false });
     })();
   </script>

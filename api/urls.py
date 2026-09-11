@@ -39,6 +39,11 @@ urlpatterns = [
         name="teams-admin-invite",
     ),
     path(
+        "teams/admin/session/",
+        teams_app_views.teams_admin_session,
+        name="teams-admin-session",
+    ),
+    path(
         "teams/admin/aup/sign/",
         teams_app_views.teams_admin_sign_aup,
         name="teams-admin-sign-aup",

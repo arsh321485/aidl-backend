@@ -11,6 +11,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from .auth_jwt import create_access_token
 from .auth_views import JWTAuthentication
 from .models import AIDLUser
 from .teams_admin import (
@@ -454,6 +455,31 @@ def teams_admin_export_csv(request):
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
+def teams_admin_session(request):
+    """
+    Mint a short-lived AIDL session token for an org admin who is already
+    inside the Teams tab (the "Send Admin Invite" flow has no browser-based
+    SPA login to hand it a token from). The Teams tab resolves the caller's
+    email from the Teams SSO context client-side and posts it here.
+
+    This does not grant admin — it only authenticates a request for someone
+    the DB already has on record as role=admin (set the normal way, via a
+    prior invite or org setup), the same requirement teams_admin_invite
+    enforces. An unrecognised or non-admin email gets nothing.
+    """
+    email = (request.data.get("email") or "").strip().lower()
+    if not email:
+        return Response({"error": "email_required"}, status=status.HTTP_400_BAD_REQUEST)
+    caller = AIDLUser.objects.filter(
+        email__iexact=email, is_active=True, role=AIDLUser.Role.ADMIN
+    ).first()
+    if caller is None:
+        return Response({"error": "not_admin"}, status=status.HTTP_403_FORBIDDEN)
+    return Response({"ok": True, "access_token": create_access_token(caller)})
+
+
+@api_view(["POST"])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def teams_admin_invite(request):
@@ -466,6 +492,14 @@ def teams_admin_invite(request):
         return Response(
             {"error": "no_organization"},
             status=status.HTTP_400_BAD_REQUEST,
+        )
+    if caller.role != AIDLUser.Role.ADMIN:
+        return Response(
+            {
+                "error": "not_admin",
+                "message": "Only an existing admin can add another admin.",
+            },
+            status=status.HTTP_403_FORBIDDEN,
         )
     target = AIDLUser.objects.filter(email__iexact=email, is_active=True).first()
     if target is None:
