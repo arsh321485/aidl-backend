@@ -9,14 +9,14 @@ from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
 
 
-# 1x1 dark-slate (#1f2937) PNG, tiled via backgroundImage, to give the
-# active nav pill a deliberately dark highlight instead of Adaptive Cards'
-# themed "accent" style — which Teams renders as its own brand blue/purple,
-# not a color this card can otherwise override (Container "style" is a
-# fixed host-themed enum, not an arbitrary hex).
+# 1x1 dark-blue (#1b2a4a) PNG, tiled via backgroundImage, to give the
+# active nav pill a deliberately dark-blue highlight instead of Adaptive
+# Cards' themed "accent" style — which Teams renders as its own brand
+# blue/purple, not a color this card can otherwise override (Container
+# "style" is a fixed host-themed enum, not an arbitrary hex).
 _ACTIVE_PILL_BG = (
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-    "DElEQVR42mOQ1zQHAADqAIBxc0TdAAAAAElFTkSuQmCC"
+    "DElEQVR42mOQ1vICAADzAJBMmffaAAAAAElFTkSuQmCC"
 )
 
 
