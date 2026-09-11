@@ -92,23 +92,43 @@ def _nav_open_url_actions(
     full_name: str = "",
     org_name: str = "",
     email: str = "",
+    team_id: str = "",
+    channel_id: str = "",
 ) -> list[dict]:
     """
     Graph-safe clickable nav — Action.OpenUrl needs no bot, so it works on
-    every Posts card. Opens the matching Admin Center tab (admin.html), which
-    carries the same 6-pill header everywhere.
+    every Posts card. When the AIDL team/channel ids are known, each button
+    deep-links to that section's own Teams tab (entity "aidl-<tab>", the same
+    ones ensure_aidl_channel_tabs installs) so it opens in-app next to Home
+    instead of popping an external browser tab. Falls back to the plain
+    admin.html URL only when the ids aren't available yet.
     """
+    from .teams_channel_tabs import build_channel_tab_deep_link
+
     base = _nav_base_url()
     query = urlencode(
         {k: v for k, v in {"full_name": full_name, "org_name": org_name, "email": email}.items() if v}
     )
     suffix = f"?{query}" if query else ""
+    tenant_id = getattr(settings, "MS_TENANT_ID", "") or ""
+
     actions = []
     for tab_id, label, icon in ADMIN_TABS:
+        if team_id and channel_id:
+            url = build_channel_tab_deep_link(
+                entity_id=f"aidl-{tab_id}",
+                team_id=team_id,
+                channel_id=channel_id,
+                tenant_id=tenant_id,
+                email=email,
+                label=label,
+            )
+        else:
+            url = f"{base}/tabs/{tab_id}/{suffix}"
         action = {
             "type": "Action.OpenUrl",
             "title": f"{icon} {label}" if icon else label,
-            "url": f"{base}/tabs/{tab_id}/{suffix}",
+            "url": url,
         }
         if tab_id == active_tab:
             action["style"] = "positive"
@@ -123,6 +143,8 @@ def _nav_container(
     org_id: str = "",
     full_name: str = "",
     org_name: str = "",
+    team_id: str = "",
+    channel_id: str = "",
     interactive: bool = False,
 ) -> dict:
     if interactive:
@@ -133,7 +155,12 @@ def _nav_container(
     return {
         "type": "ActionSet",
         "actions": _nav_open_url_actions(
-            active_tab, full_name=full_name, org_name=org_name, email=email
+            active_tab,
+            full_name=full_name,
+            org_name=org_name,
+            email=email,
+            team_id=team_id,
+            channel_id=channel_id,
         ),
     }
 
@@ -222,6 +249,8 @@ def _home_card(
     )
     org_id = dash.get("organization_id") or ""
     org = dash.get("org_name") or org_name or "AIDL"
+    team_id = getattr(user, "teams_team_id", "") or ""
+    channel_id = getattr(user, "teams_channel_id", "") or ""
 
     stats = dash.get("stats") or []
     stats_cols = []
@@ -283,6 +312,8 @@ def _home_card(
             org_id=org_id,
             full_name=full_name,
             org_name=org,
+            team_id=team_id,
+            channel_id=channel_id,
             interactive=interactive,
         ),
         {
@@ -408,6 +439,8 @@ def _section_card(
     )
     org_id = payload.get("organization_id") or ""
     org = payload.get("org_name") or org_name or "AIDL"
+    team_id = getattr(user, "teams_team_id", "") or ""
+    channel_id = getattr(user, "teams_channel_id", "") or ""
     items = payload.get("items") or []
     item_blocks = []
     for it in items[:12]:
@@ -504,6 +537,8 @@ def _section_card(
             org_id=org_id,
             full_name=full_name,
             org_name=org,
+            team_id=team_id,
+            channel_id=channel_id,
             interactive=interactive,
         ),
         {
