@@ -118,22 +118,23 @@ def replace_welcome_card(
     channel_just_created: bool = False,
 ) -> dict:
     """
-    Post the Admin Center welcome card, first deleting whichever copy was
+    Post the Admin Center welcome card, then delete whichever copy was
     posted last time (Graph has no way to edit an existing message's
-    Adaptive Card attachment, so "refresh" means delete-then-repost) — so a
+    Adaptive Card attachment, so "refresh" means repost-then-delete) — so a
     fresh login updates the one card already in Posts instead of stacking a
     new one on top every time.
+
+    Post-then-delete, not delete-then-post: send_welcome_card_after_signup
+    already falls back through a full dashboard card, a minimal text card,
+    and a learner-welcome card, but if every one of those still fails
+    (Graph throttling, a token/consent hiccup, a brand-new channel not yet
+    message-ready) a delete-first order leaves the channel with nothing at
+    all — Teams then shows its own empty-channel placeholder in Posts,
+    which is worse than a stale duplicate for a login or two.
     """
     from .teams_messaging import delete_channel_message, send_welcome_card_after_signup
 
     org = get_organization_for_user(user, org_name=org_name)
-    if org and org.teams_welcome_message_id and org.teams_welcome_channel_id == channel_id:
-        delete_channel_message(
-            access_token,
-            team_id=team_id,
-            channel_id=channel_id,
-            message_id=org.teams_welcome_message_id,
-        )
 
     result = send_welcome_card_after_signup(
         access_token,
@@ -148,13 +149,21 @@ def replace_welcome_card(
 
     if org is not None and result and result.get("ok"):
         new_message_id = result.get("message_id") or (result.get("message") or {}).get("id") or ""
-        if new_message_id and (
-            new_message_id != org.teams_welcome_message_id
-            or channel_id != org.teams_welcome_channel_id
-        ):
+        old_message_id = org.teams_welcome_message_id
+        old_channel_id = org.teams_welcome_channel_id
+        if new_message_id and (new_message_id != old_message_id or channel_id != old_channel_id):
             org.teams_welcome_channel_id = channel_id
             org.teams_welcome_message_id = new_message_id
             org.save(update_fields=["teams_welcome_channel_id", "teams_welcome_message_id", "updated_at"])
+            # Only now remove the previous card — the new one is confirmed
+            # posted, so Posts is never left empty by a failed refresh.
+            if old_message_id and old_channel_id == channel_id and old_message_id != new_message_id:
+                delete_channel_message(
+                    access_token,
+                    team_id=team_id,
+                    channel_id=channel_id,
+                    message_id=old_message_id,
+                )
     return result
 
 
