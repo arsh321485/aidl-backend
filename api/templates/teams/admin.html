@@ -48,6 +48,7 @@
       text-decoration: none;
       font-size: 14px;
       font-weight: 600;
+      cursor: pointer;
     }
     .nav a.active {
       background: var(--aidl-purple);
@@ -196,6 +197,7 @@
       font-size: 14px;
       font-weight: 600;
       text-decoration: none;
+      cursor: pointer;
     }
     .placeholder-title {
       font-size: 20px;
@@ -221,7 +223,7 @@
 </head>
 <body>
   <div class="page">
-    <nav class="nav" aria-label="AIDL Admin Center">
+    <nav class="nav" aria-label="AIDL Admin Center" id="navBar">
       {% for tab in tabs %}
       <a href="{{ tab.url }}" class="{% if tab.active %}active{% endif %}" data-tab-link="{{ tab.id }}">
         <span aria-hidden="true">{{ tab.icon }}</span>
@@ -230,78 +232,23 @@
       {% endfor %}
     </nav>
 
-    {% if active_tab == "home" %}
-    <p class="section-label">Shown the moment an admin opens your Admin Center</p>
-    <p class="section-sub">Depot Overview</p>
-    {% endif %}
+    <p class="section-label" id="sectionLabel" hidden>Shown the moment an admin opens your Admin Center</p>
+    <p class="section-sub" id="sectionSub" hidden>Depot Overview</p>
 
     <div class="card" id="mainCard">
       <p class="user-chip" id="userChip">Loading signed-in user…</p>
-
-      {% if active_tab == "home" %}
-      <div class="brand">
-        <img id="logoImg" src="{{ dashboard.logo_url }}" alt="AIDL" />
-        <div class="brand-text" id="brandText">AIDL for {{ dashboard.org_name }}</div>
-      </div>
-      <h1 class="welcome" id="welcomeTitle">{{ dashboard.welcome_title }}</h1>
-      <p class="intro" id="welcomeBody">{{ dashboard.welcome_body }}</p>
-
-      <div class="stats" id="statsRow">
-        {% for s in dashboard.stats %}
-        <div class="stat">
-          <div class="stat-label">{{ s.label }}</div>
-          <div class="stat-value{% if s.alert %} alert{% endif %}">{{ s.value }}</div>
-          <div class="stat-sub">{{ s.sub }}</div>
-        </div>
-        {% endfor %}
-      </div>
-
-      <p class="gov-title">GOVERNANCE SNAPSHOT</p>
-      <div class="gov" id="govRow">
-        {% for g in dashboard.governance %}
-        <div class="gov-item">
-          <div class="gov-label">{{ g.label }}</div>
-          <div class="gov-value">{{ g.value }}</div>
-          <div class="gov-sub">{{ g.sub }}</div>
-        </div>
-        {% endfor %}
-      </div>
-
-      <div class="actions">
-        <button type="button" class="btn" id="exportBtn">{{ dashboard.export_label }}</button>
-        <span class="progress" id="progressText">{{ dashboard.progress_text }}</span>
-      </div>
-      <hr class="divider" />
-      <a class="next-link" id="nextLink" href="{{ next_tab_url }}">{{ dashboard.next_step }}</a>
-
-      {% else %}
-      <div class="brand">
-        <img src="{{ placeholder.logo_url }}" alt="AIDL" />
-        <div class="brand-text">AIDL for {{ placeholder.org_name }}</div>
-      </div>
-      <h1 class="placeholder-title" id="phTitle">{{ placeholder.heading }}</h1>
-      <p class="placeholder-body" id="phBody">{{ placeholder.body }}</p>
-      <div id="itemsHost" style="margin-top:16px;"></div>
-      {% if active_tab == "add-admin" %}
-      <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
-        <input id="inviteEmail" type="email" placeholder="admin@company.com"
-          style="flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--aidl-border);border-radius:6px;" />
-        <button type="button" class="btn" id="inviteBtn">Add admin</button>
-      </div>
-      <p id="inviteMsg" class="progress" style="margin-top:8px;"></p>
-      {% endif %}
-      {% if active_tab == "policy" and placeholder.policy_url %}
-      <p style="margin-top:12px;"><a class="next-link" id="policyLink" href="{{ placeholder.policy_url }}" target="_blank" rel="noopener">Read full policy</a></p>
-      {% endif %}
-      {% endif %}
+      <div id="cardBody"></div>
     </div>
   </div>
 
   <script>
-    const ACTIVE_TAB = "{{ active_tab }}";
     const BASE = "{{ teams_base_url }}";
     const SERVER_DASHBOARD = {{ dashboard_json|safe }};
     const SERVER_PLACEHOLDER = {{ placeholder_json|safe }};
+
+    const INITIAL_TAB = "{{ active_tab }}";
+    let activeTab = INITIAL_TAB;
+    let currentUser = { fullName: "", orgName: "", email: "" };
 
     function qsWithUser(extra) {
       const params = new URLSearchParams(window.location.search);
@@ -311,93 +258,141 @@
       return params.toString();
     }
 
-    function applyUserToNav(fullName, orgName, email) {
-      document.querySelectorAll("[data-tab-link]").forEach((a) => {
-        const id = a.getAttribute("data-tab-link");
-        const q = qsWithUser({ full_name: fullName, org_name: orgName, email: email });
-        a.href = BASE + "/tabs/" + id + "/" + (q ? "?" + q : "");
+    function tabUrl(tabId) {
+      const q = qsWithUser({
+        full_name: currentUser.fullName,
+        org_name: currentUser.orgName,
+        email: currentUser.email,
       });
-      const next = document.getElementById("nextLink");
-      if (next) {
-        const q = qsWithUser({ full_name: fullName, org_name: orgName, email: email });
-        next.href = BASE + "/tabs/add-admin/" + (q ? "?" + q : "");
-      }
+      return BASE + "/tabs/" + tabId + "/" + (q ? "?" + q : "");
     }
 
-    function renderHome(data) {
-      const chip = document.getElementById("userChip");
-      if (chip) {
-        chip.textContent = data.email
-          ? ("Signed in as " + data.full_name + " · " + data.email)
-          : ("Signed in as " + (data.full_name || data.first_name));
-      }
-      const brand = document.getElementById("brandText");
-      if (brand) brand.textContent = "AIDL for " + data.org_name;
-      const title = document.getElementById("welcomeTitle");
-      if (title) title.textContent = data.welcome_title;
-      const body = document.getElementById("welcomeBody");
-      if (body) body.textContent = data.welcome_body;
-      const progress = document.getElementById("progressText");
-      if (progress) progress.textContent = data.progress_text;
-      const stats = document.getElementById("statsRow");
-      if (stats && data.stats) {
-        stats.innerHTML = data.stats.map((s) => (
-          '<div class="stat">' +
-            '<div class="stat-label">' + s.label + '</div>' +
-            '<div class="stat-value' + (s.alert ? ' alert' : '') + '">' + s.value + '</div>' +
-            '<div class="stat-sub">' + s.sub + '</div>' +
-          '</div>'
-        )).join("");
-      }
-      const gov = document.getElementById("govRow");
-      if (gov && data.governance) {
-        gov.innerHTML = data.governance.map((g) => (
-          '<div class="gov-item">' +
-            '<div class="gov-label">' + g.label + '</div>' +
-            '<div class="gov-value">' + g.value + '</div>' +
-            '<div class="gov-sub">' + g.sub + '</div>' +
-          '</div>'
-        )).join("");
-      }
-      applyUserToNav(data.full_name, data.org_name, data.email);
+    function applyUserToNav() {
+      document.querySelectorAll("[data-tab-link]").forEach((a) => {
+        a.setAttribute("href", tabUrl(a.getAttribute("data-tab-link")));
+      });
     }
 
-    function renderItems(items) {
-      const host = document.getElementById("itemsHost");
-      if (!host) return;
-      if (!items || !items.length) {
-        host.innerHTML = '<p class="progress">No records yet for this organisation.</p>';
-        return;
+    function escapeHtml(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+    }
+
+    function buildHomeHtml(data) {
+      const stats = (data.stats || []).map((s) => (
+        '<div class="stat">' +
+          '<div class="stat-label">' + escapeHtml(s.label) + '</div>' +
+          '<div class="stat-value' + (s.alert ? ' alert' : '') + '">' + escapeHtml(s.value) + '</div>' +
+          '<div class="stat-sub">' + escapeHtml(s.sub) + '</div>' +
+        '</div>'
+      )).join("");
+      const gov = (data.governance || []).map((g) => (
+        '<div class="gov-item">' +
+          '<div class="gov-label">' + escapeHtml(g.label) + '</div>' +
+          '<div class="gov-value">' + escapeHtml(g.value) + '</div>' +
+          '<div class="gov-sub">' + escapeHtml(g.sub) + '</div>' +
+        '</div>'
+      )).join("");
+      return (
+        '<div class="brand">' +
+          '<img src="' + escapeHtml(data.logo_url) + '" alt="AIDL" />' +
+          '<div class="brand-text">AIDL for ' + escapeHtml(data.org_name) + '</div>' +
+        '</div>' +
+        '<h1 class="welcome">' + escapeHtml(data.welcome_title) + '</h1>' +
+        '<p class="intro">' + escapeHtml(data.welcome_body) + '</p>' +
+        '<div class="stats">' + stats + '</div>' +
+        '<p class="gov-title">GOVERNANCE SNAPSHOT</p>' +
+        '<div class="gov">' + gov + '</div>' +
+        '<div class="actions">' +
+          '<button type="button" class="btn" id="exportBtn">' + escapeHtml(data.export_label) + '</button>' +
+          '<span class="progress">' + escapeHtml(data.progress_text) + '</span>' +
+        '</div>' +
+        '<hr class="divider" />' +
+        '<a class="next-link" id="nextLink" data-tab-link="add-admin" href="' + tabUrl("add-admin") + '">' + escapeHtml(data.next_step) + '</a>'
+      );
+    }
+
+    function buildPlaceholderHtml(tab, data) {
+      const items = data.items || [];
+      let itemsHtml;
+      if (!items.length) {
+        itemsHtml = '<p class="progress">No records yet for this organisation.</p>';
+      } else {
+        itemsHtml = '<div style="display:grid;gap:8px;">' + items.map((it) => {
+          const title = it.name || it.email || "Item";
+          const meta = [it.email, it.role, it.status].filter(Boolean).join(" · ");
+          const desc = it.description || it.sub || "";
+          return (
+            '<div style="background:var(--aidl-beige);border-radius:8px;padding:10px 12px;">' +
+              '<div style="font-weight:700;">' + escapeHtml(title) + '</div>' +
+              (meta ? '<div class="progress">' + escapeHtml(meta) + '</div>' : '') +
+              (desc ? '<div class="progress">' + escapeHtml(desc) + '</div>' : '') +
+            '</div>'
+          );
+        }).join("") + '</div>';
       }
-      host.innerHTML = '<div style="display:grid;gap:8px;">' + items.map((it) => {
-        const title = it.name || it.email || "Item";
-        const meta = [it.email, it.role, it.status].filter(Boolean).join(" · ");
-        const desc = it.description || it.sub || "";
-        return (
-          '<div style="background:var(--aidl-beige);border-radius:8px;padding:10px 12px;">' +
-            '<div style="font-weight:700;">' + title + '</div>' +
-            (meta ? '<div class="progress">' + meta + '</div>' : '') +
-            (desc ? '<div class="progress">' + desc + '</div>' : '') +
-          '</div>'
+
+      let extra = "";
+      if (tab === "add-admin") {
+        extra = (
+          '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<input id="inviteEmail" type="email" placeholder="admin@company.com" ' +
+              'style="flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--aidl-border);border-radius:6px;" />' +
+            '<button type="button" class="btn" id="inviteBtn">Add admin</button>' +
+          '</div>' +
+          '<p id="inviteMsg" class="progress" style="margin-top:8px;"></p>'
         );
-      }).join("") + '</div>';
+      } else if (tab === "policy" && data.policy_url) {
+        extra = '<p style="margin-top:12px;"><a class="next-link" id="policyLink" href="' + escapeHtml(data.policy_url) + '" target="_blank" rel="noopener">Read full policy</a></p>';
+      }
+
+      return (
+        '<div class="brand">' +
+          '<img src="' + escapeHtml(data.logo_url) + '" alt="AIDL" />' +
+          '<div class="brand-text">AIDL for ' + escapeHtml(data.org_name) + '</div>' +
+        '</div>' +
+        '<h1 class="placeholder-title">' + escapeHtml(data.heading) + '</h1>' +
+        '<p class="placeholder-body">' + escapeHtml(data.body) + '</p>' +
+        '<div style="margin-top:16px;">' + itemsHtml + '</div>' +
+        extra
+      );
     }
 
-    function renderPlaceholder(data) {
+    function setUserChip(data) {
       const chip = document.getElementById("userChip");
-      if (chip) {
-        chip.textContent = data.full_name
-          ? ("Signed in as " + data.full_name + (data.email ? " · " + data.email : ""))
-          : "Admin Center";
+      if (!chip) return;
+      if (data.full_name || data.first_name) {
+        chip.textContent = data.email
+          ? ("Signed in as " + (data.full_name || data.first_name) + " · " + data.email)
+          : ("Signed in as " + (data.full_name || data.first_name));
+      } else {
+        chip.textContent = "Admin Center";
       }
-      const title = document.getElementById("phTitle");
-      if (title) title.textContent = data.heading;
-      const body = document.getElementById("phBody");
-      if (body) body.textContent = data.body;
-      renderItems(data.items || []);
-      const policy = document.getElementById("policyLink");
-      if (policy && data.policy_url) policy.href = data.policy_url;
-      applyUserToNav(data.full_name, data.org_name, data.email || "");
+    }
+
+    function setActiveNav(tab) {
+      document.querySelectorAll("[data-tab-link]").forEach((a) => {
+        a.classList.toggle("active", a.getAttribute("data-tab-link") === tab);
+      });
+      const label = document.getElementById("sectionLabel");
+      const sub = document.getElementById("sectionSub");
+      if (label) label.hidden = tab !== "home";
+      if (sub) sub.hidden = tab !== "home";
+      document.title = "AIDL Admin — " + tab.replace(/-/g, " ");
+    }
+
+    function renderTab(tab, payload) {
+      const body = document.getElementById("cardBody");
+      if (!body) return;
+      if (tab === "home") {
+        body.innerHTML = buildHomeHtml(payload);
+      } else {
+        body.innerHTML = buildPlaceholderHtml(tab, payload);
+      }
+      setUserChip(payload);
+      setActiveNav(tab);
+      applyUserToNav();
     }
 
     async function resolveUserFromTeams() {
@@ -414,56 +409,79 @@
             if (ctx.user.displayName) fullName = ctx.user.displayName;
             if (ctx.user.userPrincipalName) email = email || ctx.user.userPrincipalName;
           }
-          if (ctx && ctx.team && ctx.team.displayName && !orgName) {
-            // Prefer configured org; team name is only a soft hint when empty.
-          }
         }
       } catch (e) {
         console.warn("Teams context unavailable", e);
       }
-      return { fullName, orgName, email };
+      currentUser = { fullName, orgName, email };
     }
 
-    async function loadDynamic() {
-      const user = await resolveUserFromTeams();
+    async function loadTab(tab, { pushState } = {}) {
+      activeTab = tab;
       const q = qsWithUser({
-        full_name: user.fullName,
-        org_name: user.orgName,
-        email: user.email,
+        full_name: currentUser.fullName,
+        org_name: currentUser.orgName,
+        email: currentUser.email,
       });
 
+      if (pushState) {
+        try {
+          window.history.pushState({ tab }, "", tabUrl(tab));
+        } catch (e) {
+          // Ignore — cross-origin/sandboxed iframes may block history writes.
+        }
+      }
+
       try {
-        const resp = await fetch(BASE + "/admin/" + ACTIVE_TAB + "/?" + q);
+        const resp = await fetch(BASE + "/admin/" + tab + "/?" + q);
         if (resp.ok) {
           const data = await resp.json();
-          if (ACTIVE_TAB === "home" && data.dashboard) {
-            renderHome(data.dashboard);
+          if (tab === "home" && data.dashboard) {
+            renderTab("home", data.dashboard);
             return;
           }
           if (data.placeholder) {
-            renderPlaceholder(data.placeholder);
+            renderTab(tab, data.placeholder);
             return;
           }
         }
       } catch (e) {
-        console.warn("Admin API fetch failed, using server render", e);
+        console.warn("Admin API fetch failed, using server default", e);
       }
 
-      if (ACTIVE_TAB === "home") renderHome(SERVER_DASHBOARD);
-      else renderPlaceholder(SERVER_PLACEHOLDER);
+      if (tab === "home") renderTab("home", SERVER_DASHBOARD);
+      else if (tab === INITIAL_TAB) renderTab(tab, SERVER_PLACEHOLDER);
+      else renderTab(tab, { heading: tab, body: "Could not load this section — check your connection and try again.", items: [] });
     }
 
-    const exportBtn = document.getElementById("exportBtn");
-    if (exportBtn) {
-      exportBtn.addEventListener("click", () => {
+    document.getElementById("navBar").addEventListener("click", (e) => {
+      const link = e.target.closest("[data-tab-link]");
+      if (!link) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // let "open in new tab" work
+      e.preventDefault();
+      const tab = link.getAttribute("data-tab-link");
+      if (tab !== activeTab) loadTab(tab, { pushState: true });
+    });
+
+    window.addEventListener("popstate", () => {
+      const match = window.location.pathname.match(/\/tabs\/([^/]+)\/?$/);
+      const tab = match ? match[1] : "home";
+      loadTab(tab, { pushState: false });
+    });
+
+    document.addEventListener("click", (e) => {
+      const nextLink = e.target.closest("#nextLink");
+      if (nextLink) {
+        e.preventDefault();
+        if (activeTab !== "add-admin") loadTab("add-admin", { pushState: true });
+        return;
+      }
+      if (e.target.id === "exportBtn") {
         const q = qsWithUser({});
         window.location.href = BASE + "/admin/export/" + (q ? "?" + q : "");
-      });
-    }
-
-    const inviteBtn = document.getElementById("inviteBtn");
-    if (inviteBtn) {
-      inviteBtn.addEventListener("click", async () => {
+        return;
+      }
+      if (e.target.id === "inviteBtn") {
         const msg = document.getElementById("inviteMsg");
         const email = (document.getElementById("inviteEmail") || {}).value || "";
         const token = new URLSearchParams(window.location.search).get("access_token") || "";
@@ -471,29 +489,34 @@
           if (msg) msg.textContent = "Open this tab after Teams login (JWT required to invite).";
           return;
         }
-        try {
-          const resp = await fetch(BASE + "/admin/invite/", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": "Bearer " + token,
-            },
-            body: JSON.stringify({ email }),
+        fetch(BASE + "/admin/invite/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token,
+          },
+          body: JSON.stringify({ email }),
+        })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+          .then(({ ok, data }) => {
+            if (msg) {
+              msg.textContent = ok
+                ? ("Added admin: " + (data.admin && data.admin.email))
+                : (data.message || data.error || "Invite failed");
+            }
+            if (ok) loadTab("add-admin", { pushState: false });
+          })
+          .catch(() => {
+            if (msg) msg.textContent = "Invite failed";
           });
-          const data = await resp.json();
-          if (msg) {
-            msg.textContent = resp.ok
-              ? ("Added admin: " + (data.admin && data.admin.email))
-              : (data.message || data.error || "Invite failed");
-          }
-          if (resp.ok) loadDynamic();
-        } catch (e) {
-          if (msg) msg.textContent = "Invite failed";
-        }
-      });
-    }
+      }
+    });
 
-    loadDynamic();
+    (async function init() {
+      renderTab(activeTab, activeTab === "home" ? SERVER_DASHBOARD : SERVER_PLACEHOLDER);
+      await resolveUserFromTeams();
+      loadTab(activeTab, { pushState: false });
+    })();
   </script>
 </body>
 </html>
