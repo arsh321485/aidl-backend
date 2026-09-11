@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
+from django.conf import settings
+
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
+
+
+def _nav_base_url() -> str:
+    configured = (getattr(settings, "MS_TEAMS_APP_BASE_URL", None) or "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return "https://aidl-backend.onrender.com/api/teams"
 
 
 def _header(org_name: str) -> dict:
@@ -75,20 +86,34 @@ def _nav_actions(active_tab: str, *, email: str = "", org_id: str = "") -> list[
     return actions
 
 
-def _nav_text(active_tab: str) -> dict:
-    """Graph-safe nav row (no bot required) — active tab highlighted in text."""
-    parts = []
-    for tab_id, label, _icon in ADMIN_TABS:
+def _nav_open_url_actions(
+    active_tab: str,
+    *,
+    full_name: str = "",
+    org_name: str = "",
+    email: str = "",
+) -> list[dict]:
+    """
+    Graph-safe clickable nav — Action.OpenUrl needs no bot, so it works on
+    every Posts card. Opens the matching Admin Center tab (admin.html), which
+    carries the same 6-pill header everywhere.
+    """
+    base = _nav_base_url()
+    query = urlencode(
+        {k: v for k, v in {"full_name": full_name, "org_name": org_name, "email": email}.items() if v}
+    )
+    suffix = f"?{query}" if query else ""
+    actions = []
+    for tab_id, label, icon in ADMIN_TABS:
+        action = {
+            "type": "Action.OpenUrl",
+            "title": f"{icon} {label}" if icon else label,
+            "url": f"{base}/tabs/{tab_id}/{suffix}",
+        }
         if tab_id == active_tab:
-            parts.append(f"**{label}**")
-        else:
-            parts.append(label)
-    return {
-        "type": "TextBlock",
-        "text": " · ".join(parts),
-        "wrap": True,
-        "spacing": "Small",
-    }
+            action["style"] = "positive"
+        actions.append(action)
+    return actions
 
 
 def _nav_container(
@@ -96,6 +121,8 @@ def _nav_container(
     *,
     email: str = "",
     org_id: str = "",
+    full_name: str = "",
+    org_name: str = "",
     interactive: bool = False,
 ) -> dict:
     if interactive:
@@ -103,7 +130,12 @@ def _nav_container(
             "type": "ActionSet",
             "actions": _nav_actions(active_tab, email=email, org_id=org_id),
         }
-    return _nav_text(active_tab)
+    return {
+        "type": "ActionSet",
+        "actions": _nav_open_url_actions(
+            active_tab, full_name=full_name, org_name=org_name, email=email
+        ),
+    }
 
 
 def _stat_tile(label: str, value: str, sub: str, *, alert: bool = False) -> dict:
@@ -249,6 +281,8 @@ def _home_card(
             "home",
             email=email,
             org_id=org_id,
+            full_name=full_name,
+            org_name=org,
             interactive=interactive,
         ),
         {
@@ -468,6 +502,8 @@ def _section_card(
             tab,
             email=email,
             org_id=org_id,
+            full_name=full_name,
+            org_name=org,
             interactive=interactive,
         ),
         {

@@ -7,7 +7,7 @@ import requests
 from django.conf import settings
 
 from .graph_client import GRAPH_BASE, graph_headers
-from .teams_cards import TEAMS_TABS
+from .teams_admin import ADMIN_TABS
 
 
 logger = logging.getLogger(__name__)
@@ -15,10 +15,14 @@ logger = logging.getLogger(__name__)
 # Built-in Teams "Website" tab — works without uploading a custom app manifest.
 WEBSITE_TAB_APP_ID = "com.microsoft.teamspace.tab.web"
 
+# Channel tabs = the same 6 pills as the in-page Admin Center header
+# (Home, Add Admin, Policy, Cards, AI Apps, IT Apps) so every tab a user opens
+# in Teams renders admin.html with a consistent, clickable nav.
 AIDL_CHANNEL_TABS = tuple(
     (f"aidl-{tab_id}", label, tab_id)
-    for tab_id, label, _icon in TEAMS_TABS
+    for tab_id, label, _icon in ADMIN_TABS
 )
+_AIDL_ENTITY_PREFIX = "aidl-"
 
 
 def target_channel_name() -> str:
@@ -102,6 +106,17 @@ def create_channel_website_tab(
         return None, str(exc)
 
 
+def delete_channel_tab(access_token: str, team_id: str, channel_id: str, tab_id: str) -> bool:
+    url = f"{GRAPH_BASE}/teams/{team_id}/channels/{channel_id}/tabs/{tab_id}"
+    try:
+        response = requests.delete(url, headers=graph_headers(access_token), timeout=20)
+        response.raise_for_status()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("delete channel tab %s on channel %s failed: %s", tab_id, channel_id, exc)
+        return False
+
+
 def _existing_entity_ids(existing_tabs: list) -> set[str]:
     ids: set[str] = set()
     for tab in existing_tabs:
@@ -110,6 +125,26 @@ def _existing_entity_ids(existing_tabs: list) -> set[str]:
         if entity_id:
             ids.add(entity_id)
     return ids
+
+
+def _stale_aidl_tabs(existing_tabs: list, expected_entity_ids: set[str]) -> list[dict]:
+    """
+    Tabs from a previous AIDL tab set (e.g. the old Learner's Permit / Highway
+    Code / Traffic Light Check tabs) that are no longer part of the current
+    6-pill Admin Center header. Identified by our "aidl-" entity id prefix so
+    we never touch tabs a customer added themselves.
+    """
+    stale = []
+    for tab in existing_tabs:
+        config = tab.get("configuration") or {}
+        entity_id = (config.get("entityId") or "").strip()
+        tab_id = (tab.get("id") or "").strip()
+        if not tab_id or not entity_id.startswith(_AIDL_ENTITY_PREFIX):
+            continue
+        if entity_id in expected_entity_ids:
+            continue
+        stale.append({"id": tab_id, "entity_id": entity_id, "display_name": tab.get("displayName") or entity_id})
+    return stale
 
 
 def _find_home_tab_web_url(tabs: list) -> str:
@@ -135,8 +170,10 @@ def ensure_aidl_channel_tabs(
     channel_just_created: bool = False,
 ) -> dict | None:
     """
-    Add Home / Learner's Permit / Highway Code / Traffic Light Check tabs
-    ONLY on the configured aidl dashboard channel (never General).
+    Add the Admin Center tabs — Home / Add Admin / Policy / Cards / AI Apps /
+    IT Apps — ONLY on the configured aidl dashboard channel (never General),
+    and remove any stale tabs from a previous AIDL tab set so every tab a
+    user opens shows the same clickable pill header.
     """
     if not getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
         return {"skipped": True, "reason": "disabled"}
@@ -187,6 +224,13 @@ def ensure_aidl_channel_tabs(
     failed: list[dict] = []
     home_web_url = _find_home_tab_web_url(existing_tabs)
 
+    expected_entity_ids = {entity_id for entity_id, _label, _slug in AIDL_CHANNEL_TABS}
+    removed: list[str] = []
+    for stale in _stale_aidl_tabs(existing_tabs, expected_entity_ids):
+        if delete_channel_tab(access_token, team_id, channel_id, stale["id"]):
+            removed.append(stale["display_name"])
+            present.discard(stale["entity_id"])
+
     for entity_id, display_name, tab_slug in AIDL_CHANNEL_TABS:
         if entity_id in present:
             continue
@@ -222,6 +266,7 @@ def ensure_aidl_channel_tabs(
         "home_entity_id": home_entity,
         "home_web_url": home_web_url,
         "tabs_created": created,
+        "tabs_removed": removed,
         "tabs_failed": failed,
         "tabs_present": len(present) + len(created),
         "expected_tabs": len(AIDL_CHANNEL_TABS),
