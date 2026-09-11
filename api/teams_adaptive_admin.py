@@ -84,8 +84,9 @@ def _section_body_blocks(
     user=None,
 ) -> list[dict]:
     """Heading + body + item list + tab-specific extras for one section, with
-    no header/nav — used to fill an Action.ShowCard nested card so a pill
-    click expands its content in place instead of leaving the Posts card."""
+    no header/nav — fills a toggle-visibility Container in the combined card
+    (see _combined_card) so a pill click swaps this content in below the nav
+    without a bot round-trip or a new browser tab."""
     payload = build_admin_tab_payload(
         tab,
         full_name=full_name,
@@ -196,47 +197,28 @@ def _section_body_blocks(
     return blocks
 
 
-def _nav_showcard_actions(
-    active_tab: str,
-    *,
-    full_name: str = "",
-    org_name: str = "",
-    email: str = "",
-    user=None,
-) -> list[dict]:
+def _section_element_id(tab_id: str) -> str:
+    return f"sec-{tab_id}"
+
+
+def _nav_toggle_actions(active_tab: str) -> list[dict]:
     """
-    Graph-safe clickable nav — each pill is an Action.ShowCard, so clicking it
-    expands that section's content directly below the nav row inside the same
-    Posts card. Purely client-side (no bot round-trip needed), so it never
-    pops a new browser tab/window the way Action.OpenUrl did.
+    Graph-safe clickable nav — each pill is an Action.ToggleVisibility that
+    force-shows its own section Container and force-hides every other one, so
+    clicking a pill swaps the card content in place (Home's card disappears
+    the moment another tab is opened) instead of leaving Home visible
+    underneath or popping a new browser tab/window.
     """
+    all_ids = [_section_element_id(t) for t, _l, _i in ADMIN_TABS]
     actions = []
     for tab_id, label, icon in ADMIN_TABS:
-        title = f"{icon} {label}" if icon else label
-        if tab_id == "home":
-            nested_body = [
-                {
-                    "type": "TextBlock",
-                    "text": "You're viewing Home ↓",
-                    "isSubtle": True,
-                    "wrap": True,
-                }
-            ]
-        else:
-            nested_body = _section_body_blocks(
-                tab_id,
-                full_name=full_name,
-                org_name=org_name,
-                email=email,
-                user=user,
-            )
+        target_id = _section_element_id(tab_id)
         action = {
-            "type": "Action.ShowCard",
-            "title": title,
-            "card": {
-                "type": "AdaptiveCard",
-                "body": nested_body,
-            },
+            "type": "Action.ToggleVisibility",
+            "title": f"{icon} {label}" if icon else label,
+            "targetElements": [
+                {"elementId": eid, "isVisible": eid == target_id} for eid in all_ids
+            ],
         }
         if tab_id == active_tab:
             action["style"] = "positive"
@@ -249,9 +231,6 @@ def _nav_container(
     *,
     email: str = "",
     org_id: str = "",
-    full_name: str = "",
-    org_name: str = "",
-    user=None,
     interactive: bool = False,
 ) -> dict:
     if interactive:
@@ -261,13 +240,7 @@ def _nav_container(
         }
     return {
         "type": "ActionSet",
-        "actions": _nav_showcard_actions(
-            active_tab,
-            full_name=full_name,
-            org_name=org_name,
-            email=email,
-            user=user,
-        ),
+        "actions": _nav_toggle_actions(active_tab),
     }
 
 
@@ -316,11 +289,23 @@ def build_admin_adaptive_card(
     """
     Build Admin Center Adaptive Card (dynamic from DB).
 
-    interactive=False (default for Graph channel posts): no Action.Execute —
-    Graph user posts reject / ignore bot verbs, which can leave Posts empty.
-    interactive=True: bot-driven in-place nav (Phase 2).
+    interactive=False (default for Graph channel posts): a single combined
+    card with every tab's section pre-built and Action.ToggleVisibility nav —
+    no Action.Execute, since Graph user posts reject / ignore bot verbs
+    (which can leave Posts empty), but still a real tab switch (old section
+    hides the moment another one is opened) with no bot and no browser tab.
+    interactive=True: bot-driven in-place nav (Phase 2) — one section per
+    message, replaced wholesale by the bot on each click.
     """
     tab = (tab or "home").strip().lower()
+    if not interactive:
+        return _combined_card(
+            full_name=full_name,
+            org_name=org_name,
+            email=email,
+            user=user,
+            active_tab=tab,
+        )
     if tab == "home":
         return _home_card(
             full_name=full_name,
@@ -337,6 +322,200 @@ def build_admin_adaptive_card(
         user=user,
         interactive=interactive,
     )
+
+
+def _home_body_items(dash: dict) -> list[dict]:
+    """Depot Overview + welcome + stats + governance + progress — Home's own
+    section content, with no header/nav (those are shared, above the tabs)."""
+    stats = dash.get("stats") or []
+    stats_cols = []
+    for s in stats[:3]:
+        stats_cols.append(
+            {
+                "type": "Column",
+                "width": "stretch",
+                "items": [
+                    _stat_tile(
+                        s.get("label", ""),
+                        s.get("value", "0"),
+                        s.get("sub", ""),
+                        alert=bool(s.get("alert")),
+                    )
+                ],
+            }
+        )
+
+    gov = dash.get("governance") or []
+    gov_row_1 = []
+    gov_row_2 = []
+    for idx, g in enumerate(gov[:4]):
+        col = {
+            "type": "Column",
+            "width": "stretch",
+            "items": [
+                _stat_tile(
+                    g.get("label", ""),
+                    g.get("value", "0"),
+                    g.get("sub", ""),
+                )
+            ],
+        }
+        if idx < 2:
+            gov_row_1.append(col)
+        else:
+            gov_row_2.append(col)
+
+    items: list[dict] = [
+        {
+            "type": "TextBlock",
+            "text": "Depot Overview",
+            "isSubtle": True,
+            "size": "Small",
+            "spacing": "None",
+        },
+        {
+            "type": "Container",
+            "spacing": "Medium",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": dash["welcome_title"],
+                    "size": "Large",
+                    "weight": "Bolder",
+                    "wrap": True,
+                },
+                {
+                    "type": "TextBlock",
+                    "text": dash["welcome_body"],
+                    "wrap": True,
+                    "spacing": "Small",
+                },
+            ],
+        },
+    ]
+
+    if stats_cols:
+        items.append({"type": "ColumnSet", "spacing": "Medium", "columns": stats_cols})
+
+    items.append(
+        {
+            "type": "TextBlock",
+            "text": "GOVERNANCE SNAPSHOT",
+            "size": "Small",
+            "weight": "Bolder",
+            "isSubtle": True,
+            "spacing": "Large",
+        }
+    )
+    if gov_row_1:
+        items.append({"type": "ColumnSet", "spacing": "Small", "columns": gov_row_1})
+    if gov_row_2:
+        items.append({"type": "ColumnSet", "spacing": "Small", "columns": gov_row_2})
+
+    items.append(
+        {
+            "type": "TextBlock",
+            "text": dash["progress_text"],
+            "size": "Small",
+            "isSubtle": True,
+            "spacing": "Medium",
+            "wrap": True,
+        }
+    )
+    return items
+
+
+def _combined_card(
+    *,
+    full_name: str = "",
+    org_name: str = "",
+    email: str = "",
+    user=None,
+    active_tab: str = "home",
+) -> dict:
+    """
+    One AdaptiveCard holding every tab's section as a Container keyed
+    "sec-<tab>", with only the active one visible at a time. Nav pills use
+    Action.ToggleVisibility to force-show the clicked section and
+    force-hide every other one, so switching tabs behaves like a real tab
+    strip — Home's card actually disappears once another tab is opened.
+    """
+    active_tab = (active_tab or "home").strip().lower()
+    dash = build_admin_dashboard_from_db(
+        full_name=full_name,
+        org_name=org_name,
+        email=email,
+        user=user,
+    )
+    org_id = dash.get("organization_id") or ""
+    org = dash.get("org_name") or org_name or "AIDL"
+
+    sections = [
+        {
+            "type": "Container",
+            "id": _section_element_id("home"),
+            "isVisible": active_tab == "home",
+            "items": _home_body_items(dash),
+        }
+    ]
+    for tab_id, _label, _icon in ADMIN_TABS:
+        if tab_id == "home":
+            continue
+        sections.append(
+            {
+                "type": "Container",
+                "id": _section_element_id(tab_id),
+                "isVisible": active_tab == tab_id,
+                "items": _section_body_blocks(
+                    tab_id,
+                    full_name=full_name,
+                    org_name=org_name,
+                    email=email,
+                    user=user,
+                ),
+            }
+        )
+
+    body = [
+        _header(org),
+        {
+            "type": "TextBlock",
+            "text": "Admin Center",
+            "size": "Medium",
+            "weight": "Bolder",
+            "spacing": "Medium",
+        },
+        _nav_container(active_tab, email=email, org_id=org_id, interactive=False),
+        *sections,
+    ]
+
+    export_url = (
+        "https://aidl-backend.onrender.com/api/teams/admin/export/"
+        f"?email={email}"
+        if email
+        else "https://aidl-backend.onrender.com/api/teams/admin/export/"
+    )
+
+    return {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.4",
+        "body": body,
+        "actions": [
+            {
+                "type": "Action.OpenUrl",
+                "title": "Export Coverage CSV",
+                "url": export_url,
+            },
+            {
+                "type": "Action.OpenUrl",
+                "title": "Refresh Admin Center",
+                "url": "https://aidl-backend.onrender.com/api/teams/",
+                "style": "positive",
+            },
+        ],
+        "msteams": {"width": "Full"},
+    }
 
 
 def _home_card(
@@ -414,9 +593,6 @@ def _home_card(
             "home",
             email=email,
             org_id=org_id,
-            full_name=full_name,
-            org_name=org,
-            user=user,
             interactive=interactive,
         ),
         {
@@ -636,9 +812,6 @@ def _section_card(
             tab,
             email=email,
             org_id=org_id,
-            full_name=full_name,
-            org_name=org,
-            user=user,
             interactive=interactive,
         ),
         {
