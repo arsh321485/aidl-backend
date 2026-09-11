@@ -7,16 +7,17 @@ from django.conf import settings
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
+from .teams_channel_tabs import build_channel_tab_deep_link
 
 
-# 1x1 dark-blue (#1b2a4a) PNG, tiled via backgroundImage, to give the
-# active nav pill a deliberately dark-blue highlight instead of Adaptive
-# Cards' themed "accent" style — which Teams renders as its own brand
-# blue/purple, not a color this card can otherwise override (Container
-# "style" is a fixed host-themed enum, not an arbitrary hex).
+# 1x1 Teams-blue (#5b5fc7 — same accent used across the tab UI) PNG, tiled
+# via backgroundImage, to give the active nav pill a minimal blue highlight
+# instead of Adaptive Cards' themed "accent" style — which Teams renders as
+# its own brand blue/purple, not a color this card can otherwise override
+# (Container "style" is a fixed host-themed enum, not an arbitrary hex).
 _ACTIVE_PILL_BG = (
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-    "DElEQVR42mOQ1vICAADzAJBMmffaAAAAAElFTkSuQmCC"
+    "DElEQVR4nGOIjj8OAAKaAYI+GmpxAAAAAElFTkSuQmCC"
 )
 
 
@@ -202,7 +203,32 @@ def _heading_block(payload: dict, tab: str, subtitle: str = "") -> list[dict]:
     return blocks
 
 
-def _add_admin_blocks(payload: dict) -> list[dict]:
+def _add_admin_open_url(user, email: str) -> str:
+    """
+    "Send Admin Invite" must not break the same promise every nav pill in
+    this card keeps (no browser tab — see _section_body_blocks): prefer a
+    Teams deep link into the "aidl-add-admin" pinned tab that
+    ensure_aidl_channel_tabs already installs, so the click stays inside the
+    Teams UI already there instead of popping the raw backend URL open in a
+    new external browser tab (and through Safelinks, since it's inside a
+    posted message). Only fall back to that raw URL when we don't have
+    enough Teams context (team/channel id) to build the deep link.
+    """
+    team_id = (getattr(user, "teams_team_id", "") or "").strip()
+    channel_id = (getattr(user, "teams_channel_id", "") or "").strip()
+    if team_id and channel_id:
+        return build_channel_tab_deep_link(
+            entity_id="aidl-add-admin",
+            team_id=team_id,
+            channel_id=channel_id,
+            tenant_id=getattr(settings, "MS_TENANT_ID", ""),
+            email=email,
+            label="Add Admin",
+        )
+    return f"{_nav_base_url()}/tabs/add-admin/?email={email}"
+
+
+def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
     admin_count = payload.get("admin_count") or 0
     admin_seat_limit = payload.get("admin_seat_limit") or 0
     email = payload.get("email") or "name@company.com"
@@ -248,7 +274,7 @@ def _add_admin_blocks(payload: dict) -> list[dict]:
                     "type": "Action.OpenUrl",
                     "title": "Send Admin Invite",
                     "style": "positive",
-                    "url": f"{_nav_base_url()}/tabs/add-admin/?email={email}",
+                    "url": _add_admin_open_url(user, email),
                 }
             ],
         },
@@ -573,7 +599,7 @@ def _section_body_blocks(
         user=user,
     )
     if tab == "add-admin":
-        return _add_admin_blocks(payload)
+        return _add_admin_blocks(payload, user=user)
     if tab == "policy":
         return _policy_blocks(payload)
     if tab == "cards":
