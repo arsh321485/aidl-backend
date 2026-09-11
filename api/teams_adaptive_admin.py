@@ -576,98 +576,48 @@ def _section_element_id(tab_id: str) -> str:
     return f"s{_TAB_INDEX[tab_id]}"
 
 
-def _pill_id(tab_id: str, *, active: bool) -> str:
-    return f"{'pa' if active else 'pi'}{_TAB_INDEX[tab_id]}"
-
-
-def _nav_toggle_targets(clicked_tab: str) -> list[dict]:
-    """Every element a pill click must force to a specific state: the clicked
-    tab's section + coloured pill show, every other section + coloured pill
-    hide (and every other plain pill comes back)."""
-    targets: list[dict] = []
-    for tab_id, _label, _icon in ADMIN_TABS:
-        targets.append(
-            {
-                "elementId": _section_element_id(tab_id),
-                "isVisible": tab_id == clicked_tab,
-            }
-        )
-        targets.append(
-            {
-                "elementId": _pill_id(tab_id, active=True),
-                "isVisible": tab_id == clicked_tab,
-            }
-        )
-        targets.append(
-            {
-                "elementId": _pill_id(tab_id, active=False),
-                "isVisible": tab_id != clicked_tab,
-            }
-        )
-    return targets
-
-
-def _nav_pill_rows(active_tab: str) -> list[dict]:
+def _nav_link_pills(active_tab: str, *, email: str = "") -> dict:
     """
-    Graph-safe clickable nav — each tab is TWO overlapping pills (a coloured
-    "active" one and a plain "inactive" one, only one ever isVisible), both
-    wired to the same Action.ToggleVisibility. Clicking one force-shows its
-    own section + its own coloured pill and force-hides every other section
-    and every other coloured pill — so the active-tab colour actually moves
-    to whichever pill was just clicked, and Home's card actually disappears
-    once another tab is opened. Pure client-side, no bot, no browser tab.
+    Graph-safe nav for the combined welcome card: plain Action.OpenUrl pills
+    to each tab's admin.html webpage (unlimited size, already rendered
+    correctly there) instead of inlining every tab's section + the
+    Action.ToggleVisibility target lists that go with it. Those toggle
+    targets alone ran ~8KB for just 6 tabs, and together with all 5 other
+    sections pushed the combined card to ~28.7KB — over Graph's ~28KB
+    Adaptive Card limit, which made Graph reject the whole card and Posts
+    show nothing at all. Home stays inline (below) since that's the one
+    view this card actually needs to carry.
     """
     columns = []
     for tab_id, label, icon in ADMIN_TABS:
         title = f"{icon} {label}" if icon else label
-        toggle_action = {
-            "type": "Action.ToggleVisibility",
-            "targetElements": _nav_toggle_targets(tab_id),
+        is_active = tab_id == active_tab
+        container: dict = {
+            "type": "Container",
+            "style": "emphasis" if is_active else "default",
+            "spacing": "None",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": title,
+                    "weight": "Bolder",
+                    "wrap": False,
+                    "spacing": "None",
+                    "horizontalAlignment": "Center",
+                }
+            ],
         }
-        columns.append(
-            {
-                "type": "Column",
-                "width": "auto",
-                "selectAction": toggle_action,
-                "items": [
-                    {
-                        "type": "Container",
-                        "id": _pill_id(tab_id, active=True),
-                        "isVisible": tab_id == active_tab,
-                        "style": "emphasis",
-                        "spacing": "None",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": title,
-                                "weight": "Bolder",
-                                "wrap": False,
-                                "spacing": "None",
-                                "horizontalAlignment": "Center",
-                            }
-                        ],
-                    },
-                    {
-                        "type": "Container",
-                        "id": _pill_id(tab_id, active=False),
-                        "isVisible": tab_id != active_tab,
-                        "spacing": "None",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": title,
-                                "weight": "Bolder",
-                                "wrap": False,
-                                "spacing": "None",
-                                "horizontalAlignment": "Center",
-                            }
-                        ],
-                    },
-                ],
+        if not is_active:
+            url = f"{_nav_base_url()}/tabs/{tab_id}/"
+            if email:
+                url += f"?email={email}"
+            container["selectAction"] = {
+                "type": "Action.OpenUrl",
+                "title": label,
+                "url": url,
             }
-        )
+        columns.append({"type": "Column", "width": "auto", "items": [container]})
 
-    # Two rows so the six pills wrap the same way as the reference design.
     return {
         "type": "Container",
         "spacing": "Small",
@@ -690,7 +640,7 @@ def _nav_container(
             "type": "ActionSet",
             "actions": _nav_actions(active_tab, email=email, org_id=org_id),
         }
-    return _nav_pill_rows(active_tab)
+    return _nav_link_pills(active_tab, email=email)
 
 
 def _stat_tile(label: str, value: str, sub: str, *, alert: bool = False) -> dict:
@@ -738,11 +688,12 @@ def build_admin_adaptive_card(
     """
     Build Admin Center Adaptive Card (dynamic from DB).
 
-    interactive=False (default for Graph channel posts): a single combined
-    card with every tab's section pre-built and Action.ToggleVisibility nav —
-    no Action.Execute, since Graph user posts reject / ignore bot verbs
-    (which can leave Posts empty), but still a real tab switch (old section
-    hides the moment another one is opened) with no bot and no browser tab.
+    interactive=False (default for Graph channel posts): the Home card with
+    plain Action.OpenUrl nav pills to the other tabs' admin.html webpages —
+    no Action.Execute (Graph user posts reject / ignore bot verbs, which can
+    leave Posts empty) and no inlined Action.ToggleVisibility sections
+    (those pushed the combined card over Graph's ~28KB Adaptive Card limit,
+    which made Graph reject it outright and left Posts empty).
     interactive=True: bot-driven in-place nav (Phase 2) — one section per
     message, replaced wholesale by the bot on each click.
     """
@@ -883,11 +834,10 @@ def _combined_card(
     active_tab: str = "home",
 ) -> dict:
     """
-    One AdaptiveCard holding every tab's section as a Container keyed
-    "sec-<tab>", with only the active one visible at a time. Nav pills use
-    Action.ToggleVisibility to force-show the clicked section and
-    force-hide every other one, so switching tabs behaves like a real tab
-    strip — Home's card actually disappears once another tab is opened.
+    One AdaptiveCard for the Home view (welcome + stats + governance),
+    posted into channel Posts on login/signup. The nav pills are plain
+    Action.OpenUrl links to each tab's admin.html webpage rather than every
+    tab's section inlined here — see _nav_link_pills for why.
     """
     active_tab = (active_tab or "home").strip().lower()
     dash = build_admin_dashboard_from_db(
@@ -903,27 +853,10 @@ def _combined_card(
         {
             "type": "Container",
             "id": _section_element_id("home"),
-            "isVisible": active_tab == "home",
+            "isVisible": True,
             "items": _home_body_items(dash),
         }
     ]
-    for tab_id, _label, _icon in ADMIN_TABS:
-        if tab_id == "home":
-            continue
-        sections.append(
-            {
-                "type": "Container",
-                "id": _section_element_id(tab_id),
-                "isVisible": active_tab == tab_id,
-                "items": _section_body_blocks(
-                    tab_id,
-                    full_name=full_name,
-                    org_name=org_name,
-                    email=email,
-                    user=user,
-                ),
-            }
-        )
 
     body = [
         _header(org),
