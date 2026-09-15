@@ -9,6 +9,11 @@ urlpatterns = [
     path("items/<str:pk>/", views.ItemDetailView.as_view(), name="item-detail"),
     # Teams / Microsoft auth
     path("auth/teams/login/", auth_views.teams_login, name="teams-login"),
+    path(
+        "auth/teams/login-redirect/",
+        auth_views.teams_login_redirect,
+        name="teams-login-redirect",
+    ),
     path("auth/teams/callback/", auth_views.teams_callback, name="teams-callback"),
     # Azure-configured production callback path
     path(
@@ -42,6 +47,11 @@ urlpatterns = [
         "teams/admin/session/",
         teams_app_views.teams_admin_session,
         name="teams-admin-session",
+    ),
+    path(
+        "teams/admin/invite-user/",
+        teams_app_views.teams_invite_user,
+        name="teams-invite-user",
     ),
     path(
         "teams/admin/aup/sign/",

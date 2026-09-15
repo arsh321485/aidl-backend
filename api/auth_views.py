@@ -26,7 +26,7 @@ from .microsoft_auth import (
 from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
 from .org_service import ensure_organization_for_login, replace_welcome_card
-from .models import AIDLUser
+from .models import AIDLUser, Invitation
 from .serializers import AIDLUserSerializer
 
 
@@ -65,17 +65,22 @@ def _issue_tokens(user: AIDLUser) -> dict:
     }
 
 
-def _upsert_user(profile: dict, enroll_as: str) -> tuple[AIDLUser, bool]:
+def _upsert_user(profile: dict, enroll_as: str, refresh_token: str = "") -> tuple[AIDLUser, bool]:
+    defaults = {
+        "email": profile.get("email", ""),
+        "full_name": profile.get("full_name", ""),
+        "enroll_as": enroll_as,
+        "provider": "teams",
+        "last_login_at": timezone.now(),
+        "is_active": True,
+    }
+    # Only overwrite when we actually got one this login (offline_access scope) —
+    # a token exchange without it must not wipe out a previously stored one.
+    if refresh_token:
+        defaults["ms_refresh_token"] = refresh_token
     user, created = AIDLUser.objects.update_or_create(
         microsoft_id=profile["microsoft_id"],
-        defaults={
-            "email": profile.get("email", ""),
-            "full_name": profile.get("full_name", ""),
-            "enroll_as": enroll_as,
-            "provider": "teams",
-            "last_login_at": timezone.now(),
-            "is_active": True,
-        },
+        defaults=defaults,
     )
     return user, created
 
@@ -97,6 +102,23 @@ def _save_channel_on_user(user: AIDLUser, channel_info: dict | None) -> None:
             "updated_at",
         ]
     )
+
+
+def _accept_pending_invitation(user: AIDLUser) -> None:
+    """Best-effort: mark a matching Invitation accepted once the invited
+    person actually signs in. Org/role placement already happened via Team
+    membership + ensure_organization_for_login — this is bookkeeping only,
+    so it must never block login if it fails."""
+    if not user.email:
+        return
+    try:
+        Invitation.objects.filter(
+            email__iexact=user.email, status=Invitation.Status.PENDING
+        ).update(status=Invitation.Status.ACCEPTED, accepted_at=timezone.now())
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning("accept invitation failed for %s: %s", user.email, exc)
 
 
 def _redirect_with_tokens(
@@ -175,6 +197,24 @@ def _redirect_with_tokens(
     if ms_access_token:
         query["ms_access_token"] = ms_access_token
     return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def teams_login_redirect(request):
+    """
+    Plain HTTP redirect straight into Microsoft sign-in — for links that must
+    work from outside the SPA (e.g. an invite email), where nothing can call
+    teams_login's JSON auth_url and redirect the browser itself.
+    """
+    enroll_as = _normalize_enroll_as(request.query_params.get("enroll_as"))
+    if not microsoft_configured():
+        return Response(
+            {"error": "microsoft_not_configured"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    data = build_auth_url(enroll_as)
+    return HttpResponseRedirect(data["auth_url"])
 
 
 @api_view(["GET"])
@@ -278,7 +318,7 @@ def teams_callback(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user, is_new_signup = _upsert_user(profile, enroll_as)
+    user, is_new_signup = _upsert_user(profile, enroll_as, token_result.get("refresh_token") or "")
     old_team_id = getattr(user, "teams_team_id", "") or ""
     old_channel_id = getattr(user, "teams_channel_id", "") or ""
 
@@ -299,16 +339,31 @@ def teams_callback(request):
 
         logging.getLogger(__name__).warning("ensure organization failed: %s", exc)
 
+    _accept_pending_invitation(user)
+
     channel_url = (channel_info or {}).get("teams_url") or ""
     posts_url = (channel_info or {}).get("channel_posts_url") or channel_url
     home_tab_url = (channel_info or {}).get("home_tab_url") or ""
     # Prefer Posts deep link so Adaptive Card is visible in-channel.
     landing_url = posts_url or channel_url or home_tab_url
 
+    is_learner = user.role == AIDLUser.Role.LEARNER
+    if is_learner:
+        # Learners get their own read-only "AIDL User Dashboard" page instead
+        # of the shared Admin Center card — the channel's Posts stream is
+        # shared by everyone in the org, so only an admin's login should
+        # replace what's posted there.
+        from urllib.parse import urlencode
+
+        teams_base = (getattr(settings, "MS_TEAMS_APP_BASE_URL", "") or "").rstrip("/")
+        landing_url = f"{teams_base}/tabs/user-dashboard/?" + urlencode(
+            {"email": user.email, "full_name": user.full_name}
+        )
+
     welcome_card_sent = False
     welcome_card_error = ""
     channel_tabs_created = 0
-    if channel_info:
+    if channel_info and not is_learner:
         # Phase 1: post Admin Center card on EVERY successful channel ensure
         # (not only first signup) so Posts is never empty after login.
         send_every_login = getattr(settings, "MS_SEND_ADMIN_CARD_EVERY_LOGIN", True)

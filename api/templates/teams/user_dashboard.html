@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AIDL User Dashboard</title>
+  <script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js"></script>
+  <style>
+    :root {
+      --aidl-purple: #6264a7;
+      --aidl-bg: #faf9f8;
+      --aidl-card: #ffffff;
+      --aidl-text: #242424;
+      --aidl-muted: #616161;
+      --aidl-border: #e1dfdd;
+      --aidl-green: #107c10;
+      --aidl-amber: #986f0b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--aidl-bg);
+      color: var(--aidl-text);
+    }
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .brand img { width: 36px; height: 36px; border-radius: 6px; }
+    .brand-text { font-weight: 700; font-size: 15px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: var(--aidl-muted); margin: 0 0 20px; font-size: 14px; }
+    .card {
+      background: var(--aidl-card);
+      border: 1px solid var(--aidl-border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .card h2 { font-size: 14px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--aidl-muted); }
+    .status-row { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .dot.ok { background: var(--aidl-green); }
+    .dot.pending { background: var(--aidl-amber); }
+    .status-line { margin-bottom: 10px; }
+    .status-line:last-child { margin-bottom: 0; }
+    a.link { color: var(--aidl-purple); font-weight: 600; text-decoration: none; }
+    a.link:hover { text-decoration: underline; }
+    .app-list { list-style: none; margin: 0; padding: 0; }
+    .app-list li {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 0; border-bottom: 1px solid var(--aidl-border); font-size: 14px;
+    }
+    .app-list li:last-child { border-bottom: none; }
+    .app-type { color: var(--aidl-muted); font-size: 12px; text-transform: uppercase; }
+    .empty { color: var(--aidl-muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    {% if empty %}
+      <div class="brand"><div class="brand-text">AIDL for {{ org_name }}</div></div>
+      <h1>Welcome to AIDL</h1>
+      <p class="sub">Sign in via Teams to see your licence status, policy, and apps.</p>
+    {% else %}
+      <div class="brand">
+        <img src="{{ logo_url }}" alt="AIDL" />
+        <div class="brand-text">AIDL for {{ org_name }}</div>
+      </div>
+      <h1>Hi {{ first_name }} 👋</h1>
+      <p class="sub">Your AI Driving Licence dashboard</p>
+
+      <div class="card">
+        <h2>My status</h2>
+        <div class="status-line status-row">
+          <span class="dot {% if aup_signed %}ok{% else %}pending{% endif %}"></span>
+          <span>Acceptable Use Policy — {% if aup_signed %}Signed{% else %}Not signed yet{% endif %}</span>
+          {% if not aup_signed %}<a class="link" href="{{ policy_url }}" target="_blank" rel="noopener">Read &amp; sign →</a>{% endif %}
+        </div>
+        <div class="status-line status-row">
+          <span class="dot {% if licence_issued %}ok{% else %}pending{% endif %}"></span>
+          <span>AI Driving Licence — {% if licence_issued %}Issued{% else %}Pending{% endif %}</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Approved apps at {{ org_name }}</h2>
+        {% if apps %}
+          <ul class="app-list">
+            {% for app in apps %}
+              <li><span>{{ app.name }}</span><span class="app-type">{{ app.app_type }}</span></li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="empty">No approved apps yet — check back soon.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  <script>
+    (async function () {
+      try {
+        if (window.microsoftTeams) {
+          await microsoftTeams.app.initialize();
+        }
+      } catch (e) {
+        console.warn("Teams SDK context unavailable", e);
+      }
+    })();
+  </script>
+</body>
+</html>

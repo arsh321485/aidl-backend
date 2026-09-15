@@ -22,7 +22,8 @@ from .teams_admin import (
 from .teams_cards import CARD_BUILDERS, TEAMS_TABS, build_card, org_display_name
 from .teams_channel_tabs import ensure_aidl_channel_tabs, is_aidl_dashboard_channel, target_channel_name
 from .teams_messaging import send_channel_adaptive_card
-from .org_service import replace_welcome_card
+from .teams_invites import send_user_invite
+from .org_service import build_user_dashboard_payload, replace_welcome_card
 
 
 def _teams_base_url(request) -> str:
@@ -137,6 +138,18 @@ def teams_tab_page(request, tab: str):
         user_bits = _request_user_bits(request)
         context = _admin_tab_context(request, tab, user_bits)
         return render(request, "teams/admin.html", context)
+
+    if tab == "user-dashboard":
+        user_bits = _request_user_bits(request)
+        db_user = user_bits.get("user")
+        if db_user is None:
+            context = {
+                "org_name": user_bits.get("org_name") or org_display_name(),
+                "empty": True,
+            }
+        else:
+            context = build_user_dashboard_payload(db_user)
+        return render(request, "teams/user_dashboard.html", context)
 
     # Legacy learner Adaptive Card pages (still available if channel tabs point here)
     if tab not in CARD_BUILDERS:
@@ -540,6 +553,35 @@ def teams_admin_invite(request):
             },
         }
     )
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_invite_user(request):
+    """
+    Invite a brand-new (same-tenant) user by email: add them to the caller's
+    AIDL Team via Graph + send them a sign-in email. They land in the
+    caller's organisation as a Learner the first time they sign in.
+    """
+    caller = request.user
+    email = (request.data.get("email") or "").strip()
+    full_name = (request.data.get("full_name") or "").strip()
+    if not email:
+        return Response({"error": "email_required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    result = send_user_invite(caller=caller, email=email, full_name=full_name)
+    if not result.get("ok"):
+        error = result.get("error") or "invite_failed"
+        code = {
+            "not_admin": status.HTTP_403_FORBIDDEN,
+            "no_organization": status.HTTP_400_BAD_REQUEST,
+            "user_already_exists": status.HTTP_409_CONFLICT,
+            "org_not_found": status.HTTP_400_BAD_REQUEST,
+            "email_required": status.HTTP_400_BAD_REQUEST,
+        }.get(error, status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=code)
+    return Response(result)
 
 
 @api_view(["POST"])

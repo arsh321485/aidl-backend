@@ -15,8 +15,24 @@ CORS_ALLOWED_ORIGINS=https://aidl-frontend-8owk.vercel.app,http://localhost:5173
 MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 
-MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All
+MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All,User.ReadBasic.All,offline_access
 MS_AIDL_CHANNEL_NAME=aidl dashboard
+
+# --- Invite-a-user feature (adds User.ReadBasic.All + offline_access above) ---
+# offline_access lets the backend store a refresh token per admin so it can
+# add an invited teammate to the Team via Graph without needing their browser
+# open. IMPORTANT: existing admins must log out and log back in via Teams
+# ONCE after this scope is added, to re-consent and get a token stored.
+#
+# Outbound invite email — Gmail: smtp.gmail.com/587 + an App Password
+# (not your normal password); Office365: smtp.office365.com/587.
+# EMAIL_HOST=smtp.gmail.com
+# EMAIL_PORT=587
+# EMAIL_HOST_USER=you@company.com
+# EMAIL_HOST_PASSWORD=your-app-password
+# DEFAULT_FROM_EMAIL=you@company.com
+# Until the three EMAIL_* vars above are set, invite emails just log to the
+# Render console instead of failing the invite.
 MS_SEND_WELCOME_CARD=True
 MS_SEND_ADMIN_CARD_EVERY_LOGIN=True
 MS_AIDL_LAND_ON_POSTS=True

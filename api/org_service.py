@@ -249,6 +249,44 @@ def ensure_organization_for_login(
     return org
 
 
+def build_user_dashboard_payload(user: AIDLUser) -> dict:
+    """Read-only 'AIDL User Dashboard' data for a Learner — their own licence
+    / policy status plus the org's approved apps, no admin actions."""
+    org = get_organization_for_user(user)
+    if org is None:
+        return {
+            "full_name": user.full_name,
+            "first_name": first_name(user.full_name),
+            "org_name": org_display_name(user.organization_name),
+            "logo_url": logo_url(),
+            "policy_url": policy_url(),
+            "licence_issued": False,
+            "aup_signed": False,
+            "apps": [],
+            "empty": True,
+        }
+
+    apps = RegisteredApp.objects.filter(
+        organization_id=_org_id(org),
+        is_active=True,
+        status=RegisteredApp.Status.APPROVED,
+    ).order_by("app_type", "name")
+
+    return {
+        "full_name": user.full_name,
+        "first_name": first_name(user.full_name),
+        "org_name": org.name,
+        "logo_url": logo_url(),
+        "policy_url": org.policy_url or policy_url(),
+        "licence_issued": bool(user.licence_issued),
+        "aup_signed": bool(user.aup_signed),
+        "apps": [
+            {"name": a.name, "app_type": a.app_type} for a in apps
+        ],
+        "empty": False,
+    }
+
+
 def _members_qs(org: Organization):
     return AIDLUser.objects.filter(organization_id=_org_id(org), is_active=True)
 

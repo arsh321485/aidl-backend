@@ -83,6 +83,12 @@ class AIDLUser(models.Model):
     aup_signed_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
+    # Microsoft OAuth refresh token (requires the "offline_access" scope), so
+    # the backend can mint a fresh Graph access token on demand — e.g. to add
+    # an invited teammate to the Team — without needing this user's browser
+    # open. Only stored for users who have logged in since offline_access was
+    # added to MS_SCOPES; older sessions must re-login once to populate it.
+    ms_refresh_token = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -99,6 +105,44 @@ class AIDLUser(models.Model):
 
     def __str__(self):
         return self.email or self.microsoft_id
+
+
+class Invitation(models.Model):
+    """Pending invite for a new (not-yet-signed-in) user to join an
+    organisation's AIDL Team as a Learner, sent by an existing admin."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        EXPIRED = "expired", "Expired"
+
+    token = models.CharField(max_length=64, unique=True)
+    email = models.EmailField()
+    full_name = models.CharField(max_length=255, blank=True, default="")
+    role = models.CharField(
+        max_length=32,
+        choices=AIDLUser.Role.choices,
+        default=AIDLUser.Role.LEARNER,
+    )
+    organization_id = models.CharField(max_length=64, db_index=True)
+    organization_name = models.CharField(max_length=255, blank=True, default="")
+    invited_by_email = models.EmailField(blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    team_member_added = models.BooleanField(default=False)
+    error = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.email} -> {self.organization_name or self.organization_id} ({self.status})"
 
 
 class RegisteredApp(models.Model):

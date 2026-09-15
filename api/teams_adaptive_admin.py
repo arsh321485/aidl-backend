@@ -7,42 +7,18 @@ from django.conf import settings
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
-from .teams_channel_tabs import build_channel_tab_deep_link
 
 
-# 1x1 solid-color PNGs, tiled via backgroundImage, to give each active nav
-# pill its OWN accent color instead of Adaptive Cards' themed "accent" style
-# — which Teams renders as one fixed host brand color, not an arbitrary hex
-# (Container "style" is a fixed enum, not a per-container color you can set).
-# Same accent palette as the admin.html tab page, so the two surfaces read
-# as one product: home=purple, add-admin=blue, policy=teal, cards=amber,
-# ai-apps=pink, it-apps=cyan.
-_PILL_ACCENT_BG = {
-    "home": (
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-        "DElEQVR42mOIjj8OAAKaAYIA57ndAAAAAElFTkSuQmCC"
-    ),
-    "add-admin": (
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-        "DElEQVR42mPQr38AAAJvAY9PDuH0AAAAAElFTkSuQmCC"
-    ),
-    "policy": (
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-        "DElEQVR42mPgm58HAAHaARzGO7vlAAAAAElFTkSuQmCC"
-    ),
-    "cards": (
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-        "DElEQVR42mN40ckDAAPaAX7dCtOCAAAAAElFTkSuQmCC"
-    ),
-    "ai-apps": (
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-        "DElEQVR42mO45tAPAAOVAaacjwPTAAAAAElFTkSuQmCC"
-    ),
-    "it-apps": (
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-        "DElEQVR42mNgW7wDAAIUAWKBNdUVAAAAAElFTkSuQmCC"
-    ),
-}
+# 1x1 Teams-blue (#5b5fc7 — same accent used across the tab UI) PNG, tiled
+# via backgroundImage, to give the active nav pill one consistent highlight
+# colour across all six tabs instead of Adaptive Cards' themed "accent"
+# style — which Teams renders as its own brand blue/purple, not a color this
+# card can otherwise override (Container "style" is a fixed host-themed
+# enum, not an arbitrary hex).
+_ACTIVE_PILL_BG = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+    "DElEQVR4nGOIjj8OAAKaAYI+GmpxAAAAAElFTkSuQmCC"
+)
 
 
 def _nav_base_url() -> str:
@@ -229,26 +205,13 @@ def _heading_block(payload: dict, tab: str, subtitle: str = "") -> list[dict]:
 
 def _add_admin_open_url(user, email: str) -> str:
     """
-    "Send Admin Invite" must not break the same promise every nav pill in
-    this card keeps (no browser tab — see _section_body_blocks): prefer a
-    Teams deep link into the "aidl-add-admin" pinned tab that
-    ensure_aidl_channel_tabs already installs, so the click stays inside the
-    Teams UI already there instead of popping the raw backend URL open in a
-    new external browser tab (and through Safelinks, since it's inside a
-    posted message). Only fall back to that raw URL when we don't have
-    enough Teams context (team/channel id) to build the deep link.
+    Always the plain backend webpage, never the "aidl-add-admin" Teams tab
+    deep link — that deep link only resolves when ensure_aidl_channel_tabs
+    has actually installed the tab (MS_AIDL_INSTALL_CHANNEL_TABS), which is
+    off in production, so the click silently fell back to opening the bare
+    channel instead of the Add Admin page. A plain https URL always works,
+    Teams-tab-installed or not.
     """
-    team_id = (getattr(user, "teams_team_id", "") or "").strip()
-    channel_id = (getattr(user, "teams_channel_id", "") or "").strip()
-    if team_id and channel_id:
-        return build_channel_tab_deep_link(
-            entity_id="aidl-add-admin",
-            team_id=team_id,
-            channel_id=channel_id,
-            tenant_id=getattr(settings, "MS_TENANT_ID", ""),
-            email=email,
-            label="Add Admin",
-        )
     return f"{_nav_base_url()}/tabs/add-admin/?email={email}"
 
 
@@ -680,7 +643,9 @@ def _nav_pill_rows(active_tab: str) -> dict:
         columns.append(
             {
                 "type": "Column",
-                "width": "auto",
+                # Fixed width (not "auto") so all six pills line up the same
+                # size regardless of label length, and stay compact.
+                "width": "78px",
                 "selectAction": toggle_action,
                 "items": [
                     {
@@ -688,16 +653,14 @@ def _nav_pill_rows(active_tab: str) -> dict:
                         "id": _pill_id(tab_id, active=True),
                         "isVisible": tab_id == active_tab,
                         "style": "emphasis",
-                        "backgroundImage": {
-                            "url": _PILL_ACCENT_BG.get(tab_id, _PILL_ACCENT_BG["home"]),
-                            "fillMode": "repeat",
-                        },
+                        "backgroundImage": {"url": _ACTIVE_PILL_BG, "fillMode": "repeat"},
                         "spacing": "None",
                         "items": [
                             {
                                 "type": "TextBlock",
                                 "text": title,
                                 "weight": "Bolder",
+                                "size": "Small",
                                 "color": "light",
                                 "wrap": False,
                                 "spacing": "None",
@@ -716,6 +679,7 @@ def _nav_pill_rows(active_tab: str) -> dict:
                                 "type": "TextBlock",
                                 "text": title,
                                 "weight": "Bolder",
+                                "size": "Small",
                                 "wrap": False,
                                 "spacing": "None",
                                 "horizontalAlignment": "Center",

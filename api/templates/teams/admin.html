@@ -484,9 +484,12 @@
       let extra = "";
       if (tab === "add-admin") {
         extra = (
+          '<p class="progress" style="margin-top:4px;">Add a teammate — they\'re added to the AIDL Team ' +
+            'right away and get an email to sign in and open their AIDL User Dashboard.</p>' +
           '<div class="invite-row">' +
-            '<input id="inviteEmail" type="email" placeholder="admin@company.com" />' +
-            '<button type="button" class="btn primary" id="inviteBtn">Add admin</button>' +
+            '<input id="inviteName" type="text" placeholder="Full name" />' +
+            '<input id="inviteEmail" type="email" placeholder="name@company.com" />' +
+            '<button type="button" class="btn primary" id="inviteBtn">Send Invite</button>' +
           '</div>' +
           '<p id="inviteMsg" class="progress" style="margin-top:8px;"></p>'
         );
@@ -653,34 +656,41 @@
       }
       if (e.target.id === "inviteBtn") {
         const msg = document.getElementById("inviteMsg");
+        const full_name = ((document.getElementById("inviteName") || {}).value || "").trim();
         const email = ((document.getElementById("inviteEmail") || {}).value || "").trim().toLowerCase();
         if (!email) {
-          if (msg) msg.textContent = "Enter the new admin's Teams email address.";
+          if (msg) msg.textContent = "Enter the new teammate's work email address.";
           return;
         }
         if (!sessionToken) {
-          if (msg) msg.textContent = "Only an existing admin can add another admin — sign in via Teams as an admin first.";
+          if (msg) msg.textContent = "Only an existing admin can invite users — sign in via Teams as an admin first.";
           return;
         }
-        if (msg) msg.textContent = "Adding…";
-        fetch(BASE + "/admin/invite/", {
+        if (msg) msg.textContent = "Sending invite…";
+        fetch(BASE + "/admin/invite-user/", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": "Bearer " + sessionToken,
           },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, full_name }),
         })
           .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
           .then(({ ok, data }) => {
             if (msg) {
-              msg.textContent = ok
-                ? ("Added admin: " + (data.admin && data.admin.email))
-                : (data.message || data.error || "Invite failed");
+              if (ok) {
+                msg.textContent = data.email_sent
+                  ? ("Invite sent to " + email + ".")
+                  : ("Added to the Team, but the invite email could not be sent (" + (data.email_error || "check SMTP settings") + ").");
+              } else {
+                msg.textContent = data.message || data.error || "Invite failed";
+              }
             }
             if (ok) {
               const inviteInput = document.getElementById("inviteEmail");
+              const nameInput = document.getElementById("inviteName");
               if (inviteInput) inviteInput.value = "";
+              if (nameInput) nameInput.value = "";
               loadTab("add-admin", { pushState: false });
             }
           })

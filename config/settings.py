@@ -58,7 +58,9 @@ _DEFAULT_MS_SCOPES = (
     "ChannelMessage.Send,"
     "TeamsTab.Create,"
     "TeamsTab.ReadWrite.All,"
-    "Group.ReadWrite.All"
+    "Group.ReadWrite.All,"
+    "User.ReadBasic.All,"
+    "offline_access"
 )
 MS_SCOPES = [
     s.strip()
@@ -144,6 +146,24 @@ AIDL_POLICY_ENTITIES = [
 JWT_SECRET = os.getenv("JWT_SECRET", SECRET_KEY)
 JWT_ACCESS_MINUTES = int(os.getenv("JWT_ACCESS_MINUTES", "60"))
 JWT_REFRESH_DAYS = int(os.getenv("JWT_REFRESH_DAYS", "7"))
+
+# Outbound email (user invites). Gmail: smtp.gmail.com / 587 / an App
+# Password (not the account password). Office365: smtp.office365.com / 587.
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes")
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-reply@aidl.app")
+# Until SMTP creds are set, fall back to logging emails to the console/log
+# instead of a hard crash on every invite.
+if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+AIDL_INVITE_EXPIRY_DAYS = int(os.getenv("AIDL_INVITE_EXPIRY_DAYS", "14"))
 
 INSTALLED_APPS = [
     "django_mongodb_backend",

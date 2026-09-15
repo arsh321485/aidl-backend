@@ -552,3 +552,86 @@ def resolve_teams_url(
         )
 
     return build_teams_launch_url(email)
+
+
+def refresh_graph_token(refresh_token: str) -> dict:
+    """
+    Mint a fresh Graph access token from a stored refresh token (requires the
+    "offline_access" scope at original login) — used for backend-initiated
+    Graph calls (e.g. adding an invited teammate to the Team) that happen
+    outside any request from that user's own browser.
+    Returns the MSAL result dict; check "access_token" / "error".
+    """
+    if not refresh_token:
+        return {"error": "missing_refresh_token"}
+    app = _msal_app()
+    return app.acquire_token_by_refresh_token(refresh_token, scopes=settings.MS_SCOPES)
+
+
+def resolve_user_by_email(access_token: str, email: str) -> dict | None:
+    """Look up a same-tenant user's Azure AD object id by email/UPN. Tries a
+    direct UPN lookup first (works when email == UPN, the common case), then
+    falls back to filtering by mail (covers a different UPN/email pair)."""
+    if not access_token or not email:
+        return None
+    headers = _graph_headers(access_token)
+    select = {"$select": "id,displayName,mail,userPrincipalName"}
+    try:
+        response = requests.get(
+            f"{GRAPH_BASE}/users/{quote(email)}",
+            headers=headers,
+            params=select,
+            timeout=20,
+        )
+        if response.status_code == 200:
+            return response.json()
+        if response.status_code not in (400, 404):
+            response.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("resolve user by UPN failed for %s: %s", email, exc)
+
+    try:
+        response = requests.get(
+            f"{GRAPH_BASE}/users",
+            headers=headers,
+            params={**select, "$filter": f"mail eq '{email}'"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        results = response.json().get("value") or []
+        return results[0] if results else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("resolve user by mail filter failed for %s: %s", email, exc)
+        return None
+
+
+def add_team_member(access_token: str, *, team_id: str, aad_user_id: str) -> dict:
+    """Add an existing tenant user (by Azure AD object id) to a Team as a
+    regular member (not owner)."""
+    if not access_token or not team_id or not aad_user_id:
+        return {"ok": False, "error": "missing_params"}
+    url = f"{GRAPH_BASE}/teams/{team_id}/members"
+    payload = {
+        "@odata.type": "#microsoft.graph.aadUserConversationMember",
+        "roles": [],
+        "user@odata.bind": f"https://graph.microsoft.com/v1.0/users('{aad_user_id}')",
+    }
+    try:
+        response = requests.post(
+            url,
+            headers=_graph_headers(access_token),
+            json=payload,
+            timeout=30,
+        )
+        # Already a member -> Graph returns 400 with a "UnknownError"/duplicate
+        # message; treat that as success rather than a failed invite.
+        if response.status_code >= 400:
+            detail = (response.text or "")[:500]
+            if "already exist" in detail.lower() or "duplicate" in detail.lower():
+                return {"ok": True, "already_member": True}
+            logger.warning("add team member HTTP %s: %s", response.status_code, detail)
+            return {"ok": False, "error": f"graph_http_{response.status_code}", "detail": detail}
+        return {"ok": True, "member": response.json() if response.content else {}}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("add team member failed: %s", exc)
+        return {"ok": False, "error": "exception", "detail": str(exc)}
