@@ -7,6 +7,7 @@ from django.conf import settings
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
+from .teams_channel_tabs import build_channel_tab_deep_link
 
 
 # 1x1 Teams-blue (#5b5fc7 — same accent used across the tab UI) PNG, tiled
@@ -205,13 +206,26 @@ def _heading_block(payload: dict, tab: str, subtitle: str = "") -> list[dict]:
 
 def _add_admin_open_url(user, email: str) -> str:
     """
-    Always the plain backend webpage, never the "aidl-add-admin" Teams tab
-    deep link — that deep link only resolves when ensure_aidl_channel_tabs
-    has actually installed the tab (MS_AIDL_INSTALL_CHANNEL_TABS), which is
-    off in production, so the click silently fell back to opening the bare
-    channel instead of the Add Admin page. A plain https URL always works,
-    Teams-tab-installed or not.
+    Prefer the Teams tab deep link so the click stays inside Teams (opens as
+    an in-app tab) instead of popping a plain https URL open in a new
+    external browser tab. This only resolves once ensure_aidl_channel_tabs
+    has actually installed the "aidl-add-admin" tab — MS_AIDL_INSTALL_CHANNEL_TABS
+    must be True (it only needs TeamsTab.Create/TeamsTab.ReadWrite.All,
+    already-granted scopes with no extra admin consent). Falls back to the
+    raw webpage URL only when we don't have team/channel context to build
+    the deep link at all.
     """
+    team_id = (getattr(user, "teams_team_id", "") or "").strip()
+    channel_id = (getattr(user, "teams_channel_id", "") or "").strip()
+    if team_id and channel_id:
+        return build_channel_tab_deep_link(
+            entity_id="aidl-add-admin",
+            team_id=team_id,
+            channel_id=channel_id,
+            tenant_id=getattr(settings, "MS_TENANT_ID", ""),
+            email=email,
+            label="Add Admin",
+        )
     return f"{_nav_base_url()}/tabs/add-admin/?email={email}"
 
 
@@ -643,9 +657,10 @@ def _nav_pill_rows(active_tab: str) -> dict:
         columns.append(
             {
                 "type": "Column",
-                # Fixed width (not "auto") so all six pills line up the same
-                # size regardless of label length, and stay compact.
-                "width": "78px",
+                # "auto" — a fixed px width clipped longer labels like
+                # "Add Admin"/"AI Apps"; smaller font + no extra spacing
+                # (below) already keeps the pills compact without that.
+                "width": "auto",
                 "selectAction": toggle_action,
                 "items": [
                     {

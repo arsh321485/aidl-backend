@@ -96,7 +96,7 @@ MS_SEND_WELCOME_CARD = os.getenv("MS_SEND_WELCOME_CARD", "True").lower() in (
     "true",
     "yes",
 )
-MS_AIDL_INSTALL_CHANNEL_TABS = os.getenv("MS_AIDL_INSTALL_CHANNEL_TABS", "False").lower() in (
+MS_AIDL_INSTALL_CHANNEL_TABS = os.getenv("MS_AIDL_INSTALL_CHANNEL_TABS", "True").lower() in (
     "1",
     "true",
     "yes",
