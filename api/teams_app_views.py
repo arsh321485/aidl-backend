@@ -128,20 +128,73 @@ def _admin_tab_context(request, active_tab: str, user_bits: dict) -> dict:
     }
 
 
+def _render_learner_tab(request, tab: str, user_bits: dict):
+    """The Learner's 4-tab dashboard (Home / Learner's Permit / Highway Code /
+    Traffic Light Check) — same nav-pill design as Admin Center, personalized
+    Adaptive Cards rendered client-side via teams_card_json."""
+    from urllib.parse import urlencode
+
+    from .teams_cards import TEAMS_TABS as LEARNER_TABS
+
+    base = _teams_base_url(request)
+    q = urlencode(
+        {
+            k: v
+            for k, v in {
+                "full_name": user_bits.get("full_name"),
+                "org_name": user_bits.get("org_name"),
+                "email": user_bits.get("email"),
+            }.items()
+            if v
+        }
+    )
+    suffix = f"?{q}" if q else ""
+    tabs = [
+        {
+            "id": tab_id,
+            "label": label,
+            "icon": icon,
+            "url": f"{base}/tabs/{tab_id}/{suffix}",
+            "active": tab_id == tab,
+        }
+        for tab_id, label, icon in LEARNER_TABS
+    ]
+    context = {
+        "tabs": tabs,
+        "active_tab": tab,
+        "org_name": user_bits.get("org_name") or org_display_name(),
+        "teams_base_url": base,
+        "card_json": json.dumps(
+            build_card(
+                tab,
+                full_name=user_bits.get("full_name", ""),
+                org_name=user_bits.get("org_name", ""),
+            )
+            or {}
+        ),
+    }
+    return render(request, "teams/tab.html", context)
+
+
 @xframe_options_exempt
 def teams_tab_page(request, tab: str):
     """
     Option C: Admin Center in-page UI (Home + clickable pills).
     Channel login/redirect flow unchanged — only the Home tab content.
     """
+    user_bits = _request_user_bits(request)
+    db_user = user_bits.get("user")
+    is_learner = db_user is not None and db_user.role == AIDLUser.Role.LEARNER
+
     if tab in _admin_tab_ids():
-        user_bits = _request_user_bits(request)
-        context = _admin_tab_context(request, tab, user_bits)
-        return render(request, "teams/admin.html", context)
+        # "home" is the one slug both the Admin Center and the Learner
+        # dashboard use — a Learner must get their own Home, not Admin
+        # Center's, so this is the one case that doesn't just fall through.
+        if not (tab == "home" and is_learner):
+            context = _admin_tab_context(request, tab, user_bits)
+            return render(request, "teams/admin.html", context)
 
     if tab == "user-dashboard":
-        user_bits = _request_user_bits(request)
-        db_user = user_bits.get("user")
         if db_user is None:
             context = {
                 "org_name": user_bits.get("org_name") or org_display_name(),
@@ -151,30 +204,12 @@ def teams_tab_page(request, tab: str):
             context = build_user_dashboard_payload(db_user)
         return render(request, "teams/user_dashboard.html", context)
 
-    # Legacy learner Adaptive Card pages (still available if channel tabs point here)
+    # Learner's 4-tab dashboard (Home / Learner's Permit / Highway Code /
+    # Traffic Light Check) — still reachable even for a non-learner viewer
+    # (e.g. previewing without ?email=), just without live personalization.
     if tab not in CARD_BUILDERS:
         raise Http404("Unknown tab")
-    from .teams_cards import TEAMS_TABS as LEARNER_TABS
-
-    base = _teams_base_url(request)
-    tabs = [
-        {
-            "id": tab_id,
-            "label": label,
-            "icon": icon,
-            "url": f"{base}/tabs/{tab_id}/",
-            "active": tab_id == tab,
-        }
-        for tab_id, label, icon in LEARNER_TABS
-    ]
-    context = {
-        "tabs": tabs,
-        "active_tab": tab,
-        "org_name": org_display_name(),
-        "teams_base_url": base,
-        "card_json": json.dumps(build_card(tab) or {}),
-    }
-    return render(request, "teams/tab.html", context)
+    return _render_learner_tab(request, tab, user_bits)
 
 
 @api_view(["GET"])

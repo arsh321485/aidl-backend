@@ -349,14 +349,16 @@ def teams_callback(request):
 
     is_learner = user.role == AIDLUser.Role.LEARNER
     if is_learner:
-        # Learners get their own read-only "AIDL User Dashboard" page instead
-        # of the shared Admin Center card — the channel's Posts stream is
-        # shared by everyone in the org, so only an admin's login should
-        # replace what's posted there.
+        # Learners get their own 4-tab dashboard (Home / Learner's Permit /
+        # Highway Code / Traffic Light Check) instead of the shared Admin
+        # Center card — the channel's Posts stream is shared by everyone in
+        # the org, so only an admin's login should replace what's posted
+        # there. teams_tab_page routes "home" to this dashboard instead of
+        # Admin Center's Home once it sees this user's role is Learner.
         from urllib.parse import urlencode
 
         teams_base = (getattr(settings, "MS_TEAMS_APP_BASE_URL", "") or "").rstrip("/")
-        landing_url = f"{teams_base}/tabs/user-dashboard/?" + urlencode(
+        landing_url = f"{teams_base}/tabs/home/?" + urlencode(
             {"email": user.email, "full_name": user.full_name}
         )
 
