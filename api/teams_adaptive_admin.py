@@ -7,7 +7,6 @@ from django.conf import settings
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
-from .teams_channel_tabs import build_channel_tab_deep_link
 
 
 # 1x1 Teams-blue (#5b5fc7 — same accent used across the tab UI) PNG, tiled
@@ -206,26 +205,17 @@ def _heading_block(payload: dict, tab: str, subtitle: str = "") -> list[dict]:
 
 def _add_admin_open_url(user, email: str) -> str:
     """
-    Prefer the Teams tab deep link so the click stays inside Teams (opens as
-    an in-app tab) instead of popping a plain https URL open in a new
-    external browser tab. This only resolves once ensure_aidl_channel_tabs
-    has actually installed the "aidl-add-admin" tab — MS_AIDL_INSTALL_CHANNEL_TABS
-    must be True (it only needs TeamsTab.Create/TeamsTab.ReadWrite.All,
-    already-granted scopes with no extra admin consent). Falls back to the
-    raw webpage URL only when we don't have team/channel context to build
-    the deep link at all.
+    Always the plain backend webpage. The Teams tab deep link (entity-based,
+    pointing at "aidl-add-admin") was tried and confirmed unreliable in
+    testing: all 6 Admin Center tabs are installed as the same built-in
+    "Website" tab type (com.microsoft.teamspace.tab.web) with different
+    entityIds, and Teams does not reliably disambiguate between them from a
+    deep link — it opened Home instead of Add Admin. Fixing that for real
+    would need a genuine custom Teams app (its own app id, static tabs in
+    the manifest, submitted to the tenant app catalog) which needs a new
+    admin-consent step — out of scope here. A plain https URL always opens
+    the right page, just in a new browser tab instead of staying in Teams.
     """
-    team_id = (getattr(user, "teams_team_id", "") or "").strip()
-    channel_id = (getattr(user, "teams_channel_id", "") or "").strip()
-    if team_id and channel_id:
-        return build_channel_tab_deep_link(
-            entity_id="aidl-add-admin",
-            team_id=team_id,
-            channel_id=channel_id,
-            tenant_id=getattr(settings, "MS_TENANT_ID", ""),
-            email=email,
-            label="Add Admin",
-        )
     return f"{_nav_base_url()}/tabs/add-admin/?email={email}"
 
 
