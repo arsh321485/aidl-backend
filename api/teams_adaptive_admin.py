@@ -10,15 +10,39 @@ from .teams_cards import logo_url
 from .teams_channel_tabs import build_channel_tab_deep_link
 
 
-# 1x1 Teams-blue (#5b5fc7 — same accent used across the tab UI) PNG, tiled
-# via backgroundImage, to give the active nav pill a minimal blue highlight
-# instead of Adaptive Cards' themed "accent" style — which Teams renders as
-# its own brand blue/purple, not a color this card can otherwise override
-# (Container "style" is a fixed host-themed enum, not an arbitrary hex).
-_ACTIVE_PILL_BG = (
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
-    "DElEQVR4nGOIjj8OAAKaAYI+GmpxAAAAAElFTkSuQmCC"
-)
+# 1x1 solid-color PNGs, tiled via backgroundImage, to give each active nav
+# pill its OWN accent color instead of Adaptive Cards' themed "accent" style
+# — which Teams renders as one fixed host brand color, not an arbitrary hex
+# (Container "style" is a fixed enum, not a per-container color you can set).
+# Same accent palette as the admin.html tab page, so the two surfaces read
+# as one product: home=purple, add-admin=blue, policy=teal, cards=amber,
+# ai-apps=pink, it-apps=cyan.
+_PILL_ACCENT_BG = {
+    "home": (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+        "DElEQVR42mOIjj8OAAKaAYIA57ndAAAAAElFTkSuQmCC"
+    ),
+    "add-admin": (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+        "DElEQVR42mPQr38AAAJvAY9PDuH0AAAAAElFTkSuQmCC"
+    ),
+    "policy": (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+        "DElEQVR42mPgm58HAAHaARzGO7vlAAAAAElFTkSuQmCC"
+    ),
+    "cards": (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+        "DElEQVR42mN40ckDAAPaAX7dCtOCAAAAAElFTkSuQmCC"
+    ),
+    "ai-apps": (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+        "DElEQVR42mO45tAPAAOVAaacjwPTAAAAAElFTkSuQmCC"
+    ),
+    "it-apps": (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+        "DElEQVR42mNgW7wDAAIUAWKBNdUVAAAAAElFTkSuQmCC"
+    ),
+}
 
 
 def _nav_base_url() -> str:
@@ -664,7 +688,10 @@ def _nav_pill_rows(active_tab: str) -> dict:
                         "id": _pill_id(tab_id, active=True),
                         "isVisible": tab_id == active_tab,
                         "style": "emphasis",
-                        "backgroundImage": {"url": _ACTIVE_PILL_BG, "fillMode": "repeat"},
+                        "backgroundImage": {
+                            "url": _PILL_ACCENT_BG.get(tab_id, _PILL_ACCENT_BG["home"]),
+                            "fillMode": "repeat",
+                        },
                         "spacing": "None",
                         "items": [
                             {
@@ -729,10 +756,10 @@ def _nav_container(
     return _nav_pill_rows(active_tab)
 
 
-def _stat_tile(label: str, value: str, sub: str, *, alert: bool = False) -> dict:
+def _stat_tile(label: str, value: str, sub: str, *, alert: bool = False, style: str = "emphasis") -> dict:
     return {
         "type": "Container",
-        "style": "emphasis",
+        "style": "attention" if alert else style,
         "items": [
             {
                 "type": "TextBlock",
@@ -812,12 +839,20 @@ def build_admin_adaptive_card(
     )
 
 
+# Style cycles that give the stat/governance tiles visual variety within
+# Adaptive Cards' fixed style enum (no arbitrary hex per tile) — chosen for
+# what each metric actually means, not just alternated for looks: "good" on
+# the approved count, "accent" as the brand highlight, "emphasis" as neutral.
+_STAT_STYLES = ("accent", "emphasis", "emphasis")
+_GOV_STYLES = ("emphasis", "good", "accent", "accent")
+
+
 def _home_body_items(dash: dict) -> list[dict]:
     """Depot Overview + welcome + stats + governance + progress — Home's own
     section content, with no header/nav (those are shared, above the tabs)."""
     stats = dash.get("stats") or []
     stats_cols = []
-    for s in stats[:3]:
+    for idx, s in enumerate(stats[:3]):
         stats_cols.append(
             {
                 "type": "Column",
@@ -828,6 +863,7 @@ def _home_body_items(dash: dict) -> list[dict]:
                         s.get("value", "0"),
                         s.get("sub", ""),
                         alert=bool(s.get("alert")),
+                        style=_STAT_STYLES[idx % len(_STAT_STYLES)],
                     )
                 ],
             }
@@ -845,6 +881,7 @@ def _home_body_items(dash: dict) -> list[dict]:
                     g.get("label", ""),
                     g.get("value", "0"),
                     g.get("sub", ""),
+                    style=_GOV_STYLES[idx % len(_GOV_STYLES)],
                 )
             ],
         }
@@ -1019,7 +1056,7 @@ def _home_card(
 
     stats = dash.get("stats") or []
     stats_cols = []
-    for s in stats[:3]:
+    for idx, s in enumerate(stats[:3]):
         stats_cols.append(
             {
                 "type": "Column",
@@ -1030,6 +1067,7 @@ def _home_card(
                         s.get("value", "0"),
                         s.get("sub", ""),
                         alert=bool(s.get("alert")),
+                        style=_STAT_STYLES[idx % len(_STAT_STYLES)],
                     )
                 ],
             }
@@ -1047,6 +1085,7 @@ def _home_card(
                     g.get("label", ""),
                     g.get("value", "0"),
                     g.get("sub", ""),
+                    style=_GOV_STYLES[idx % len(_GOV_STYLES)],
                 )
             ],
         }
