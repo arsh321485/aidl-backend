@@ -18,6 +18,22 @@ DEFAULT_POLICY_ENTITIES = (
     "SpinifexIT Deutschland GmbH",
 )
 
+# 1x1 solid-color PNGs, tiled via backgroundImage — the same trick the Admin
+# Center card uses to get exact brand colors Adaptive Cards' themed style
+# enum can't otherwise produce (Container "style" is host-themed, not a hex).
+# Only used for colors with no good native-style match (purple brand accent,
+# license-card yellow); traffic-light/highway-code rows use native
+# good/warning/attention/accent styles instead, since those stay legible in
+# both light and dark Teams themes without us guessing at tint colors.
+_PURPLE_BG = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+    "DElEQVR42mOIjj8OAAKaAYIA57ndAAAAAElFTkSuQmCC"
+)
+_YELLOW_BG = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA"
+    "DElEQVR42mP4dEIQAAR7Acw2oylWAAAAAElFTkSuQmCC"
+)
+
 
 def first_name(full_name: str) -> str:
     parts = (full_name or "").strip().split()
@@ -53,6 +69,13 @@ def logo_url() -> str:
         getattr(settings, "AIDL_LOGO_URL", None)
         or "https://aidl-backend.onrender.com/static/aidl/logo.png"
     ).strip()
+
+
+def _tabs_base_url() -> str:
+    configured = (getattr(settings, "MS_TEAMS_APP_BASE_URL", None) or "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return "https://aidl-backend.onrender.com/api/teams"
 
 
 def _header_block(org_name: str) -> dict:
@@ -101,49 +124,83 @@ def _header_block(org_name: str) -> dict:
     }
 
 
-def _policy_checklist_block() -> dict:
-    items = []
-    for entity in policy_entities():
-        items.append(
+def _nav_row(active_tab: str) -> dict:
+    """Same purple-pill nav strip as the Admin Center card, wrapping to 2
+    rows of 2 — each pill deep-links to that tab's own standalone page so the
+    strip is still useful even though these 4 cards are sent as separate
+    bot/DM messages, not one togglable card."""
+    base = _tabs_base_url()
+    columns = []
+    for tab_id, label, icon in TEAMS_TABS:
+        active = tab_id == active_tab
+        columns.append(
             {
-                "type": "ColumnSet",
-                "spacing": "Small",
-                "columns": [
+                "type": "Column",
+                "width": "auto",
+                "selectAction": {
+                    "type": "Action.OpenUrl",
+                    "url": f"{base}/tabs/{tab_id}/",
+                },
+                "items": [
                     {
-                        "type": "Column",
-                        "width": "auto",
+                        "type": "Container",
+                        "style": "emphasis",
+                        "spacing": "None",
+                        **({"backgroundImage": {"url": _PURPLE_BG, "fillMode": "repeat"}} if active else {}),
                         "items": [
                             {
                                 "type": "TextBlock",
-                                "text": "☐",
-                                "size": "Default",
+                                "text": f"{icon} {label}",
+                                "weight": "Bolder",
+                                "size": "Small",
+                                "color": "light" if active else "default",
+                                "wrap": False,
+                                "spacing": "None",
+                                "horizontalAlignment": "Center",
                             }
                         ],
-                    },
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": entity,
-                                "wrap": True,
-                            }
-                        ],
-                    },
+                    }
                 ],
             }
         )
+    return {
+        "type": "Container",
+        "spacing": "Small",
+        "items": [
+            {"type": "ColumnSet", "spacing": "Small", "columns": columns[:2]},
+            {"type": "ColumnSet", "spacing": "Small", "columns": columns[2:]},
+        ],
+    }
 
+
+def _pill_button(title: str, url: str) -> dict:
+    """A purple pill-shaped call-to-action — native Action.OpenUrl buttons
+    render in Teams' own host color, not an arbitrary hex, so this uses the
+    same backgroundImage trick as the nav pills to get the exact brand color."""
+    return {
+        "type": "Container",
+        "style": "emphasis",
+        "backgroundImage": {"url": _PURPLE_BG, "fillMode": "repeat"},
+        "spacing": "Medium",
+        "selectAction": {"type": "Action.OpenUrl", "url": url},
+        "items": [
+            {
+                "type": "TextBlock",
+                "text": title,
+                "weight": "Bolder",
+                "color": "light",
+                "horizontalAlignment": "Center",
+                "spacing": "None",
+            }
+        ],
+    }
+
+
+def _policy_checklist_block() -> dict:
     return {
         "type": "Container",
         "style": "emphasis",
         "bleed": True,
-        "backgroundImage": {
-            "fillMode": "Cover",
-            "horizontalAlignment": "Center",
-            "verticalAlignment": "Center",
-        },
         "items": [
             {
                 "type": "TextBlock",
@@ -153,13 +210,12 @@ def _policy_checklist_block() -> dict:
             },
             {
                 "type": "TextBlock",
-                "text": "APPLIES TO",
+                "text": "Read the full policy before you start using AI tools at work.",
                 "size": "Small",
-                "weight": "Bolder",
                 "isSubtle": True,
-                "spacing": "Medium",
+                "wrap": True,
+                "spacing": "Small",
             },
-            *items,
         ],
         "spacing": "Medium",
     }
@@ -174,6 +230,7 @@ def build_home_card(*, full_name: str = "", org_name: str = "") -> dict:
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "version": "1.5",
         "body": [
+            _nav_row("home"),
             _header_block(org),
             {
                 "type": "TextBlock",
@@ -194,6 +251,7 @@ def build_home_card(*, full_name: str = "", org_name: str = "") -> dict:
                 "spacing": "Small",
             },
             _policy_checklist_block(),
+            _pill_button("Read full policy", policy_url()),
             {
                 "type": "TextBlock",
                 "text": f"Sent automatically on signup · {org}",
@@ -203,136 +261,108 @@ def build_home_card(*, full_name: str = "", org_name: str = "") -> dict:
                 "wrap": True,
             },
         ],
-        "actions": [
-            {
-                "type": "Action.OpenUrl",
-                "title": "Read full policy",
-                "url": policy_url(),
-                "style": "positive",
-            }
-        ],
         "msteams": {
             "width": "Full",
         },
     }
 
 
-def build_learners_permit_card(*, full_name: str = "", org_name: str = "") -> dict:
-    org = org_display_name(org_name)
-    name = first_name(full_name)
+def _level_toggle(active: str) -> dict:
+    def _tile(code: str, label: str, is_active: bool) -> dict:
+        return {
+            "type": "Column",
+            "width": "stretch",
+            "items": [
+                {
+                    "type": "Container",
+                    "style": "emphasis",
+                    **({"backgroundImage": {"url": _YELLOW_BG, "fillMode": "repeat"}} if is_active else {}),
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": code,
+                            "weight": "Bolder",
+                            "horizontalAlignment": "Center",
+                            "spacing": "None",
+                            "isSubtle": not is_active,
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": label,
+                            "size": "Small",
+                            "weight": "Bolder",
+                            "horizontalAlignment": "Center",
+                            "spacing": "None",
+                            "isSubtle": not is_active,
+                        },
+                    ],
+                }
+            ],
+        }
+
     return {
-        "type": "AdaptiveCard",
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "version": "1.5",
-        "body": [
-            _header_block(org),
-            {
-                "type": "TextBlock",
-                "text": f"Learner's Permit — {name}",
-                "size": "Large",
-                "weight": "Bolder",
-                "wrap": True,
-                "spacing": "Medium",
-            },
-            {
-                "type": "TextBlock",
-                "text": (
-                    "Complete the Acceptable Use Policy on **Home**, then start your "
-                    "AIDL modules here. Your digital permit will appear once you pass "
-                    "the required checks."
-                ),
-                "wrap": True,
-            },
-            {
-                "type": "FactSet",
-                "facts": [
-                    {"title": "Status", "value": "Not issued yet"},
-                    {"title": "Organisation", "value": org},
-                ],
-                "spacing": "Medium",
-            },
+        "type": "ColumnSet",
+        "spacing": "Medium",
+        "columns": [
+            _tile("L", "Learner", active == "learner"),
+            _tile("F", "Full", active == "full"),
         ],
-        "actions": [
-            {
-                "type": "Action.OpenUrl",
-                "title": "Start learning",
-                "url": getattr(settings, "FRONTEND_URL", ""),
-                "style": "positive",
-            }
-        ],
-        "msteams": {"width": "Full"},
     }
 
 
-def build_highway_code_card(*, full_name: str = "", org_name: str = "") -> dict:
-    org = org_display_name(org_name)
+def _licence_card_visual(*, full_name: str, org_name: str) -> dict:
+    name = (full_name or "Jordan Ellis").strip().upper()
     return {
-        "type": "AdaptiveCard",
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "version": "1.5",
-        "body": [
-            _header_block(org),
+        "type": "Container",
+        "style": "emphasis",
+        "backgroundImage": {"url": _YELLOW_BG, "fillMode": "repeat"},
+        "spacing": "Medium",
+        "items": [
             {
-                "type": "TextBlock",
-                "text": "Highway Code",
-                "size": "Large",
-                "weight": "Bolder",
-                "wrap": True,
-                "spacing": "Medium",
-            },
-            {
-                "type": "TextBlock",
-                "text": (
-                    "Review core AI safety principles, responsible use guidelines, "
-                    "and organisation-specific rules before taking your licence quiz."
-                ),
-                "wrap": True,
-            },
-            {
-                "type": "Container",
-                "style": "emphasis",
-                "items": [
+                "type": "ColumnSet",
+                "columns": [
                     {
-                        "type": "TextBlock",
-                        "text": "Coming up",
-                        "weight": "Bolder",
+                        "type": "Column",
+                        "width": "stretch",
+                        "items": [
+                            {
+                                "type": "TextBlock",
+                                "text": "AI DRIVING LICENSE",
+                                "weight": "Bolder",
+                                "size": "Medium",
+                                "spacing": "None",
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": f"ISSUED FOR {org_name.upper()}",
+                                "size": "Small",
+                                "isSubtle": True,
+                                "spacing": "None",
+                                "wrap": True,
+                            },
+                        ],
                     },
                     {
-                        "type": "TextBlock",
-                        "text": "• Responsible AI basics\n• Data handling\n• Prompt safety",
-                        "wrap": True,
+                        "type": "Column",
+                        "width": "auto",
+                        "items": [
+                            {
+                                "type": "TextBlock",
+                                "text": "L",
+                                "weight": "Bolder",
+                                "horizontalAlignment": "Center",
+                            }
+                        ],
+                        "style": "default",
                     },
                 ],
-                "spacing": "Medium",
             },
-        ],
-        "msteams": {"width": "Full"},
-    }
-
-
-def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "") -> dict:
-    org = org_display_name(org_name)
-    name = first_name(full_name)
-    return {
-        "type": "AdaptiveCard",
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "version": "1.5",
-        "body": [
-            _header_block(org),
             {
                 "type": "TextBlock",
-                "text": "Traffic Light Check",
-                "size": "Large",
+                "text": name,
                 "weight": "Bolder",
-                "wrap": True,
+                "size": "ExtraLarge",
                 "spacing": "Medium",
-            },
-            {
-                "type": "TextBlock",
-                "text": (
-                    f"Hi {name}, this quick readiness check shows whether you're "
-                    "green to proceed, amber for review, or red for mandatory training."
-                ),
                 "wrap": True,
             },
             {
@@ -343,43 +373,259 @@ def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "") -
                         "type": "Column",
                         "width": "stretch",
                         "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": "🟢 Ready",
-                                "horizontalAlignment": "Center",
-                            }
+                            {"type": "TextBlock", "text": "CLASS", "size": "Small", "isSubtle": True, "spacing": "None"},
+                            {"type": "TextBlock", "text": "Learner's Permit", "weight": "Bolder", "spacing": "None"},
+                            {"type": "TextBlock", "text": "EXPIRES", "size": "Small", "isSubtle": True, "spacing": "Medium"},
+                            {"type": "TextBlock", "text": "1 year from issue", "weight": "Bolder", "spacing": "None"},
                         ],
                     },
                     {
                         "type": "Column",
                         "width": "stretch",
                         "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": "🟡 Review",
-                                "horizontalAlignment": "Center",
-                            }
-                        ],
-                    },
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": "🔴 Training",
-                                "horizontalAlignment": "Center",
-                            }
+                            {"type": "TextBlock", "text": "ISSUED", "size": "Small", "isSubtle": True, "spacing": "None"},
+                            {"type": "TextBlock", "text": "Today", "weight": "Bolder", "spacing": "None"},
+                            {"type": "TextBlock", "text": "STATUS", "size": "Small", "isSubtle": True, "spacing": "Medium"},
+                            {"type": "TextBlock", "text": "ACTIVE", "weight": "Bolder", "spacing": "None"},
                         ],
                     },
                 ],
             },
             {
+                "type": "Container",
+                "style": "default",
+                "spacing": "Medium",
+                "items": [
+                    {
+                        "type": "TextBlock",
+                        "text": "AIDL-L-" + "".join(str(ord(c) % 10) for c in (name[:4] or "AIDL")),
+                        "size": "Small",
+                        "isSubtle": True,
+                        "spacing": "None",
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def build_learners_permit_card(*, full_name: str = "", org_name: str = "") -> dict:
+    org = org_display_name(org_name)
+    return {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.5",
+        "body": [
+            _nav_row("learners-permit"),
+            _header_block(org),
+            {
                 "type": "TextBlock",
-                "text": "Your check will unlock after policy acceptance.",
-                "isSubtle": True,
+                "text": "Your Learner's Permit is ready",
+                "size": "Large",
+                "weight": "Bolder",
                 "wrap": True,
                 "spacing": "Medium",
+            },
+            _level_toggle("learner"),
+            _licence_card_visual(full_name=full_name, org_name=org),
+            {
+                "type": "TextBlock",
+                "text": (
+                    "This is your AI Driving Licence. You're currently at **Level L — "
+                    "Learner**. As you complete lessons and pass checks, you'll move up "
+                    "to higher levels."
+                ),
+                "wrap": True,
+                "spacing": "Medium",
+            },
+            {
+                "type": "TextBlock",
+                "text": "Share: 𝕏 · LinkedIn · Facebook · WhatsApp",
+                "size": "Small",
+                "isSubtle": True,
+                "spacing": "Small",
+                "wrap": True,
+            },
+        ],
+        "actions": [
+            {
+                "type": "Action.OpenUrl",
+                "title": "Download License",
+                "url": f"{_tabs_base_url()}/cards/learners-permit/",
+            }
+        ],
+        "msteams": {"width": "Full"},
+    }
+
+
+def _highway_code_row(icon: str, style: str, title: str, body: str) -> dict:
+    return {
+        "type": "ColumnSet",
+        "spacing": "Medium",
+        "columns": [
+            {
+                "type": "Column",
+                "width": "60px",
+                "items": [
+                    {
+                        "type": "Container",
+                        "style": style,
+                        "spacing": "None",
+                        "items": [
+                            {
+                                "type": "TextBlock",
+                                "text": icon,
+                                "weight": "Bolder",
+                                "size": "Small",
+                                "horizontalAlignment": "Center",
+                                "spacing": "None",
+                                "wrap": True,
+                            }
+                        ],
+                    }
+                ],
+                "verticalContentAlignment": "Center",
+            },
+            {
+                "type": "Column",
+                "width": "stretch",
+                "items": [
+                    {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True, "spacing": "None"},
+                    {"type": "TextBlock", "text": body, "wrap": True, "spacing": "None", "size": "Small"},
+                ],
+            },
+        ],
+    }
+
+
+def build_highway_code_card(*, full_name: str = "", org_name: str = "") -> dict:
+    org = org_display_name(org_name)
+    rows = [
+        _highway_code_row(
+            "STOP", "attention", "Keep Private Things Private",
+            "Never paste **passwords, ID numbers, bank details, or your home "
+            "address** into a consumer AI tool. Once it's in, you've lost control of it.",
+        ),
+        _highway_code_row(
+            "CHECK", "warning", "Check Before You Trust",
+            "AI can state wrong things confidently. **Verify facts, dates, and "
+            "numbers** against a real source before you rely on them.",
+        ),
+        _highway_code_row(
+            "YOU", "warning", "You're Still the Driver",
+            "AI drafts; you decide. **Read and edit every output** and make it "
+            "your own before you use or send it.",
+        ),
+        _highway_code_row(
+            "ASK", "accent", "Better Prompt, Better Answer",
+            "Vague questions get vague answers. **Say who the AI should be, what "
+            "you want, and how it should look** — that's the PREP habit.",
+        ),
+        _highway_code_row(
+            "ONE WAY", "default", "Mind What You Share",
+            "Free tools may learn from what you type. **Treat every prompt like "
+            "a postcard** — assume it could be read.",
+        ),
+    ]
+    return {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.5",
+        "body": [
+            _nav_row("highway-code"),
+            _header_block(org),
+            {
+                "type": "TextBlock",
+                "text": "The Highway Code",
+                "size": "Large",
+                "weight": "Bolder",
+                "wrap": True,
+                "spacing": "Medium",
+            },
+            {
+                "type": "TextBlock",
+                "text": (
+                    "The everyday rules for using AI safely and confidently. Learn "
+                    "them, follow them, drive happy."
+                ),
+                "wrap": True,
+            },
+            *rows,
+            _pill_button("Open full Highway Code", policy_url()),
+        ],
+        "msteams": {"width": "Full"},
+    }
+
+
+def _traffic_light_section(style: str, title: str, bullets: list[str], action_text: str) -> dict:
+    return {
+        "type": "Container",
+        "style": style,
+        "spacing": "Medium",
+        "items": [
+            {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True, "spacing": "None"},
+            {
+                "type": "TextBlock",
+                "text": "\n".join(f"• {b}" for b in bullets),
+                "wrap": True,
+                "spacing": "Small",
+            },
+            {
+                "type": "TextBlock",
+                "text": f"→ {action_text}",
+                "weight": "Bolder",
+                "wrap": True,
+                "spacing": "Small",
+                "size": "Small",
+            },
+        ],
+    }
+
+
+def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "") -> dict:
+    org = org_display_name(org_name)
+    return {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.5",
+        "body": [
+            _nav_row("traffic-light-check"),
+            _header_block(org),
+            {
+                "type": "TextBlock",
+                "text": "🚦 Traffic Light Check",
+                "size": "Large",
+                "weight": "Bolder",
+                "wrap": True,
+                "spacing": "Medium",
+            },
+            {
+                "type": "TextBlock",
+                "text": "Before you paste anything into an AI, check the lights.",
+                "wrap": True,
+            },
+            _traffic_light_section(
+                "good", "🟢 GO — Public, non-personal.",
+                ["General questions & explanations", "Public articles to summarise", "Story, recipe, and idea prompts"],
+                "Any tool you like — then check facts.",
+            ),
+            _traffic_light_section(
+                "warning", "🟡 CAUTION — A little personal.",
+                ["Your first name or city", "Your rough plans or preferences", "Non-sensitive everyday details"],
+                "Use a placeholder or remove it first.",
+            ),
+            _traffic_light_section(
+                "attention", "🔴 STOP — Private, keep it out.",
+                ["Passwords, PINs, verification codes", "Bank/card numbers, national ID", "Home address, other people's data"],
+                "Never paste. Anonymise, then retry.",
+            ),
+            {
+                "type": "TextBlock",
+                "text": "Was this card useful? 👍 128 · 👎 6",
+                "size": "Small",
+                "isSubtle": True,
+                "spacing": "Medium",
+                "wrap": True,
             },
         ],
         "msteams": {"width": "Full"},
