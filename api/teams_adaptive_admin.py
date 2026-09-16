@@ -476,22 +476,27 @@ CARD_CATALOG = (
 )
 
 def _card_row(card: dict) -> list[dict]:
-    # One TextBlock per card (title bold, meta as a markdown newline below)
-    # instead of a Container wrapping two TextBlocks — every byte here is
-    # repeated 10x, and the combined card (all 6 tabs + nav) sits close to
-    # Graph/Teams' ~28KB Adaptive Card size cap; over it, Graph rejects the
-    # card outright and Posts shows nothing. "View"/"Request Card" belongs
-    # on the full admin.html webpage where there's no such size ceiling.
+    # Wrapped in the same "emphasis" Container as _item_row (used by the
+    # other tabs) so each card gets its own subtle background box — without
+    # it, consecutive TextBlocks render as one continuous stream of text
+    # with no visual break between cards.
     status_prefix = "✓ · " if card["requested"] else ""
     meta = f"{card['category']} · {status_prefix}★{card['rating'].split(' ')[0]}"
     if card["price"]:
         meta = f"{meta} · {card['price']}"
     return [
         {
-            "type": "TextBlock",
-            "text": f"**{card['icon']} {card['title']}**\n\n{meta}",
-            "wrap": True,
+            "type": "Container",
+            "style": "emphasis",
             "spacing": "Small",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": f"**{card['icon']} {card['title']}**\n\n{meta}",
+                    "wrap": True,
+                    "spacing": "None",
+                }
+            ],
         },
     ]
 
