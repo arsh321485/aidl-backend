@@ -398,10 +398,71 @@
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--aidl-purple) 22%, transparent);
       border-color: var(--aidl-purple);
     }
+
+    /* ---- Policy tab: colored "live policy" bar + signed/unsigned tiles ---- */
+    .policy-live {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--c-policy) 16%, var(--aidl-card)), var(--aidl-card) 70%);
+      border: 1px solid color-mix(in srgb, var(--c-policy) 35%, var(--aidl-border));
+      border-radius: 18px;
+      padding: 16px 18px;
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .policy-live-label {
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--c-policy);
+    }
+    .policy-live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--c-policy);
+      background: color-mix(in srgb, var(--c-policy) 18%, transparent);
+      border-radius: 999px;
+      padding: 4px 12px;
+      white-space: nowrap;
+    }
+    .policy-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 14px 0 20px;
+    }
+    .policy-stat {
+      background: var(--aidl-subtle);
+      border: 1px solid var(--aidl-border);
+      border-radius: 16px;
+      padding: 14px 16px;
+    }
+    .policy-stat-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--aidl-muted);
+      margin-bottom: 6px;
+    }
+    .policy-stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--c-policy);
+    }
+    .policy-stat-value.unsigned { color: var(--aidl-alert); }
     @media (max-width: 720px) {
       .stats { grid-template-columns: 1fr; }
       .gov { grid-template-columns: 1fr 1fr; }
       .card { padding: 20px; }
+      .policy-live { flex-direction: column; align-items: flex-start; }
     }
   </style>
 </head>
@@ -530,8 +591,22 @@
           '</div>' +
           '<p id="inviteMsg" class="progress" style="margin-top:8px;"></p>'
         );
-      } else if (tab === "policy" && data.policy_url) {
-        extra = '<p style="margin-top:12px;"><a class="next-link" id="policyLink" href="' + escapeHtml(data.policy_url) + '" target="_blank" rel="noopener">Read full policy</a></p>';
+      } else if (tab === "policy") {
+        const signed = data.signed_count || 0;
+        const unsigned = data.unsigned_count || 0;
+        extra = (
+          '<div class="policy-live">' +
+            '<span class="policy-live-label">Current Live Policy</span>' +
+            '<span class="policy-live-badge">● Live</span>' +
+          '</div>' +
+          '<div class="policy-stats">' +
+            '<div class="policy-stat"><div class="policy-stat-label">Signed</div><div class="policy-stat-value">' + signed + '</div></div>' +
+            '<div class="policy-stat"><div class="policy-stat-label">Unsigned</div><div class="policy-stat-value' + (unsigned ? ' unsigned' : '') + '">' + unsigned + '</div></div>' +
+          '</div>' +
+          (data.policy_url
+            ? '<a class="btn primary" id="policyLink" href="' + escapeHtml(data.policy_url) + '" target="_blank" rel="noopener">View Current Policy</a>'
+            : '')
+        );
       }
 
       return (

@@ -224,16 +224,19 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
     admin_seat_limit = payload.get("admin_seat_limit") or 0
     email = payload.get("email") or "name@company.com"
 
+    # Each tile gets its own Adaptive Card container style so the three
+    # permissions read as distinct colored chips instead of one highlighted
+    # tile next to two blank ones.
     permission_tiles = [
-        ("Approve Apps", "Governance", True),
-        ("Access Cards", "Reference cards", False),
-        ("Create Card", "Add new cards", False),
+        ("Approve Apps", "Governance", "warning"),
+        ("Access Cards", "Reference cards", "accent"),
+        ("Create Card", "Add new cards", "good"),
     ]
 
-    def _tile(title: str, sub: str, highlighted: bool) -> dict:
+    def _tile(title: str, sub: str, style: str) -> dict:
         return {
             "type": "Container",
-            "style": "warning" if highlighted else "default",
+            "style": style,
             "spacing": "Small",
             "items": [
                 {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True, "spacing": "None"},
@@ -284,7 +287,6 @@ def _policy_blocks(payload: dict) -> list[dict]:
     policy_url = payload.get("policy_url") or ""
     signed = payload.get("signed_count") or 0
     unsigned = payload.get("unsigned_count") or 0
-    version = payload.get("policy_version") or "current"
 
     return [
         *_heading_block(
@@ -293,8 +295,12 @@ def _policy_blocks(payload: dict) -> list[dict]:
             payload.get("body")
             or "The AUP policy is uploaded by your organisation and shown here for every team member to sign.",
         ),
+        # Colored "live" status bar — style "accent" instead of a plain
+        # unstyled Container so the current policy stands out the way the
+        # rest of the highlighted sections (badges, tiles) already do.
         {
             "type": "Container",
+            "style": "accent",
             "spacing": "Medium",
             "items": [
                 {
@@ -319,7 +325,7 @@ def _policy_blocks(payload: dict) -> list[dict]:
                             "items": [
                                 {
                                     "type": "TextBlock",
-                                    "text": "LIVE",
+                                    "text": "● LIVE",
                                     "size": "Small",
                                     "weight": "Bolder",
                                     "color": "good",
@@ -329,12 +335,43 @@ def _policy_blocks(payload: dict) -> list[dict]:
                         },
                     ],
                 },
+            ],
+        },
+        # Signed/unsigned as colored stat tiles instead of one subtle
+        # footer line — makes the split legible at a glance.
+        {
+            "type": "ColumnSet",
+            "spacing": "Medium",
+            "columns": [
                 {
-                    "type": "TextBlock",
-                    "text": f"Version {version}",
-                    "size": "Small",
-                    "wrap": True,
-                    "spacing": "Small",
+                    "type": "Column",
+                    "width": "stretch",
+                    "items": [
+                        {"type": "TextBlock", "text": "SIGNED", "size": "Small", "isSubtle": True, "spacing": "None"},
+                        {
+                            "type": "TextBlock",
+                            "text": str(signed),
+                            "size": "ExtraLarge",
+                            "weight": "Bolder",
+                            "color": "good",
+                            "spacing": "None",
+                        },
+                    ],
+                },
+                {
+                    "type": "Column",
+                    "width": "stretch",
+                    "items": [
+                        {"type": "TextBlock", "text": "UNSIGNED", "size": "Small", "isSubtle": True, "spacing": "None"},
+                        {
+                            "type": "TextBlock",
+                            "text": str(unsigned),
+                            "size": "ExtraLarge",
+                            "weight": "Bolder",
+                            "color": "attention" if unsigned else "good",
+                            "spacing": "None",
+                        },
+                    ],
                 },
             ],
         },
@@ -348,6 +385,7 @@ def _policy_blocks(payload: dict) -> list[dict]:
                         {
                             "type": "Action.OpenUrl",
                             "title": "View Current Policy",
+                            "style": "positive",
                             "url": policy_url,
                         }
                         if policy_url
@@ -356,14 +394,6 @@ def _policy_blocks(payload: dict) -> list[dict]:
                 ]
                 if a
             ],
-        },
-        {
-            "type": "TextBlock",
-            "text": f"{signed} team members signed · {unsigned} unsigned",
-            "size": "Small",
-            "isSubtle": True,
-            "spacing": "Small",
-            "wrap": True,
         },
     ]
 
