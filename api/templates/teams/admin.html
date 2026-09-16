@@ -63,16 +63,16 @@
       padding: 20px 20px 40px;
     }
 
-    /* ---- Top nav: elevated segmented control with per-tab accent colors ---- */
+    /* ---- Top nav: pill-shaped segmented control with per-tab accent colors ---- */
     .nav {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 20px;
+      gap: 8px;
+      margin-bottom: 22px;
       background: var(--aidl-card);
       border: 1px solid var(--aidl-border);
-      border-radius: 16px;
-      padding: 6px;
+      border-radius: 22px;
+      padding: 8px;
       box-shadow: var(--aidl-shadow);
     }
     .nav a {
@@ -80,8 +80,8 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 9px 14px;
-      border-radius: 10px;
+      padding: 9px 16px 9px 10px;
+      border-radius: 999px;
       border: 1px solid transparent;
       background: transparent;
       color: var(--aidl-muted);
@@ -89,7 +89,7 @@
       font-size: 13.5px;
       font-weight: 600;
       cursor: pointer;
-      transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+      transition: background-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
     }
     .nav a[data-tab-link="home"] { --accent: var(--c-home); }
     .nav a[data-tab-link="add-admin"] { --accent: var(--c-add-admin); }
@@ -101,24 +101,33 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 22px;
-      height: 22px;
-      border-radius: 7px;
-      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
       font-size: 12px;
       line-height: 1;
+      transition: background-color .18s ease, transform .18s ease;
     }
     .nav a:hover {
-      background: color-mix(in srgb, var(--accent) 10%, transparent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--aidl-text);
+      transform: translateY(-1px);
+    }
+    .nav a:hover .nav-icon {
+      transform: scale(1.08);
     }
     .nav a.active {
-      background: var(--accent);
+      background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 78%, black));
       color: #fff;
-      box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+      box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 50%, transparent);
     }
     .nav a.active .nav-icon {
-      background: rgba(255, 255, 255, 0.22);
+      background: rgba(255, 255, 255, 0.25);
+    }
+    .nav a:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+      outline-offset: 2px;
     }
 
     .section-label {
@@ -134,8 +143,8 @@
     .card {
       background: var(--aidl-card);
       border: 1px solid var(--aidl-border);
-      border-radius: 16px;
-      padding: 26px 28px;
+      border-radius: 24px;
+      padding: 28px 30px;
       box-shadow: var(--aidl-shadow);
     }
     .brand {
@@ -149,7 +158,7 @@
     .brand img {
       width: 40px;
       height: 40px;
-      border-radius: 12px;
+      border-radius: 999px;
       box-shadow: 0 2px 6px rgba(32, 31, 54, 0.12);
     }
     .brand-text {
@@ -178,15 +187,32 @@
       margin-bottom: 24px;
     }
     .stat {
-      background: var(--aidl-card);
+      --accent: var(--aidl-purple);
+      position: relative;
+      background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 10%, var(--aidl-card)), var(--aidl-card) 60%);
       border: 1px solid var(--aidl-border);
-      border-left: 4px solid var(--aidl-purple);
-      border-radius: 12px;
-      padding: 14px 16px;
-      box-shadow: 0 1px 3px rgba(32, 31, 54, 0.05);
+      border-radius: 18px;
+      padding: 16px 18px 16px 20px;
+      box-shadow: 0 2px 6px rgba(32, 31, 54, 0.06);
+      overflow: hidden;
+      transition: transform .18s ease, box-shadow .18s ease;
     }
-    .stat:nth-of-type(2) { border-left-color: var(--c-add-admin); }
-    .stat:nth-of-type(3) { border-left-color: var(--aidl-alert); }
+    .stat::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 4px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+    .stat:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 18px rgba(32, 31, 54, 0.1);
+    }
+    .stat:nth-of-type(2) { --accent: var(--c-add-admin); }
+    .stat:nth-of-type(3) { --accent: var(--aidl-alert); }
     .stat-label {
       font-size: 11px;
       font-weight: 700;
@@ -224,12 +250,14 @@
     .gov-item {
       background: var(--aidl-subtle);
       border: 1px solid var(--aidl-border);
-      border-radius: 12px;
-      padding: 14px 15px;
-      transition: box-shadow .15s ease, transform .15s ease;
+      border-radius: 18px;
+      padding: 15px 17px;
+      transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
     }
     .gov-item:hover {
-      box-shadow: 0 4px 10px rgba(32, 31, 54, 0.07);
+      box-shadow: 0 8px 18px rgba(32, 31, 54, 0.09);
+      transform: translateY(-2px);
+      border-color: color-mix(in srgb, var(--aidl-purple) 30%, var(--aidl-border));
     }
     .gov-label {
       font-size: 10.5px;
@@ -260,8 +288,8 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 9px 16px;
-      border-radius: 8px;
+      padding: 10px 20px;
+      border-radius: 999px;
       border: 1px solid var(--aidl-border);
       background: var(--aidl-card);
       color: var(--aidl-text);
@@ -269,19 +297,22 @@
       font-weight: 600;
       text-decoration: none;
       cursor: pointer;
-      transition: background-color .15s ease, box-shadow .15s ease;
+      transition: background-color .18s ease, box-shadow .18s ease, transform .18s ease;
     }
     .btn:hover {
       background: var(--aidl-subtle);
-      box-shadow: 0 2px 6px rgba(32, 31, 54, 0.08);
+      box-shadow: 0 4px 10px rgba(32, 31, 54, 0.09);
+      transform: translateY(-1px);
     }
     .btn.primary {
-      background: var(--aidl-purple);
+      background: linear-gradient(135deg, var(--aidl-purple), var(--aidl-purple-dark));
       border-color: var(--aidl-purple);
       color: #fff;
+      box-shadow: 0 4px 12px color-mix(in srgb, var(--aidl-purple) 40%, transparent);
     }
     .btn.primary:hover {
-      background: var(--aidl-purple-dark);
+      background: linear-gradient(135deg, var(--aidl-purple-dark), var(--aidl-purple-dark));
+      box-shadow: 0 6px 16px color-mix(in srgb, var(--aidl-purple) 50%, transparent);
     }
     .progress {
       font-size: 12px;
@@ -333,8 +364,13 @@
     .item-row {
       background: var(--aidl-subtle);
       border: 1px solid var(--aidl-border);
-      border-radius: 10px;
-      padding: 12px 14px;
+      border-radius: 16px;
+      padding: 13px 16px;
+      transition: box-shadow .18s ease, transform .18s ease;
+    }
+    .item-row:hover {
+      box-shadow: 0 6px 14px rgba(32, 31, 54, 0.08);
+      transform: translateY(-1px);
     }
     .item-row-title {
       font-weight: 700;
@@ -349,16 +385,17 @@
     .invite-row input {
       flex: 1;
       min-width: 200px;
-      padding: 9px 12px;
+      padding: 10px 16px;
       border: 1px solid var(--aidl-border);
-      border-radius: 8px;
+      border-radius: 999px;
       font-size: 13px;
       background: var(--aidl-card);
       color: var(--aidl-text);
+      transition: border-color .18s ease, box-shadow .18s ease;
     }
     .invite-row input:focus {
-      outline: 2px solid color-mix(in srgb, var(--aidl-purple) 35%, transparent);
-      outline-offset: 1px;
+      outline: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--aidl-purple) 22%, transparent);
       border-color: var(--aidl-purple);
     }
     @media (max-width: 720px) {
