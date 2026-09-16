@@ -5,6 +5,7 @@ import json
 from django.conf import settings
 from django.http import Http404
 from django.shortcuts import render
+from django.views.decorators.cache import never_cache
 from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -177,6 +178,7 @@ def _render_learner_tab(request, tab: str, user_bits: dict):
 
 
 @xframe_options_exempt
+@never_cache
 def teams_tab_page(request, tab: str):
     """
     Option C: Admin Center in-page UI (Home + clickable pills).
