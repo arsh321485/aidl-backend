@@ -465,15 +465,15 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
             ensure_aidl_channel_tabs,
         )
 
-        tab_info = None
-        if getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
-            tab_info = ensure_aidl_channel_tabs(
-                access_token,
-                team_id=team_id,
-                channel_id=channel_id,
-                channel_name=channel_name,
-                channel_just_created=channel_just_created,
-            )
+        # Always call this — when MS_AIDL_INSTALL_CHANNEL_TABS is off it
+        # cleans up any AIDL tabs already on the channel instead of a no-op.
+        tab_info = ensure_aidl_channel_tabs(
+            access_token,
+            team_id=team_id,
+            channel_id=channel_id,
+            channel_name=channel_name,
+            channel_just_created=channel_just_created,
+        )
 
         home_web_url = ((tab_info or {}).get("home_web_url") or "").strip()
         home_tab_url = build_home_tab_deep_link(
@@ -603,6 +603,39 @@ def resolve_user_by_email(access_token: str, email: str) -> dict | None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("resolve user by mail filter failed for %s: %s", email, exc)
         return None
+
+
+def send_mail_via_graph(access_token: str, *, to_email: str, subject: str, body_text: str) -> dict:
+    """Send an email from the signed-in admin's own mailbox via Graph
+    (/me/sendMail), so invites land directly in the recipient's Outlook/Teams
+    mailbox instead of going through a separate SMTP account. Requires the
+    delegated Mail.Send scope + admin consent."""
+    if not access_token or not to_email:
+        return {"ok": False, "error": "missing_params"}
+    url = f"{GRAPH_BASE}/me/sendMail"
+    payload = {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "Text", "content": body_text},
+            "toRecipients": [{"emailAddress": {"address": to_email}}],
+        },
+        "saveToSentItems": "true",
+    }
+    try:
+        response = requests.post(
+            url,
+            headers=_graph_headers(access_token),
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code >= 400:
+            detail = (response.text or "")[:500]
+            logger.warning("graph sendMail HTTP %s: %s", response.status_code, detail)
+            return {"ok": False, "error": f"graph_http_{response.status_code}", "detail": detail}
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("graph sendMail failed: %s", exc)
+        return {"ok": False, "error": "exception", "detail": str(exc)}
 
 
 def add_team_member(access_token: str, *, team_id: str, aad_user_id: str) -> dict:

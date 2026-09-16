@@ -12,10 +12,14 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
-from django.core.mail import send_mail
 from django.utils import timezone
 
-from .microsoft_auth import add_team_member, refresh_graph_token, resolve_user_by_email
+from .microsoft_auth import (
+    add_team_member,
+    refresh_graph_token,
+    resolve_user_by_email,
+    send_mail_via_graph,
+)
 from .models import AIDLUser, Invitation, Organization
 
 
@@ -68,14 +72,16 @@ def send_user_invite(*, caller: AIDLUser, email: str, full_name: str = "") -> di
         expires_at=timezone.now() + timedelta(days=expiry_days),
     )
 
-    graph_result = _add_to_team(caller=caller, team_id=caller.teams_team_id, email=email)
+    access_token = _get_caller_access_token(caller)
+
+    graph_result = _add_to_team(access_token=access_token, team_id=caller.teams_team_id, email=email)
     if graph_result.get("ok"):
         invitation.team_member_added = True
     else:
         invitation.error = (graph_result.get("error") or "")[:255]
     invitation.save(update_fields=["team_member_added", "error"])
 
-    email_result = _send_invite_email(invitation)
+    email_result = _send_invite_email(invitation, access_token=access_token)
 
     return {
         "ok": True,
@@ -87,14 +93,12 @@ def send_user_invite(*, caller: AIDLUser, email: str, full_name: str = "") -> di
     }
 
 
-def _add_to_team(*, caller: AIDLUser, team_id: str, email: str) -> dict:
-    if not team_id:
-        return {"ok": False, "error": "caller_missing_team_id"}
+def _get_caller_access_token(caller: AIDLUser) -> str:
+    """Mint a fresh Graph access token from the admin's stored refresh token.
+    Used for both adding the invitee to the Team and sending the invite email
+    from the admin's own mailbox, so we only refresh once per invite."""
     if not caller.ms_refresh_token:
-        return {
-            "ok": False,
-            "error": "caller_missing_refresh_token",
-        }
+        return ""
     token_result = refresh_graph_token(caller.ms_refresh_token)
     access_token = token_result.get("access_token") if isinstance(token_result, dict) else ""
     if not access_token:
@@ -103,7 +107,7 @@ def _add_to_team(*, caller: AIDLUser, team_id: str, email: str) -> dict:
             caller.email,
             (token_result or {}).get("error_description") or (token_result or {}).get("error"),
         )
-        return {"ok": False, "error": "graph_token_refresh_failed"}
+        return ""
 
     # A rotated refresh token comes back on most requests — keep it current
     # so the next invite doesn't fail once the old one expires.
@@ -112,6 +116,15 @@ def _add_to_team(*, caller: AIDLUser, team_id: str, email: str) -> dict:
         caller.ms_refresh_token = new_refresh
         caller.save(update_fields=["ms_refresh_token", "updated_at"])
 
+    return access_token
+
+
+def _add_to_team(*, access_token: str, team_id: str, email: str) -> dict:
+    if not team_id:
+        return {"ok": False, "error": "caller_missing_team_id"}
+    if not access_token:
+        return {"ok": False, "error": "caller_missing_refresh_token"}
+
     aad_user = resolve_user_by_email(access_token, email)
     if not aad_user or not aad_user.get("id"):
         return {"ok": False, "error": "user_not_found_in_tenant"}
@@ -119,7 +132,7 @@ def _add_to_team(*, caller: AIDLUser, team_id: str, email: str) -> dict:
     return add_team_member(access_token, team_id=team_id, aad_user_id=aad_user["id"])
 
 
-def _send_invite_email(invitation: Invitation) -> dict:
+def _send_invite_email(invitation: Invitation, *, access_token: str) -> dict:
     from urllib.parse import urlsplit
 
     redirect_uri = getattr(settings, "MS_REDIRECT_URI", "") or ""
@@ -141,15 +154,19 @@ def _send_invite_email(invitation: Invitation) -> dict:
         f"AIDL User Dashboard:\n   {login_url}\n\n"
         "See you there!\n"
     )
-    try:
-        send_mail(
-            subject,
-            body,
-            getattr(settings, "DEFAULT_FROM_EMAIL", None),
-            [invitation.email],
-            fail_silently=False,
+    if not access_token:
+        return {"ok": False, "error": "caller_missing_refresh_token"}
+
+    result = send_mail_via_graph(
+        access_token,
+        to_email=invitation.email,
+        subject=subject,
+        body_text=body,
+    )
+    if not result.get("ok"):
+        logger.warning(
+            "invite email send failed for %s: %s",
+            invitation.email,
+            result.get("detail") or result.get("error"),
         )
-        return {"ok": True}
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("invite email send failed for %s: %s", invitation.email, exc)
-        return {"ok": False, "error": str(exc)}
+    return result

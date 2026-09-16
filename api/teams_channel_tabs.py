@@ -161,6 +161,28 @@ def _find_home_tab_web_url(tabs: list) -> str:
     return ""
 
 
+def _remove_all_aidl_tabs(access_token: str, team_id: str, channel_id: str) -> list[str]:
+    """Delete every tab this app ever installed (identified by the "aidl-"
+    entity id prefix). Used to clean up the channel once
+    MS_AIDL_INSTALL_CHANNEL_TABS is turned off, so the pill tabs (Home, Add
+    Admin, Policy, Cards, AI Apps, IT Apps) disappear from the Teams tab bar."""
+    try:
+        existing_tabs = list_channel_tabs(access_token, team_id, channel_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("list channel tabs for cleanup failed: %s", exc)
+        return []
+    removed: list[str] = []
+    for tab in existing_tabs:
+        config = tab.get("configuration") or {}
+        entity_id = (config.get("entityId") or "").strip()
+        tab_id = (tab.get("id") or "").strip()
+        if not tab_id or not entity_id.startswith(_AIDL_ENTITY_PREFIX):
+            continue
+        if delete_channel_tab(access_token, team_id, channel_id, tab_id):
+            removed.append(tab.get("displayName") or entity_id)
+    return removed
+
+
 def ensure_aidl_channel_tabs(
     access_token: str,
     *,
@@ -174,10 +196,11 @@ def ensure_aidl_channel_tabs(
     IT Apps — ONLY on the configured aidl dashboard channel (never General),
     and remove any stale tabs from a previous AIDL tab set so every tab a
     user opens shows the same clickable pill header.
-    """
-    if not getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", True):
-        return {"skipped": True, "reason": "disabled"}
 
+    When MS_AIDL_INSTALL_CHANNEL_TABS is off, instead removes every AIDL tab
+    already on the channel, so a login self-heals the tab bar back to just
+    the Teams defaults (Posts / Shared / Page / Notes).
+    """
     if not access_token or not team_id or not channel_id:
         return {"skipped": True, "reason": "missing_ids"}
 
@@ -192,6 +215,17 @@ def ensure_aidl_channel_tabs(
             "reason": "wrong_channel",
             "channel_name": channel_name,
             "expected_channel": target_channel_name(),
+        }
+
+    if not getattr(settings, "MS_AIDL_INSTALL_CHANNEL_TABS", False):
+        removed = _remove_all_aidl_tabs(access_token, team_id, channel_id)
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "disabled",
+            "channel_name": channel_name,
+            "channel_id": channel_id,
+            "tabs_removed": removed,
         }
 
     if channel_just_created:

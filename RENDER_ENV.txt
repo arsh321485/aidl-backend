@@ -15,31 +15,28 @@ CORS_ALLOWED_ORIGINS=https://aidl-frontend-8owk.vercel.app,http://localhost:5173
 MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 
-MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All,User.ReadBasic.All,offline_access
+MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All,User.ReadBasic.All,Mail.Send,offline_access
 MS_AIDL_CHANNEL_NAME=aidl dashboard
 
-# --- Invite-a-user feature (adds User.ReadBasic.All + offline_access above) ---
+# --- Invite-a-user feature (adds User.ReadBasic.All + Mail.Send + offline_access above) ---
 # offline_access lets the backend store a refresh token per admin so it can
 # add an invited teammate to the Team via Graph without needing their browser
-# open. IMPORTANT: existing admins must log out and log back in via Teams
-# ONCE after this scope is added, to re-consent and get a token stored.
-#
-# Outbound invite email — Gmail: smtp.gmail.com/587 + an App Password
-# (not your normal password); Office365: smtp.office365.com/587.
-# EMAIL_HOST=smtp.gmail.com
-# EMAIL_PORT=587
-# EMAIL_HOST_USER=you@company.com
-# EMAIL_HOST_PASSWORD=your-app-password
-# DEFAULT_FROM_EMAIL=you@company.com
-# Until the three EMAIL_* vars above are set, invite emails just log to the
-# Render console instead of failing the invite.
+# open. Mail.Send lets the backend send the invite email from that SAME admin's
+# own Microsoft 365 mailbox via Graph (/me/sendMail) — no separate SMTP/Gmail
+# account needed; the invite lands straight in the recipient's Outlook/Teams
+# mailbox. IMPORTANT: existing admins must log out and log back in via Teams
+# ONCE after these scopes are added, to re-consent and get a token stored.
+# Azure App Registration → API permissions (delegated) must include Mail.Send
+# with admin consent granted.
 MS_SEND_WELCOME_CARD=True
 MS_SEND_ADMIN_CARD_EVERY_LOGIN=True
 MS_AIDL_LAND_ON_POSTS=True
-MS_AIDL_INSTALL_CHANNEL_TABS=True
-# ^ Needs TeamsTab.Create/TeamsTab.ReadWrite.All (already in MS_SCOPES above,
-# no extra admin consent needed). With this True, "Send Admin Invite" opens
-# the Add Admin tab INSIDE Teams instead of a new browser tab.
+MS_AIDL_INSTALL_CHANNEL_TABS=False
+# ^ Off = the Home / Add Admin / Policy / Cards / AI Apps / IT Apps pill tabs
+# are NOT added to the "aidl dashboard" channel tab bar, and any that were
+# added before get auto-removed the next time someone logs in via Teams
+# (self-heals — no manual Graph cleanup needed). Set True to bring them back;
+# needs TeamsTab.Create/TeamsTab.ReadWrite.All (already in MS_SCOPES above).
 # Azure delegated permission required for Posts card:
 #   ChannelMessage.Send (+ admin consent)
 # Bot messaging endpoint (Phase 2 clicks):
