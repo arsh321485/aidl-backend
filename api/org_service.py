@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from django.conf import settings
 from django.utils import timezone
 
-from .models import AIDLUser, Organization, RegisteredApp
+from .models import AIDLUser, Organization, PolicyVersion, RegisteredApp
 from .teams_cards import first_name, logo_url, org_display_name, policy_url
 
 
@@ -40,6 +40,13 @@ def _slugify(name: str) -> str:
 
 def _org_id(org: Organization) -> str:
     return str(org.pk)
+
+
+def _backend_base_url() -> str:
+    configured = (getattr(settings, "MS_TEAMS_APP_BASE_URL", None) or "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return "https://aidl-backend.onrender.com"
 
 
 def get_organization_for_user(user: AIDLUser | None = None, *, org_name: str = "") -> Organization | None:
@@ -488,6 +495,11 @@ def build_admin_tab_payload(
                 "email": m.email,
                 "role": m.role,
                 "last_login_at": m.last_login_at.isoformat() if m.last_login_at else "",
+                "permissions": {
+                    "approve_apps": bool(m.perm_approve_apps),
+                    "access_cards": bool(m.perm_access_cards),
+                    "create_card": bool(m.perm_create_card),
+                },
             }
             for m in metrics["admins"]
         ]
@@ -531,11 +543,28 @@ def build_admin_tab_payload(
             if not m.aup_signed
         ]
         signed = [m for m in metrics["members"] if m.aup_signed]
+        live_version = PolicyVersion.objects.filter(
+            organization_id=_org_id(org), is_live=True
+        ).first()
         return {
             **base,
             "title": "Policy",
             "body": org.policy_title,
-            "policy_url": org.policy_url or policy_url(),
+            "policy_url": (
+                f"{_backend_base_url()}/api/teams/admin/policy/file/{live_version.pk}/"
+                if live_version
+                else (org.policy_url or policy_url())
+            ),
+            "policy_file_name": live_version.file_name if live_version else "",
+            "policy_version": live_version.version if live_version else "",
+            "policy_effective_date": (
+                live_version.effective_date.isoformat()
+                if live_version and live_version.effective_date
+                else ""
+            ),
+            "policy_uploaded_by": live_version.uploaded_by_name or live_version.uploaded_by_email
+            if live_version
+            else "",
             "signed_count": len(signed),
             "unsigned_count": len(unsigned),
             "items": unsigned,
@@ -543,22 +572,17 @@ def build_admin_tab_payload(
         }
 
     if tab == "cards":
+        from .cards_service import get_cards_payload
+
+        cards = get_cards_payload(org)
         return {
             **base,
             "title": "Cards",
-            "body": "Teams Adaptive Cards configured for this organisation.",
-            "items": [
-                {
-                    "name": "Admin Center Home",
-                    "status": "active",
-                    "description": "Shown when an admin opens AIDL dashboard Home.",
-                },
-                {
-                    "name": "Learner welcome",
-                    "status": "active",
-                    "description": "Sent on signup / channel recreate.",
-                },
-            ],
+            "body": "Pick the reference cards your team needs, then request or send one into the channel.",
+            "items": [],
+            "catalog": cards["catalog"],
+            "quota_used": cards["quota_used"],
+            "quota_max": cards["quota_max"],
             "heading": f"Cards — {org.name}",
         }
 
@@ -568,6 +592,8 @@ def build_admin_tab_payload(
                 "name": a.name,
                 "status": a.status,
                 "description": a.description,
+                "category": a.category,
+                "data_allowed": a.data_allowed,
             }
             for a in metrics["ai_app_list"]
         ]
@@ -585,6 +611,8 @@ def build_admin_tab_payload(
                 "name": a.name,
                 "status": a.status,
                 "description": a.description,
+                "category": a.category,
+                "data_allowed": a.data_allowed,
             }
             for a in metrics["it_app_list"]
         ]

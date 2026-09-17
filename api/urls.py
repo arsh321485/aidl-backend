@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import auth_views, teams_app_views, teams_bot_views, views
+from . import auth_views, teams_admin_extra_views, teams_app_views, teams_bot_views, views
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
@@ -62,6 +62,46 @@ urlpatterns = [
         "teams/admin/licence/issue/",
         teams_app_views.teams_admin_issue_licence,
         name="teams-admin-issue-licence",
+    ),
+    # Policy upload/versioning
+    path(
+        "teams/admin/policy/upload/",
+        teams_admin_extra_views.teams_admin_policy_upload,
+        name="teams-admin-policy-upload",
+    ),
+    path(
+        "teams/admin/policy/file/<str:version_id>/",
+        teams_admin_extra_views.teams_admin_policy_file,
+        name="teams-admin-policy-file",
+    ),
+    # Cards catalogue — request / send (now or later) / request a new card
+    path(
+        "teams/admin/cards/request-new/",
+        teams_admin_extra_views.teams_admin_cards_request_new,
+        name="teams-admin-cards-request-new",
+    ),
+    path(
+        "teams/admin/cards/<str:card_id>/request/",
+        teams_admin_extra_views.teams_admin_cards_request,
+        name="teams-admin-cards-request",
+    ),
+    path(
+        "teams/admin/cards/<str:card_id>/send/",
+        teams_admin_extra_views.teams_admin_cards_send,
+        name="teams-admin-cards-send",
+    ),
+    # AI Apps / IT Apps — Add Application
+    path(
+        "teams/admin/ai-apps/add/",
+        teams_admin_extra_views.teams_admin_app_add,
+        {"app_type": "ai"},
+        name="teams-admin-ai-apps-add",
+    ),
+    path(
+        "teams/admin/it-apps/add/",
+        teams_admin_extra_views.teams_admin_app_add,
+        {"app_type": "it"},
+        name="teams-admin-it-apps-add",
     ),
     path(
         "teams/admin/<str:tab>/",

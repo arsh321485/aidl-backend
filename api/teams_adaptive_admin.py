@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from django.conf import settings
 
+from .cards_catalog_data import CARD_CATALOG
 from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
@@ -564,7 +565,8 @@ def _card_row(card: dict) -> list[dict]:
     # other tabs) so each card gets its own subtle background box — without
     # it, consecutive TextBlocks render as one continuous stream of text
     # with no visual break between cards.
-    status_prefix = "✓ · " if card["requested"] else ""
+    status = card.get("status") or "not_sent"
+    status_prefix = "✓ · " if status in ("sent", "scheduled", "requested") else ""
     meta = f"{card['category']} · {status_prefix}★{card['rating'].split(' ')[0]}"
     if card["price"]:
         meta = f"{meta} · {card['price']}"
@@ -586,11 +588,14 @@ def _card_row(card: dict) -> list[dict]:
 
 
 def _cards_blocks(payload: dict) -> list[dict]:
+    catalog = payload.get("catalog") or CARD_CATALOG
+    quota_used = payload.get("quota_used", 0)
+    quota_max = payload.get("quota_max", 10)
     blocks: list[dict] = [
         *_heading_block(
             payload,
             "cards",
-            "Pick the reference cards your team needs — view one, request it, then send it into the channel where they already work.",
+            "Pick the reference cards your team needs — request or send one from the Cards tab.",
         ),
         {
             "type": "Container",
@@ -606,7 +611,7 @@ def _cards_blocks(payload: dict) -> list[dict]:
                 },
                 {
                     "type": "TextBlock",
-                    "text": "1 of 10 cards requested this month",
+                    "text": f"{quota_used} of {quota_max} cards requested this month",
                     "weight": "Bolder",
                     "size": "Medium",
                     "spacing": "Small",
@@ -614,16 +619,16 @@ def _cards_blocks(payload: dict) -> list[dict]:
             ],
         },
     ]
-    shown_cards = CARD_CATALOG[:_INLINE_LIST_CAP]
+    shown_cards = catalog[:_INLINE_LIST_CAP]
     for card in shown_cards:
         blocks.extend(_card_row(card))
-    overflow = _overflow_note("cards", len(CARD_CATALOG), len(shown_cards))
+    overflow = _overflow_note("cards", len(catalog), len(shown_cards))
     if overflow:
         blocks.append(overflow)
     blocks.append(
         {
             "type": "TextBlock",
-            "text": "Need something that's not listed? Request a brand-new reference card for your team.",
+            "text": "Need something that's not listed? Request a brand-new reference card from the Cards tab.",
             "size": "Small",
             "isSubtle": True,
             "wrap": True,
@@ -1277,6 +1282,355 @@ def _home_card(
     }
 
 
+def _generic_item_blocks(items: list[dict]) -> list[dict]:
+    item_blocks = []
+    for it in items[:12]:
+        title = it.get("name") or it.get("email") or "Item"
+        meta = " · ".join(
+            str(x) for x in [it.get("email"), it.get("role"), it.get("status")] if x
+        )
+        desc = it.get("description") or ""
+        block_items = [
+            {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True, "spacing": "None"}
+        ]
+        if meta:
+            block_items.append(
+                {"type": "TextBlock", "text": meta, "size": "Small", "isSubtle": True, "wrap": True, "spacing": "None"}
+            )
+        if desc:
+            block_items.append(
+                {"type": "TextBlock", "text": desc, "size": "Small", "wrap": True, "spacing": "None"}
+            )
+        item_blocks.append({"type": "Container", "style": "emphasis", "items": block_items, "spacing": "Small"})
+    if not item_blocks:
+        item_blocks.append(
+            {"type": "TextBlock", "text": "No records yet for this organisation.", "isSubtle": True, "wrap": True}
+        )
+    return item_blocks
+
+
+def _bool_toggle(value: bool = True) -> str:
+    # Adaptive Cards Input.Toggle values are strings, not JSON booleans.
+    return "true" if value else "false"
+
+
+def _interactive_add_admin_blocks(payload: dict) -> tuple[list[dict], list[dict]]:
+    """Promote-to-admin form (email + the 3 permission chips as toggles) —
+    the bot-native equivalent of the Website Tab's Add Admin screen."""
+    items = payload.get("items") or []
+    rows = []
+    for it in items[:8]:
+        title = it.get("name") or it.get("email") or "Admin"
+        perms = it.get("permissions") or {}
+        on = [
+            label
+            for label, key in (
+                ("Approve Apps", "approve_apps"),
+                ("Access Cards", "access_cards"),
+                ("Create Card", "create_card"),
+            )
+            if perms.get(key)
+        ]
+        rows.append(
+            {
+                "type": "Container",
+                "style": "emphasis",
+                "spacing": "Small",
+                "items": [
+                    {"type": "TextBlock", "text": f"**{title}**", "wrap": True, "spacing": "None"},
+                    {"type": "TextBlock", "text": it.get("email") or "", "size": "Small", "isSubtle": True, "wrap": True, "spacing": "None"},
+                    {
+                        "type": "TextBlock",
+                        "text": ", ".join(on) if on else "No extra permissions",
+                        "size": "Small",
+                        "isSubtle": True,
+                        "wrap": True,
+                        "spacing": "None",
+                    },
+                ],
+            }
+        )
+    body = rows or [{"type": "TextBlock", "text": "No admins yet.", "isSubtle": True, "wrap": True}]
+    body += [
+        {"type": "TextBlock", "text": "PROMOTE TO ADMIN", "size": "Small", "weight": "Bolder", "isSubtle": True, "spacing": "Medium"},
+        {"type": "Input.Text", "id": "promoteEmail", "label": "Work email", "placeholder": "name@company.com"},
+        {"type": "Input.Toggle", "id": "permApproveApps", "title": "Approve Apps", "value": _bool_toggle(True)},
+        {"type": "Input.Toggle", "id": "permAccessCards", "title": "Access Cards", "value": _bool_toggle(True)},
+        {"type": "Input.Toggle", "id": "permCreateCard", "title": "Create Card", "value": _bool_toggle(True)},
+    ]
+    actions = [
+        {
+            "type": "Action.Execute",
+            "title": "Send Admin Invite",
+            "verb": "aidl.promote_admin",
+            "style": "positive",
+            "data": {"action": "promote_admin", "tab": "add-admin"},
+        }
+    ]
+    return body, actions
+
+
+def _interactive_add_user_blocks(payload: dict) -> tuple[list[dict], list[dict]]:
+    licences_issued = payload.get("licences_issued") or 0
+    seats_purchased = payload.get("seats_purchased") or 0
+    body = [
+        {
+            "type": "TextBlock",
+            "text": f"{licences_issued} of {seats_purchased} licences issued",
+            "size": "Small",
+            "isSubtle": True,
+            "wrap": True,
+        },
+        {"type": "Input.Text", "id": "inviteName", "label": "Full name", "placeholder": "Full name"},
+        {"type": "Input.Text", "id": "inviteEmail", "label": "Work email", "placeholder": "name@company.com"},
+    ]
+    actions = [
+        {
+            "type": "Action.Execute",
+            "title": "Issue Licence",
+            "verb": "aidl.invite_user",
+            "style": "positive",
+            "data": {"action": "invite_user", "tab": "add-user"},
+        }
+    ]
+    return body, actions
+
+
+def _interactive_policy_blocks(payload: dict) -> tuple[list[dict], list[dict]]:
+    signed = payload.get("signed_count") or 0
+    unsigned = payload.get("unsigned_count") or 0
+    meta_bits = [
+        payload.get("policy_file_name"),
+        payload.get("policy_version"),
+        f"effective {payload['policy_effective_date']}" if payload.get("policy_effective_date") else "",
+        f"uploaded by {payload['policy_uploaded_by']}" if payload.get("policy_uploaded_by") else "",
+    ]
+    meta_bits = [b for b in meta_bits if b]
+    body = [
+        {
+            "type": "TextBlock",
+            "text": " · ".join(meta_bits) if meta_bits else "No policy uploaded yet.",
+            "size": "Small",
+            "isSubtle": True,
+            "wrap": True,
+        },
+        {
+            "type": "ColumnSet",
+            "spacing": "Medium",
+            "columns": [
+                {
+                    "type": "Column",
+                    "width": "stretch",
+                    "items": [
+                        {"type": "TextBlock", "text": "SIGNED", "size": "Small", "isSubtle": True, "spacing": "None"},
+                        {"type": "TextBlock", "text": str(signed), "size": "ExtraLarge", "weight": "Bolder", "color": "good", "spacing": "None"},
+                    ],
+                },
+                {
+                    "type": "Column",
+                    "width": "stretch",
+                    "items": [
+                        {"type": "TextBlock", "text": "UNSIGNED", "size": "Small", "isSubtle": True, "spacing": "None"},
+                        {
+                            "type": "TextBlock",
+                            "text": str(unsigned),
+                            "size": "ExtraLarge",
+                            "weight": "Bolder",
+                            "color": "attention" if unsigned else "good",
+                            "spacing": "None",
+                        },
+                    ],
+                },
+            ],
+        },
+    ]
+    actions = []
+    if payload.get("policy_url"):
+        actions.append({"type": "Action.OpenUrl", "title": "View Current Policy", "url": payload["policy_url"], "style": "positive"})
+    # Adaptive Cards have no file-upload input at all — publishing a new PDF
+    # version can only happen on a real webpage, so that one step opens the
+    # Website Tab instead of staying in-card.
+    actions.append(
+        {
+            "type": "Action.OpenUrl",
+            "title": "Upload New Policy (PDF)",
+            "url": f"{_nav_base_url()}/tabs/policy/?email={payload.get('email', '')}",
+        }
+    )
+    return body, actions
+
+
+_CARD_STATUS_LABELS = {
+    "not_sent": "Not sent",
+    "requested": "Requested",
+    "sent": "Sent",
+    "scheduled": "Scheduled",
+    "failed": "Failed",
+}
+
+
+def _interactive_cards_blocks(payload: dict) -> tuple[list[dict], list[dict]]:
+    catalog = payload.get("catalog") or CARD_CATALOG
+    quota_used = payload.get("quota_used", 0)
+    quota_max = payload.get("quota_max", 10)
+    body: list[dict] = [
+        {
+            "type": "Container",
+            "style": "warning",
+            "spacing": "Medium",
+            "items": [
+                {"type": "TextBlock", "text": "MONTHLY CARD QUOTA", "size": "Small", "weight": "Bolder", "spacing": "None"},
+                {
+                    "type": "TextBlock",
+                    "text": f"{quota_used} of {quota_max} cards requested this month",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                    "spacing": "Small",
+                },
+            ],
+        }
+    ]
+    choices = []
+    for c in catalog:
+        status_label = _CARD_STATUS_LABELS.get(c.get("status"), c.get("status") or "")
+        rating_num = (c.get("rating") or "").split(" ")[0]
+        meta = " · ".join(x for x in [c.get("category"), c.get("price"), (f"★{rating_num}" if rating_num else "")] if x)
+        body.append(
+            {
+                "type": "Container",
+                "style": "emphasis",
+                "spacing": "Small",
+                "items": [
+                    {"type": "TextBlock", "text": f"**{c.get('icon', '')} {c.get('title')}** · {status_label}", "wrap": True, "spacing": "None"},
+                    {"type": "TextBlock", "text": meta, "size": "Small", "isSubtle": True, "wrap": True, "spacing": "None"},
+                    {
+                        "type": "ActionSet",
+                        "spacing": "Small",
+                        "actions": [
+                            {
+                                "type": "Action.Execute",
+                                "title": "Request",
+                                "verb": "aidl.card_request",
+                                "data": {"action": "request_card", "tab": "cards", "card_id": c["id"]},
+                            },
+                            {
+                                "type": "Action.Execute",
+                                "title": "Send Now",
+                                "verb": "aidl.card_send_now",
+                                "style": "positive",
+                                "data": {"action": "send_card_now", "tab": "cards", "card_id": c["id"]},
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+        choices.append({"title": f"{c.get('icon', '')} {c.get('title')}", "value": c["id"]})
+
+    body += [
+        {"type": "TextBlock", "text": "SCHEDULE A CARD", "size": "Small", "weight": "Bolder", "isSubtle": True, "spacing": "Medium"},
+        {"type": "Input.ChoiceSet", "id": "scheduleCardId", "style": "compact", "placeholder": "Pick a card", "choices": choices},
+        {"type": "Input.Date", "id": "scheduleDate", "label": "Date"},
+        {"type": "Input.Time", "id": "scheduleTime", "label": "Time"},
+        {"type": "TextBlock", "text": "REQUEST A NEW CARD", "size": "Small", "weight": "Bolder", "isSubtle": True, "spacing": "Medium"},
+        {"type": "Input.Text", "id": "newCardTitle", "label": "Title", "placeholder": "New card title"},
+        {"type": "Input.Text", "id": "newCardDesc", "placeholder": "What should it cover? (optional)", "isMultiline": True},
+    ]
+    actions = [
+        {
+            "type": "Action.Execute",
+            "title": "Schedule",
+            "verb": "aidl.card_schedule",
+            "data": {"action": "schedule_card", "tab": "cards"},
+        },
+        {
+            "type": "Action.Execute",
+            "title": "Request New Card",
+            "verb": "aidl.card_request_new",
+            "data": {"action": "request_new_card", "tab": "cards"},
+        },
+    ]
+    return body, actions
+
+
+_DATA_ALLOWED_LABELS = {
+    "public_only": "Public only",
+    "internal": "Internal",
+    "internal_confidential": "Internal + Confidential",
+    "none": "None",
+}
+
+
+def _interactive_app_list_blocks(tab: str, payload: dict) -> tuple[list[dict], list[dict]]:
+    items = payload.get("items") or []
+    rows = []
+    for it in items[:10]:
+        app_status = (it.get("status") or "pending").lower()
+        color = {"approved": "good", "pending": "warning", "rejected": "attention"}.get(app_status)
+        label = "Prohibited" if app_status == "rejected" else app_status.title()
+        meta = " · ".join(x for x in [it.get("category"), _DATA_ALLOWED_LABELS.get(it.get("data_allowed"), "")] if x) or it.get("description") or ""
+        status_block = {"type": "TextBlock", "text": label.upper(), "size": "Small", "weight": "Bolder", "wrap": False}
+        if color:
+            status_block["color"] = color
+        rows.append(
+            {
+                "type": "Container",
+                "style": "emphasis",
+                "spacing": "Small",
+                "items": [
+                    {
+                        "type": "ColumnSet",
+                        "columns": [
+                            {
+                                "type": "Column",
+                                "width": "stretch",
+                                "items": [
+                                    {"type": "TextBlock", "text": f"**{it.get('name') or 'App'}**", "wrap": True, "spacing": "None"},
+                                    {"type": "TextBlock", "text": meta, "size": "Small", "isSubtle": True, "wrap": True, "spacing": "None"},
+                                ],
+                            },
+                            {"type": "Column", "width": "auto", "verticalContentAlignment": "Center", "items": [status_block]},
+                        ],
+                    }
+                ],
+            }
+        )
+    body = rows or [{"type": "TextBlock", "text": "No applications registered yet.", "isSubtle": True, "wrap": True}]
+    body += [
+        {"type": "TextBlock", "text": "ADD APPLICATION", "size": "Small", "weight": "Bolder", "isSubtle": True, "spacing": "Medium"},
+        {"type": "Input.Text", "id": "appName", "label": "Name", "placeholder": "App name"},
+        {"type": "Input.Text", "id": "appCategory", "placeholder": "Category (optional)"},
+        {
+            "type": "Input.ChoiceSet",
+            "id": "appDataAllowed",
+            "style": "compact",
+            "placeholder": "Data allowed…",
+            "choices": [{"title": v, "value": k} for k, v in _DATA_ALLOWED_LABELS.items()],
+        },
+        {
+            "type": "Input.ChoiceSet",
+            "id": "appStatus",
+            "style": "compact",
+            "value": "pending",
+            "choices": [
+                {"title": "Pending", "value": "pending"},
+                {"title": "Approved", "value": "approved"},
+                {"title": "Prohibited", "value": "rejected"},
+            ],
+        },
+    ]
+    actions = [
+        {
+            "type": "Action.Execute",
+            "title": "Add Application",
+            "verb": "aidl.app_add",
+            "style": "positive",
+            "data": {"action": "add_app", "tab": tab, "app_type": "ai" if tab == "ai-apps" else "it"},
+        }
+    ]
+    return body, actions
+
+
 def _section_card(
     tab: str,
     *,
@@ -1295,86 +1649,19 @@ def _section_card(
     )
     org_id = payload.get("organization_id") or ""
     org = payload.get("org_name") or org_name or "AIDL"
-    items = payload.get("items") or []
-    item_blocks = []
-    for it in items[:12]:
-        title = it.get("name") or it.get("email") or "Item"
-        meta = " · ".join(
-            str(x) for x in [it.get("email"), it.get("role"), it.get("status")] if x
-        )
-        desc = it.get("description") or ""
-        block_items = [
-            {
-                "type": "TextBlock",
-                "text": title,
-                "weight": "Bolder",
-                "wrap": True,
-                "spacing": "None",
-            }
-        ]
-        if meta:
-            block_items.append(
-                {
-                    "type": "TextBlock",
-                    "text": meta,
-                    "size": "Small",
-                    "isSubtle": True,
-                    "wrap": True,
-                    "spacing": "None",
-                }
-            )
-        if desc:
-            block_items.append(
-                {
-                    "type": "TextBlock",
-                    "text": desc,
-                    "size": "Small",
-                    "wrap": True,
-                    "spacing": "None",
-                }
-            )
-        item_blocks.append(
-            {
-                "type": "Container",
-                "style": "emphasis",
-                "items": block_items,
-                "spacing": "Small",
-            }
-        )
-    if not item_blocks:
-        item_blocks.append(
-            {
-                "type": "TextBlock",
-                "text": "No records yet for this organisation.",
-                "isSubtle": True,
-                "wrap": True,
-            }
-        )
 
-    actions = []
-    if tab == "policy" and payload.get("policy_url"):
-        actions.append(
-            {
-                "type": "Action.OpenUrl",
-                "title": "Read full policy",
-                "url": payload["policy_url"],
-                "style": "positive",
-            }
-        )
-    if interactive and tab == "add-admin":
-        actions.append(
-            {
-                "type": "Action.Execute",
-                "title": "Refresh admins",
-                "verb": "aidl.nav",
-                "data": {
-                    "action": "nav",
-                    "tab": "add-admin",
-                    "email": email,
-                    "organization_id": org_id,
-                },
-            }
-        )
+    if tab == "add-admin":
+        content_blocks, actions = _interactive_add_admin_blocks(payload)
+    elif tab == "add-user":
+        content_blocks, actions = _interactive_add_user_blocks(payload)
+    elif tab == "policy":
+        content_blocks, actions = _interactive_policy_blocks(payload)
+    elif tab == "cards":
+        content_blocks, actions = _interactive_cards_blocks(payload)
+    elif tab in ("ai-apps", "it-apps"):
+        content_blocks, actions = _interactive_app_list_blocks(tab, payload)
+    else:
+        content_blocks, actions = _generic_item_blocks(payload.get("items") or []), []
 
     body = [
         _header(org),
@@ -1404,7 +1691,7 @@ def _section_card(
             "text": payload.get("body") or "",
             "wrap": True,
         },
-        *item_blocks,
+        *content_blocks,
     ]
     card = {
         "type": "AdaptiveCard",

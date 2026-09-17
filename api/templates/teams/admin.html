@@ -498,6 +498,154 @@
     .app-badge.approved { color: var(--c-policy); background: color-mix(in srgb, var(--c-policy) 16%, transparent); }
     .app-badge.pending { color: var(--aidl-warn); background: color-mix(in srgb, var(--aidl-warn) 18%, transparent); }
     .app-badge.rejected { color: var(--aidl-alert); background: color-mix(in srgb, var(--aidl-alert) 14%, transparent); }
+    /* ---- Add Admin: permission chips ---- */
+    .perm-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 14px 0 4px;
+    }
+    .perm-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--aidl-border);
+      background: var(--aidl-subtle);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--aidl-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    .perm-chip input { margin: 0; }
+    .perm-chip:has(input:checked) {
+      color: var(--c-add-admin);
+      background: color-mix(in srgb, var(--c-add-admin) 14%, transparent);
+      border-color: color-mix(in srgb, var(--c-add-admin) 40%, var(--aidl-border));
+    }
+    .item-row-perms {
+      font-size: 11.5px;
+      color: var(--aidl-muted);
+      margin-top: 4px;
+    }
+
+    /* ---- Policy: upload form ---- */
+    .policy-upload {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+      align-items: center;
+    }
+    .policy-upload input[type="text"],
+    .policy-upload input[type="date"] {
+      padding: 10px 14px;
+      border: 1px solid var(--aidl-border);
+      border-radius: 999px;
+      font-size: 13px;
+      background: var(--aidl-card);
+      color: var(--aidl-text);
+    }
+    .policy-meta {
+      font-size: 12px;
+      color: var(--aidl-muted);
+      margin-top: 6px;
+    }
+
+    /* ---- Cards catalogue ---- */
+    .card-quota {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: color-mix(in srgb, var(--c-cards) 14%, var(--aidl-card));
+      border: 1px solid color-mix(in srgb, var(--c-cards) 35%, var(--aidl-border));
+      border-radius: 16px;
+      padding: 12px 16px;
+      margin: 14px 0;
+      font-size: 12.5px;
+      color: var(--aidl-text);
+    }
+    .card-list { display: grid; gap: 10px; }
+    .card-row {
+      background: var(--aidl-subtle);
+      border: 1px solid var(--aidl-border);
+      border-radius: 16px;
+      padding: 14px 16px;
+    }
+    .card-row-title { font-weight: 700; font-size: 14px; }
+    .card-row-meta { font-size: 12px; color: var(--aidl-muted); margin-top: 2px; }
+    .card-row-desc { font-size: 12.5px; color: var(--aidl-muted); margin-top: 4px; }
+    .card-row-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .btn.small { padding: 6px 14px; font-size: 12px; }
+    .card-status {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--aidl-border);
+      color: var(--aidl-muted);
+    }
+    .card-status.sent { background: color-mix(in srgb, var(--c-policy) 18%, transparent); color: var(--c-policy); }
+    .card-status.requested { background: color-mix(in srgb, var(--aidl-warn) 18%, transparent); color: var(--aidl-warn); }
+    .card-status.scheduled { background: color-mix(in srgb, var(--c-add-admin) 18%, transparent); color: var(--c-add-admin); }
+    .card-status.failed { background: color-mix(in srgb, var(--aidl-alert) 14%, transparent); color: var(--aidl-alert); }
+    .card-schedule-input {
+      padding: 6px 10px;
+      border: 1px solid var(--aidl-border);
+      border-radius: 999px;
+      font-size: 12px;
+      background: var(--aidl-card);
+      color: var(--aidl-text);
+    }
+    .card-new-request {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--aidl-border);
+    }
+    .card-new-request input {
+      flex: 1;
+      min-width: 160px;
+      padding: 10px 16px;
+      border: 1px solid var(--aidl-border);
+      border-radius: 999px;
+      font-size: 13px;
+      background: var(--aidl-card);
+      color: var(--aidl-text);
+    }
+
+    /* ---- AI/IT Apps: Add Application form ---- */
+    .app-add-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--aidl-border);
+    }
+    .app-add-form input,
+    .app-add-form select {
+      padding: 10px 14px;
+      border: 1px solid var(--aidl-border);
+      border-radius: 999px;
+      font-size: 13px;
+      background: var(--aidl-card);
+      color: var(--aidl-text);
+    }
+    .app-row-meta2 { font-size: 11.5px; color: var(--aidl-muted); margin-top: 2px; }
+
     @media (max-width: 720px) {
       .stats { grid-template-columns: 1fr; }
       .gov { grid-template-columns: 1fr 1fr; }
@@ -610,16 +758,24 @@
       } else if (isAppTab) {
         // Flat divider-separated rows with a colored status pill on the
         // right, instead of the generic boxed item-list used elsewhere.
+        const dataAllowedLabels = {
+          public_only: "Public only",
+          internal: "Internal",
+          internal_confidential: "Internal + Confidential",
+          none: "None",
+        };
         itemsHtml = '<div class="app-list">' + items.map((it) => {
           const title = it.name || "App";
           const desc = it.description || "";
           const status = (it.status || "pending").toLowerCase();
           const label = status === "rejected" ? "Prohibited" : status.charAt(0).toUpperCase() + status.slice(1);
+          const meta2 = [it.category, dataAllowedLabels[it.data_allowed] || ""].filter(Boolean).join(" · ");
           return (
             '<div class="app-row">' +
               '<div class="app-row-main">' +
                 '<div class="app-row-title">' + escapeHtml(title) + '</div>' +
                 (desc ? '<div class="app-row-desc">' + escapeHtml(desc) + '</div>' : '') +
+                (meta2 ? '<div class="app-row-meta2">' + escapeHtml(meta2) + '</div>' : '') +
               '</div>' +
               '<span class="app-badge ' + escapeHtml(status) + '">' + escapeHtml(label) + '</span>' +
             '</div>'
@@ -630,11 +786,20 @@
           const title = it.name || it.email || "Item";
           const meta = [it.email, it.role, it.status].filter(Boolean).join(" · ");
           const desc = it.description || it.sub || "";
+          let permsLine = "";
+          if (tab === "add-admin" && it.permissions) {
+            const on = [];
+            if (it.permissions.approve_apps) on.push("Approve Apps");
+            if (it.permissions.access_cards) on.push("Access Cards");
+            if (it.permissions.create_card) on.push("Create Card");
+            permsLine = '<div class="item-row-perms">' + (on.length ? escapeHtml(on.join(" · ")) : "No extra permissions") + '</div>';
+          }
           return (
             '<div class="item-row">' +
               '<div class="item-row-title">' + escapeHtml(title) + '</div>' +
               (meta ? '<div class="progress">' + escapeHtml(meta) + '</div>' : '') +
               (desc ? '<div class="progress">' + escapeHtml(desc) + '</div>' : '') +
+              permsLine +
             '</div>'
           );
         }).join("") + '</div>';
@@ -645,6 +810,11 @@
         extra = (
           '<p class="progress" style="margin-top:4px;">Promote an existing team member to admin — they must ' +
             'have signed in via Teams at least once before they can be promoted.</p>' +
+          '<div class="perm-chips">' +
+            '<label class="perm-chip"><input type="checkbox" id="permApproveApps" checked /> Approve Apps</label>' +
+            '<label class="perm-chip"><input type="checkbox" id="permAccessCards" checked /> Access Cards</label>' +
+            '<label class="perm-chip"><input type="checkbox" id="permCreateCard" checked /> Create Card</label>' +
+          '</div>' +
           '<div class="invite-row">' +
             '<input id="promoteAdminEmail" type="email" placeholder="name@company.com" />' +
             '<button type="button" class="btn primary" id="promoteAdminBtn">Send Admin Invite</button>' +
@@ -665,18 +835,48 @@
       } else if (tab === "policy") {
         const signed = data.signed_count || 0;
         const unsigned = data.unsigned_count || 0;
+        const metaBits = [data.policy_file_name, data.policy_version, data.policy_effective_date ? ("effective " + data.policy_effective_date) : "", data.policy_uploaded_by ? ("uploaded by " + data.policy_uploaded_by) : ""].filter(Boolean);
         extra = (
           '<div class="policy-live">' +
             '<span class="policy-live-label">Current Live Policy</span>' +
             '<span class="policy-live-badge">● Live</span>' +
           '</div>' +
+          (metaBits.length ? '<div class="policy-meta">' + escapeHtml(metaBits.join(" · ")) + '</div>' : '') +
           '<div class="policy-stats">' +
             '<div class="policy-stat"><div class="policy-stat-label">Signed</div><div class="policy-stat-value">' + signed + '</div></div>' +
             '<div class="policy-stat"><div class="policy-stat-label">Unsigned</div><div class="policy-stat-value' + (unsigned ? ' unsigned' : '') + '">' + unsigned + '</div></div>' +
           '</div>' +
           (data.policy_url
             ? '<a class="btn primary" id="policyLink" href="' + escapeHtml(data.policy_url) + '" target="_blank" rel="noopener">View Current Policy</a>'
-            : '')
+            : '') +
+          '<div class="policy-upload">' +
+            '<input type="file" id="policyFile" accept="application/pdf" />' +
+            '<input type="text" id="policyVersion" placeholder="Version e.g. v3.2" />' +
+            '<input type="date" id="policyEffectiveDate" />' +
+            '<button type="button" class="btn primary" id="policyPublishBtn">Publish New Version</button>' +
+          '</div>' +
+          '<p id="policyMsg" class="progress" style="margin-top:8px;"></p>'
+        );
+      } else if (tab === "ai-apps" || tab === "it-apps") {
+        extra = (
+          '<div class="app-add-form">' +
+            '<input type="text" id="appName" placeholder="App name" />' +
+            '<input type="text" id="appCategory" placeholder="Category" />' +
+            '<select id="appDataAllowed">' +
+              '<option value="">Data allowed…</option>' +
+              '<option value="public_only">Public only</option>' +
+              '<option value="internal">Internal</option>' +
+              '<option value="internal_confidential">Internal + Confidential</option>' +
+              '<option value="none">None</option>' +
+            '</select>' +
+            '<select id="appStatus">' +
+              '<option value="pending">Pending</option>' +
+              '<option value="approved">Approved</option>' +
+              '<option value="rejected">Prohibited</option>' +
+            '</select>' +
+            '<button type="button" class="btn primary" id="appAddBtn" data-app-type="' + (tab === "ai-apps" ? "ai" : "it") + '">Add Application</button>' +
+          '</div>' +
+          '<p id="appAddMsg" class="progress" style="margin-top:8px;"></p>'
         );
       }
 
@@ -689,6 +889,56 @@
         '<p class="placeholder-body">' + escapeHtml(data.body) + '</p>' +
         '<div style="margin-top:16px;">' + itemsHtml + '</div>' +
         extra
+      );
+    }
+
+    const CARD_STATUS_LABELS = {
+      not_sent: "Not sent",
+      requested: "Requested",
+      sent: "Sent",
+      scheduled: "Scheduled",
+      failed: "Failed",
+    };
+
+    function buildCardsHtml(data) {
+      const quotaUsed = data.quota_used || 0;
+      const quotaMax = data.quota_max || 10;
+      const catalog = data.catalog || [];
+      const rows = catalog.map((c) => {
+        const statusLabel = CARD_STATUS_LABELS[c.status] || c.status;
+        const ratingNum = (c.rating || "").split(" ")[0];
+        const metaBits = [c.category, c.price, ratingNum ? ("★" + ratingNum) : ""].filter(Boolean).join(" · ");
+        return (
+          '<div class="card-row">' +
+            '<div class="card-row-title">' + escapeHtml(c.icon || "") + " " + escapeHtml(c.title) + '</div>' +
+            '<div class="card-row-meta">' + escapeHtml(metaBits) + '</div>' +
+            '<div class="card-row-desc">' + escapeHtml(c.desc || "") + '</div>' +
+            '<div class="card-row-actions">' +
+              '<span class="card-status ' + escapeHtml(c.status) + '">' + escapeHtml(statusLabel) + '</span>' +
+              '<button type="button" class="btn small" data-card-action="request" data-card-id="' + escapeHtml(c.id) + '">Request</button>' +
+              '<button type="button" class="btn small primary" data-card-action="send-now" data-card-id="' + escapeHtml(c.id) + '">Send Now</button>' +
+              '<input type="datetime-local" class="card-schedule-input" data-card-id="' + escapeHtml(c.id) + '" />' +
+              '<button type="button" class="btn small" data-card-action="schedule" data-card-id="' + escapeHtml(c.id) + '">Schedule</button>' +
+            '</div>' +
+          '</div>'
+        );
+      }).join("");
+
+      return (
+        '<div class="brand">' +
+          '<img src="' + escapeHtml(data.logo_url) + '" alt="AIDL" />' +
+          '<div class="brand-text">AIDL for ' + escapeHtml(data.org_name) + '</div>' +
+        '</div>' +
+        '<h1 class="placeholder-title">' + escapeHtml(data.heading) + '</h1>' +
+        '<p class="placeholder-body">' + escapeHtml(data.body) + '</p>' +
+        '<div class="card-quota"><span>MONTHLY CARD QUOTA</span><strong>' + quotaUsed + ' of ' + quotaMax + ' requested this month</strong></div>' +
+        '<div class="card-list">' + rows + '</div>' +
+        '<div class="card-new-request">' +
+          '<input type="text" id="newCardTitle" placeholder="New card title" />' +
+          '<input type="text" id="newCardDesc" placeholder="What should it cover? (optional)" />' +
+          '<button type="button" class="btn primary" id="newCardBtn">Request a New Card</button>' +
+        '</div>' +
+        '<p id="cardsMsg" class="progress" style="margin-top:8px;"></p>'
       );
     }
 
@@ -720,6 +970,8 @@
       if (!body) return;
       if (tab === "home") {
         body.innerHTML = buildHomeHtml(payload);
+      } else if (tab === "cards") {
+        body.innerHTML = buildCardsHtml(payload);
       } else {
         body.innerHTML = buildPlaceholderHtml(tab, payload);
       }
@@ -893,13 +1145,18 @@
           return;
         }
         if (msg) msg.textContent = "Sending invite…";
+        const permissions = {
+          approve_apps: !!((document.getElementById("permApproveApps") || {}).checked),
+          access_cards: !!((document.getElementById("permAccessCards") || {}).checked),
+          create_card: !!((document.getElementById("permCreateCard") || {}).checked),
+        };
         fetch(BASE + "/admin/invite/", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": "Bearer " + sessionToken,
           },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, permissions }),
         })
           .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
           .then(({ ok, data }) => {
@@ -917,6 +1174,162 @@
           .catch(() => {
             if (msg) msg.textContent = "Promote failed";
           });
+      }
+
+      if (e.target.id === "policyPublishBtn") {
+        const msg = document.getElementById("policyMsg");
+        const fileInput = document.getElementById("policyFile");
+        const file = fileInput && fileInput.files && fileInput.files[0];
+        if (!file) {
+          if (msg) msg.textContent = "Choose a PDF file first.";
+          return;
+        }
+        if (!sessionToken) {
+          if (msg) msg.textContent = "Sign in via Teams as an admin first.";
+          return;
+        }
+        const version = ((document.getElementById("policyVersion") || {}).value || "").trim();
+        const effectiveDate = ((document.getElementById("policyEffectiveDate") || {}).value || "").trim();
+        const form = new FormData();
+        form.append("file", file);
+        if (version) form.append("version", version);
+        if (effectiveDate) form.append("effective_date", effectiveDate);
+        if (msg) msg.textContent = "Publishing…";
+        fetch(BASE + "/admin/policy/upload/", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + sessionToken },
+          body: form,
+        })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+          .then(({ ok, data }) => {
+            if (msg) msg.textContent = ok ? "Published " + (data.file_name || "new version") + " as the live policy." : (data.message || data.error || "Publish failed");
+            if (ok) loadTab("policy", { pushState: false });
+          })
+          .catch(() => {
+            if (msg) msg.textContent = "Publish failed";
+          });
+      }
+
+      if (e.target.id === "appAddBtn") {
+        const msg = document.getElementById("appAddMsg");
+        const appType = e.target.getAttribute("data-app-type");
+        const name = ((document.getElementById("appName") || {}).value || "").trim();
+        const category = ((document.getElementById("appCategory") || {}).value || "").trim();
+        const dataAllowed = ((document.getElementById("appDataAllowed") || {}).value || "").trim();
+        const appStatus = ((document.getElementById("appStatus") || {}).value || "pending").trim();
+        if (!name) {
+          if (msg) msg.textContent = "Enter the application name.";
+          return;
+        }
+        if (!sessionToken) {
+          if (msg) msg.textContent = "Sign in via Teams as an admin first.";
+          return;
+        }
+        if (msg) msg.textContent = "Adding…";
+        fetch(BASE + "/admin/" + appType + "-apps/add/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + sessionToken,
+          },
+          body: JSON.stringify({ name, category, data_allowed: dataAllowed, status: appStatus }),
+        })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+          .then(({ ok, data }) => {
+            if (msg) msg.textContent = ok ? (data.app && data.app.name || name) + " added." : (data.message || data.error || "Add failed");
+            if (ok) loadTab(appType + "-apps", { pushState: false });
+          })
+          .catch(() => {
+            if (msg) msg.textContent = "Add failed";
+          });
+      }
+
+      const cardActionBtn = e.target.closest("[data-card-action]");
+      if (cardActionBtn) {
+        const msg = document.getElementById("cardsMsg");
+        const cardId = cardActionBtn.getAttribute("data-card-id");
+        const action = cardActionBtn.getAttribute("data-card-action");
+        if (!sessionToken) {
+          if (msg) msg.textContent = "Sign in via Teams as an admin first.";
+          return;
+        }
+        if (action === "request") {
+          if (msg) msg.textContent = "Requesting…";
+          fetch(BASE + "/admin/cards/" + cardId + "/request/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + sessionToken },
+            body: "{}",
+          })
+            .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+            .then(({ ok, data }) => {
+              if (msg) msg.textContent = ok ? "Card requested." : (data.message || data.error || "Request failed");
+              if (ok) loadTab("cards", { pushState: false });
+            })
+            .catch(() => { if (msg) msg.textContent = "Request failed"; });
+        } else if (action === "send-now") {
+          if (msg) msg.textContent = "Sending…";
+          fetch(BASE + "/admin/cards/" + cardId + "/send/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + sessionToken },
+            body: JSON.stringify({ when: "now" }),
+          })
+            .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+            .then(({ ok, data }) => {
+              if (msg) msg.textContent = ok ? "Card sent to the channel." : (data.message || data.error || "Send failed");
+              if (ok) loadTab("cards", { pushState: false });
+            })
+            .catch(() => { if (msg) msg.textContent = "Send failed"; });
+        } else if (action === "schedule") {
+          const input = document.querySelector('.card-schedule-input[data-card-id="' + cardId + '"]');
+          const at = input && input.value;
+          if (!at) {
+            if (msg) msg.textContent = "Pick a date and time to schedule this card.";
+            return;
+          }
+          if (msg) msg.textContent = "Scheduling…";
+          fetch(BASE + "/admin/cards/" + cardId + "/send/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + sessionToken },
+            body: JSON.stringify({ when: "later", at }),
+          })
+            .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+            .then(({ ok, data }) => {
+              if (msg) msg.textContent = ok ? "Card scheduled." : (data.message || data.error || "Schedule failed");
+              if (ok) loadTab("cards", { pushState: false });
+            })
+            .catch(() => { if (msg) msg.textContent = "Schedule failed"; });
+        }
+      }
+
+      if (e.target.id === "newCardBtn") {
+        const msg = document.getElementById("cardsMsg");
+        const title = ((document.getElementById("newCardTitle") || {}).value || "").trim();
+        const description = ((document.getElementById("newCardDesc") || {}).value || "").trim();
+        if (!title) {
+          if (msg) msg.textContent = "Give the new card a title.";
+          return;
+        }
+        if (!sessionToken) {
+          if (msg) msg.textContent = "Sign in via Teams as an admin first.";
+          return;
+        }
+        if (msg) msg.textContent = "Sending request…";
+        fetch(BASE + "/admin/cards/request-new/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + sessionToken },
+          body: JSON.stringify({ title, description }),
+        })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+          .then(({ ok, data }) => {
+            if (msg) msg.textContent = ok ? "Request sent to the AIDL team." : (data.message || data.error || "Request failed");
+            if (ok) {
+              const t = document.getElementById("newCardTitle");
+              const d = document.getElementById("newCardDesc");
+              if (t) t.value = "";
+              if (d) d.value = "";
+            }
+          })
+          .catch(() => { if (msg) msg.textContent = "Request failed"; });
       }
     });
 

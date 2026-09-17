@@ -568,6 +568,34 @@ def refresh_graph_token(refresh_token: str) -> dict:
     return app.acquire_token_by_refresh_token(refresh_token, scopes=settings.MS_SCOPES)
 
 
+def get_access_token_for_user(user) -> str:
+    """Mint a fresh Graph access token from an AIDLUser's stored refresh
+    token, for backend-initiated Graph calls that happen with no browser
+    session open (invite emails, scheduled card sends, ...). Keeps the
+    rotated refresh token current so the next call doesn't fail once the
+    old one expires. Returns "" if the user has none stored (hasn't logged
+    in since offline_access was added) or the refresh fails."""
+    refresh_token = getattr(user, "ms_refresh_token", "") or ""
+    if not refresh_token:
+        return ""
+    token_result = refresh_graph_token(refresh_token)
+    access_token = token_result.get("access_token") if isinstance(token_result, dict) else ""
+    if not access_token:
+        logger.warning(
+            "refresh graph token failed for %s: %s",
+            getattr(user, "email", ""),
+            (token_result or {}).get("error_description") or (token_result or {}).get("error"),
+        )
+        return ""
+
+    new_refresh = token_result.get("refresh_token")
+    if new_refresh and new_refresh != refresh_token:
+        user.ms_refresh_token = new_refresh
+        user.save(update_fields=["ms_refresh_token", "updated_at"])
+
+    return access_token
+
+
 def resolve_user_by_email(access_token: str, email: str) -> dict | None:
     """Look up a same-tenant user's Azure AD object id by email/UPN. Tries a
     direct UPN lookup first (works when email == UPN, the common case), then
@@ -605,18 +633,36 @@ def resolve_user_by_email(access_token: str, email: str) -> dict | None:
         return None
 
 
-def send_mail_via_graph(access_token: str, *, to_email: str, subject: str, body_text: str) -> dict:
+def send_mail_via_graph(
+    access_token: str,
+    *,
+    to_email: str,
+    subject: str,
+    body_text: str = "",
+    body_html: str = "",
+) -> dict:
     """Send an email from the signed-in admin's own mailbox via Graph
     (/me/sendMail), so invites land directly in the recipient's Outlook/Teams
     mailbox instead of going through a separate SMTP account. Requires the
-    delegated Mail.Send scope + admin consent."""
+    delegated Mail.Send scope + admin consent.
+
+    Prefer body_html for anything containing a link: a plain-text body has no
+    real <a href>, so Exchange/Defender Safe Links has nothing to rewrite at
+    delivery time — Outlook's client-side auto-linkification then sends the
+    click through safelink.html with url=null, landing on "We can't check the
+    safety of this website right now" instead of the real link."""
     if not access_token or not to_email:
         return {"ok": False, "error": "missing_params"}
     url = f"{GRAPH_BASE}/me/sendMail"
+    body = (
+        {"contentType": "HTML", "content": body_html}
+        if body_html
+        else {"contentType": "Text", "content": body_text}
+    )
     payload = {
         "message": {
             "subject": subject,
-            "body": {"contentType": "Text", "content": body_text},
+            "body": body,
             "toRecipients": [{"emailAddress": {"address": to_email}}],
         },
         "saveToSentItems": "true",

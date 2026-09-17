@@ -534,52 +534,22 @@ def teams_admin_session(request):
 @permission_classes([IsAuthenticated])
 def teams_admin_invite(request):
     """Promote / add an admin by email within the caller's organisation."""
-    caller = request.user
-    email = (request.data.get("email") or "").strip().lower()
-    if not email:
-        return Response({"error": "email_required"}, status=status.HTTP_400_BAD_REQUEST)
-    if not caller.organization_id:
-        return Response(
-            {"error": "no_organization"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if caller.role != AIDLUser.Role.ADMIN:
-        return Response(
-            {
-                "error": "not_admin",
-                "message": "Only an existing admin can add another admin.",
-            },
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    target = AIDLUser.objects.filter(email__iexact=email, is_active=True).first()
-    if target is None:
-        return Response(
-            {
-                "error": "user_not_found",
-                "message": "User must sign in via Teams once before becoming admin.",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
-    admins = AIDLUser.objects.filter(
-        organization_id=caller.organization_id,
-        role=AIDLUser.Role.ADMIN,
-        is_active=True,
-    ).count()
-    from .models import Organization
+    from .admin_ops import AdminOpsError, promote_to_admin
 
-    org = Organization.objects.filter(pk=caller.organization_id).first()
-    limit = org.admin_seat_limit if org else 3
-    if target.role != AIDLUser.Role.ADMIN and admins >= limit:
-        return Response(
-            {"error": "admin_seats_full", "limit": limit},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    target.organization_id = caller.organization_id
-    target.organization_name = caller.organization_name or (org.name if org else "")
-    target.role = AIDLUser.Role.ADMIN
-    target.save(
-        update_fields=["organization_id", "organization_name", "role", "updated_at"]
-    )
+    caller = request.user
+    permissions = request.data.get("permissions") or {}
+    try:
+        target = promote_to_admin(caller, email=request.data.get("email") or "", permissions=permissions)
+    except AdminOpsError as exc:
+        code = {
+            "email_required": status.HTTP_400_BAD_REQUEST,
+            "no_organization": status.HTTP_400_BAD_REQUEST,
+            "not_admin": status.HTTP_403_FORBIDDEN,
+            "user_not_found": status.HTTP_404_NOT_FOUND,
+            "admin_seats_full": status.HTTP_400_BAD_REQUEST,
+        }.get(exc.code, status.HTTP_400_BAD_REQUEST)
+        return Response({"error": exc.code, "message": exc.message}, status=code)
+
     return Response(
         {
             "ok": True,
@@ -587,6 +557,11 @@ def teams_admin_invite(request):
                 "email": target.email,
                 "full_name": target.full_name,
                 "role": target.role,
+                "permissions": {
+                    "approve_apps": target.perm_approve_apps,
+                    "access_cards": target.perm_access_cards,
+                    "create_card": target.perm_create_card,
+                },
             },
         }
     )

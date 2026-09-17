@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from .microsoft_auth import (
     add_team_member,
-    refresh_graph_token,
+    get_access_token_for_user,
     resolve_user_by_email,
     send_mail_via_graph,
 )
@@ -97,26 +97,7 @@ def _get_caller_access_token(caller: AIDLUser) -> str:
     """Mint a fresh Graph access token from the admin's stored refresh token.
     Used for both adding the invitee to the Team and sending the invite email
     from the admin's own mailbox, so we only refresh once per invite."""
-    if not caller.ms_refresh_token:
-        return ""
-    token_result = refresh_graph_token(caller.ms_refresh_token)
-    access_token = token_result.get("access_token") if isinstance(token_result, dict) else ""
-    if not access_token:
-        logger.warning(
-            "refresh graph token failed for %s: %s",
-            caller.email,
-            (token_result or {}).get("error_description") or (token_result or {}).get("error"),
-        )
-        return ""
-
-    # A rotated refresh token comes back on most requests — keep it current
-    # so the next invite doesn't fail once the old one expires.
-    new_refresh = token_result.get("refresh_token")
-    if new_refresh and new_refresh != caller.ms_refresh_token:
-        caller.ms_refresh_token = new_refresh
-        caller.save(update_fields=["ms_refresh_token", "updated_at"])
-
-    return access_token
+    return get_access_token_for_user(caller)
 
 
 def _add_to_team(*, access_token: str, team_id: str, email: str) -> dict:
@@ -133,6 +114,7 @@ def _add_to_team(*, access_token: str, team_id: str, email: str) -> dict:
 
 
 def _send_invite_email(invitation: Invitation, *, access_token: str) -> dict:
+    from html import escape
     from urllib.parse import urlsplit
 
     redirect_uri = getattr(settings, "MS_REDIRECT_URI", "") or ""
@@ -143,25 +125,34 @@ def _send_invite_email(invitation: Invitation, *, access_token: str) -> dict:
     login_url = f"{origin}/api/auth/teams/login-redirect/"
     name = invitation.full_name or "there"
     org_name = invitation.organization_name or "AIDL"
+    channel_name = getattr(settings, "MS_AIDL_CHANNEL_NAME", "aidl dashboard")
+    inviter = invitation.invited_by_email or "An admin"
     subject = f"You've been added to {org_name}'s AI Driving Licence programme"
-    body = (
-        f"Hi {name},\n\n"
-        f"{invitation.invited_by_email or 'An admin'} has added you to {org_name}'s "
-        "AIDL (AI Driving Licence) programme in Microsoft Teams.\n\n"
-        f"1. Open Microsoft Teams — you should already see the \"AIDL\" team and "
-        f"\"{getattr(settings, 'MS_AIDL_CHANNEL_NAME', 'aidl dashboard')}\" channel.\n"
-        f"2. Sign in here with your work account to finish setup and open your "
-        f"AIDL User Dashboard:\n   {login_url}\n\n"
-        "See you there!\n"
-    )
     if not access_token:
         return {"ok": False, "error": "caller_missing_refresh_token"}
+
+    # HTML with a real <a href> — a plain-text body has no anchor tag for
+    # Exchange/Defender Safe Links to rewrite at delivery time, so Outlook's
+    # client-side auto-linkified URL ends up routed through safelink.html
+    # with url=null instead of the real link (see send_mail_via_graph).
+    body_html = (
+        f"<p>Hi {escape(name)},</p>"
+        f"<p>{escape(inviter)} has added you to {escape(org_name)}'s "
+        "AIDL (AI Driving Licence) programme in Microsoft Teams.</p>"
+        "<ol>"
+        f"<li>Open Microsoft Teams &mdash; you should already see the "
+        f'"AIDL" team and "{escape(channel_name)}" channel.</li>'
+        "<li>Sign in here with your work account to finish setup and open "
+        f'your AIDL User Dashboard: <a href="{escape(login_url)}">{escape(login_url)}</a></li>'
+        "</ol>"
+        "<p>See you there!</p>"
+    )
 
     result = send_mail_via_graph(
         access_token,
         to_email=invitation.email,
         subject=subject,
-        body_text=body,
+        body_html=body_html,
     )
     if not result.get("ok"):
         logger.warning(

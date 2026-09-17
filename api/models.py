@@ -36,6 +36,7 @@ class Organization(models.Model):
         default="Acceptable Use of Technology Policy",
     )
     policy_url = models.URLField(blank=True, default="")
+    logo_url = models.URLField(blank=True, default="")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -81,6 +82,13 @@ class AIDLUser(models.Model):
     licence_issued = models.BooleanField(default=False)
     aup_signed = models.BooleanField(default=False)
     aup_signed_at = models.DateTimeField(null=True, blank=True)
+    # Admin Center "Add Admin" permission chips — set when an admin is
+    # promoted/invited, only meaningful for role=admin. Default True so
+    # existing admins (promoted before these chips existed) keep working
+    # exactly as before instead of silently losing access.
+    perm_approve_apps = models.BooleanField(default=True)
+    perm_access_cards = models.BooleanField(default=True)
+    perm_create_card = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
     # Microsoft OAuth refresh token (requires the "offline_access" scope), so
@@ -157,6 +165,12 @@ class RegisteredApp(models.Model):
         PENDING = "pending", "Pending"
         REJECTED = "rejected", "Rejected"
 
+    class DataAllowed(models.TextChoices):
+        PUBLIC_ONLY = "public_only", "Public only"
+        INTERNAL = "internal", "Internal"
+        INTERNAL_CONFIDENTIAL = "internal_confidential", "Internal + Confidential"
+        NONE = "none", "None"
+
     organization_id = models.CharField(max_length=64, db_index=True)
     name = models.CharField(max_length=255)
     app_type = models.CharField(max_length=16, choices=AppType.choices)
@@ -164,6 +178,13 @@ class RegisteredApp(models.Model):
         max_length=16,
         choices=Status.choices,
         default=Status.PENDING,
+    )
+    category = models.CharField(max_length=100, blank=True, default="")
+    data_allowed = models.CharField(
+        max_length=32,
+        choices=DataAllowed.choices,
+        blank=True,
+        default="",
     )
     description = models.TextField(blank=True, default="")
     is_active = models.BooleanField(default=True)
@@ -175,6 +196,81 @@ class RegisteredApp(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class PolicyVersion(models.Model):
+    """One uploaded version of an organisation's Acceptable Use Policy PDF.
+
+    The file itself is stored as base64 in Mongo (not on local disk) so it
+    survives Render's ephemeral filesystem across deploys/restarts with no
+    extra storage service to configure."""
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    file_name = models.CharField(max_length=255)
+    file_content_type = models.CharField(max_length=100, default="application/pdf")
+    file_base64 = models.TextField()
+    version = models.CharField(max_length=32, blank=True, default="")
+    effective_date = models.DateField(null=True, blank=True)
+    uploaded_by_email = models.EmailField(blank=True, default="")
+    uploaded_by_name = models.CharField(max_length=255, blank=True, default="")
+    is_live = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.organization_id} · {self.file_name} ({self.version})"
+
+
+class CardRequest(models.Model):
+    """Per-organisation state of one reference card from the (static) Cards
+    catalogue — requested / sent / scheduled — powering the quota + Send
+    Cards flow on the Admin Center Cards tab."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        SENT = "sent", "Sent"
+        SCHEDULED = "scheduled", "Scheduled"
+        FAILED = "failed", "Failed"
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    card_id = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.REQUESTED,
+    )
+    requested_by_email = models.EmailField(blank=True, default="")
+    requested_at = models.DateTimeField(auto_now_add=True)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    error = models.CharField(max_length=255, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+
+    def __str__(self):
+        return f"{self.organization_id} · {self.card_id} ({self.status})"
+
+
+class CardCustomRequest(models.Model):
+    """A "Request a New Card" submission — not a card in the catalogue yet,
+    just a request for the AIDL team to review."""
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    requested_by_email = models.EmailField(blank=True, default="")
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=32, default="submitted")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.organization_id} · {self.title}"
 
 
 class OAuthState(models.Model):
