@@ -8,6 +8,17 @@ from .org_service import build_admin_dashboard_from_db, build_admin_tab_payload
 from .teams_admin import ADMIN_TABS
 from .teams_cards import logo_url
 
+# The combined welcome card below packs every tab's full section into ONE
+# Adaptive Card message, which Graph caps at ~28KB — measured at ~27.7KB
+# for a typical org with all 7 ADMIN_TABS, leaving almost no headroom before
+# Graph starts rejecting the post outright (Posts then falls back to the
+# bare "could not be posted" message). Add Admin and Add User share a single
+# pill + section in THIS card only, to keep the nav pill count (and its
+# O(n^2) ToggleVisibility target lists) at 6 instead of 7. Both remain full,
+# separate tabs everywhere else — the Website Tab bar, admin.html, and the
+# JSON API — none of which have this size ceiling.
+_WELCOME_CARD_TABS = tuple(t for t in ADMIN_TABS if t[0] != "add-user")
+
 
 # 1x1 Teams-blue (#5b5fc7 — same accent used across the tab UI) PNG, tiled
 # via backgroundImage, to give the active nav pill one consistent highlight
@@ -269,7 +280,15 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
                     "title": "Send Admin Invite",
                     "style": "positive",
                     "url": _add_admin_open_url(user, email),
-                }
+                },
+                # Add User has its own tab in the Website Tab bar and
+                # admin.html, but not its own pill in this combined card (see
+                # _WELCOME_CARD_TABS) — this keeps it one tap away anyway.
+                {
+                    "type": "Action.OpenUrl",
+                    "title": "Add a Team Member instead",
+                    "url": _add_user_open_url(email),
+                },
             ],
         },
         {
@@ -672,7 +691,7 @@ def _section_body_blocks(
     return _generic_blocks(tab, payload)
 
 
-_TAB_INDEX = {t: i for i, (t, _l, _i) in enumerate(ADMIN_TABS)}
+_TAB_INDEX = {t: i for i, (t, _l, _i) in enumerate(_WELCOME_CARD_TABS)}
 
 
 def _section_element_id(tab_id: str) -> str:
@@ -691,7 +710,7 @@ def _nav_toggle_targets(clicked_tab: str) -> list[dict]:
     tab's section + coloured pill show, every other section + coloured pill
     hide (and every other plain pill comes back)."""
     targets: list[dict] = []
-    for tab_id, _label, _icon in ADMIN_TABS:
+    for tab_id, _label, _icon in _WELCOME_CARD_TABS:
         targets.append({"elementId": _section_element_id(tab_id), "isVisible": tab_id == clicked_tab})
         targets.append({"elementId": _pill_id(tab_id, active=True), "isVisible": tab_id == clicked_tab})
         targets.append({"elementId": _pill_id(tab_id, active=False), "isVisible": tab_id != clicked_tab})
@@ -710,7 +729,7 @@ def _nav_pill_rows(active_tab: str) -> dict:
     entirely client-side, inside the one posted message.
     """
     columns = []
-    for tab_id, label, icon in ADMIN_TABS:
+    for tab_id, label, icon in _WELCOME_CARD_TABS:
         title = f"{icon} {label}" if icon else label
         toggle_action = {
             "type": "Action.ToggleVisibility",
@@ -1007,6 +1026,10 @@ def _combined_card(
     strip, entirely inside the one posted message — no bot, no browser tab.
     """
     active_tab = (active_tab or "home").strip().lower()
+    if active_tab not in _TAB_INDEX:
+        # e.g. "add-user" — has no pill in this size-capped card (see
+        # _WELCOME_CARD_TABS); land on Home instead of showing no section.
+        active_tab = "home"
     dash = build_admin_dashboard_from_db(
         full_name=full_name,
         org_name=org_name,
@@ -1024,7 +1047,7 @@ def _combined_card(
             "items": _home_body_items(dash),
         }
     ]
-    for tab_id, _label, _icon in ADMIN_TABS:
+    for tab_id, _label, _icon in _WELCOME_CARD_TABS:
         if tab_id == "home":
             continue
         sections.append(
