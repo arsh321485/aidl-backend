@@ -24,6 +24,7 @@
       /* per-tab accent colors */
       --c-home: #5b5fc7;
       --c-add-admin: #2f7fe0;
+      --c-add-user: #7a5fd6;
       --c-policy: #0e9f6e;
       --c-cards: #e8890c;
       --c-ai-apps: #d6408f;
@@ -96,6 +97,7 @@
     }
     .nav a[data-tab-link="home"] { --accent: var(--c-home); }
     .nav a[data-tab-link="add-admin"] { --accent: var(--c-add-admin); }
+    .nav a[data-tab-link="add-user"] { --accent: var(--c-add-user); }
     .nav a[data-tab-link="policy"] { --accent: var(--c-policy); }
     .nav a[data-tab-link="cards"] { --accent: var(--c-cards); }
     .nav a[data-tab-link="ai-apps"] { --accent: var(--c-ai-apps); }
@@ -601,7 +603,9 @@
       const items = data.items || [];
       const isAppTab = tab === "ai-apps" || tab === "it-apps";
       let itemsHtml;
-      if (!items.length) {
+      if (tab === "add-user") {
+        itemsHtml = "";
+      } else if (!items.length) {
         itemsHtml = '<p class="progress">No records yet for this organisation.</p>';
       } else if (isAppTab) {
         // Flat divider-separated rows with a colored status pill on the
@@ -639,12 +643,22 @@
       let extra = "";
       if (tab === "add-admin") {
         extra = (
-          '<p class="progress" style="margin-top:4px;">Add a teammate — they\'re added to the AIDL Team ' +
-            'right away and get an email to sign in and open their AIDL User Dashboard.</p>' +
+          '<p class="progress" style="margin-top:4px;">Promote an existing team member to admin — they must ' +
+            'have signed in via Teams at least once before they can be promoted.</p>' +
+          '<div class="invite-row">' +
+            '<input id="promoteAdminEmail" type="email" placeholder="name@company.com" />' +
+            '<button type="button" class="btn primary" id="promoteAdminBtn">Send Admin Invite</button>' +
+          '</div>' +
+          '<p id="promoteAdminMsg" class="progress" style="margin-top:8px;"></p>'
+        );
+      } else if (tab === "add-user") {
+        extra = (
+          '<p class="progress" style="margin-top:4px;">Issue a licence to a team member — they get the ' +
+            'reference cards and can request more for their channel. No Admin Center access.</p>' +
           '<div class="invite-row">' +
             '<input id="inviteName" type="text" placeholder="Full name" />' +
             '<input id="inviteEmail" type="email" placeholder="name@company.com" />' +
-            '<button type="button" class="btn primary" id="inviteBtn">Send Invite</button>' +
+            '<button type="button" class="btn primary" id="inviteBtn">Issue Licence</button>' +
           '</div>' +
           '<p id="inviteMsg" class="progress" style="margin-top:8px;"></p>'
         );
@@ -860,11 +874,48 @@
               const nameInput = document.getElementById("inviteName");
               if (inviteInput) inviteInput.value = "";
               if (nameInput) nameInput.value = "";
-              loadTab("add-admin", { pushState: false });
+              loadTab("add-user", { pushState: false });
             }
           })
           .catch(() => {
             if (msg) msg.textContent = "Invite failed";
+          });
+      }
+      if (e.target.id === "promoteAdminBtn") {
+        const msg = document.getElementById("promoteAdminMsg");
+        const email = ((document.getElementById("promoteAdminEmail") || {}).value || "").trim().toLowerCase();
+        if (!email) {
+          if (msg) msg.textContent = "Enter the teammate's work email address.";
+          return;
+        }
+        if (!sessionToken) {
+          if (msg) msg.textContent = "Only an existing admin can promote another admin — sign in via Teams as an admin first.";
+          return;
+        }
+        if (msg) msg.textContent = "Sending invite…";
+        fetch(BASE + "/admin/invite/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + sessionToken,
+          },
+          body: JSON.stringify({ email }),
+        })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+          .then(({ ok, data }) => {
+            if (msg) {
+              msg.textContent = ok
+                ? ((data.admin && (data.admin.full_name || data.admin.email)) || email) + " is now an admin."
+                : (data.message || data.error || "Promote failed");
+            }
+            if (ok) {
+              const emailInput = document.getElementById("promoteAdminEmail");
+              if (emailInput) emailInput.value = "";
+              loadTab("add-admin", { pushState: false });
+            }
+          })
+          .catch(() => {
+            if (msg) msg.textContent = "Promote failed";
           });
       }
     });

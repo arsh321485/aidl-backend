@@ -10,7 +10,8 @@ from .teams_cards import first_name, logo_url, org_display_name
 # In-page Admin Center tabs (Option C — clickable pills inside tab HTML).
 ADMIN_TABS = (
     ("home", "Home", "🏠"),
-    ("add-admin", "Add Admin", "👤"),
+    ("add-admin", "Add Admin", "🧑‍💼"),
+    ("add-user", "Add User", "👤"),
     ("policy", "Policy", "📄"),
     ("cards", "Cards", "💳"),
     ("ai-apps", "AI Apps", "🤖"),

@@ -496,12 +496,28 @@ def build_admin_tab_payload(
             "title": "Add Admin",
             "body": (
                 f"{metrics['admin_count']} of {metrics['admin_seat_limit']} admin seats in use. "
-                "Invite another admin from your organisation."
+                "Promote an existing team member to admin."
             ),
             "items": items,
             "admin_seat_limit": metrics["admin_seat_limit"],
             "admin_count": metrics["admin_count"],
             "can_add": metrics["admin_count"] < metrics["admin_seat_limit"],
+        }
+
+    if tab == "add-user":
+        return {
+            **base,
+            "title": "Add User",
+            "body": (
+                f"{metrics['licences_issued']} of {metrics['seats_purchased']} licences issued. "
+                "Issue a licence to a team member — they get the reference cards and can request "
+                "more for their channel. No Admin Center access."
+            ),
+            "items": [],
+            "licences_issued": metrics["licences_issued"],
+            "seats_purchased": metrics["seats_purchased"],
+            "can_add": metrics["licences_issued"] < metrics["seats_purchased"],
+            "heading": f"Add User — {org.name}",
         }
 
     if tab == "policy":

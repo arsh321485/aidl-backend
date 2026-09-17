@@ -283,6 +283,41 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
     ]
 
 
+def _add_user_open_url(email: str) -> str:
+    """Same reasoning as _add_admin_open_url — always the plain webpage."""
+    return f"{_nav_base_url()}/tabs/add-user/?email={email}"
+
+
+def _add_user_blocks(payload: dict) -> list[dict]:
+    licences_issued = payload.get("licences_issued") or 0
+    seats_purchased = payload.get("seats_purchased") or 0
+    email = payload.get("email") or "name@company.com"
+
+    return [
+        *_heading_block(payload, "add-user", "Whenever a new team member joins · Team · Issue a licence"),
+        {
+            "type": "ActionSet",
+            "spacing": "Medium",
+            "actions": [
+                {
+                    "type": "Action.OpenUrl",
+                    "title": "Issue Licence",
+                    "style": "positive",
+                    "url": _add_user_open_url(email),
+                }
+            ],
+        },
+        {
+            "type": "TextBlock",
+            "text": f"{licences_issued} of {seats_purchased} licences issued · {email}",
+            "size": "Small",
+            "isSubtle": True,
+            "spacing": "Small",
+            "wrap": True,
+        },
+    ]
+
+
 def _policy_blocks(payload: dict) -> list[dict]:
     policy_url = payload.get("policy_url") or ""
     signed = payload.get("signed_count") or 0
@@ -626,6 +661,8 @@ def _section_body_blocks(
     )
     if tab == "add-admin":
         return _add_admin_blocks(payload, user=user)
+    if tab == "add-user":
+        return _add_user_blocks(payload)
     if tab == "policy":
         return _policy_blocks(payload)
     if tab == "cards":
