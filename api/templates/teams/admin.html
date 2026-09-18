@@ -67,44 +67,68 @@
       padding: 20px 20px 40px;
     }
 
-    /* ---- Top nav: flat segmented toolbar (VaptFix-style tab strip) ---- */
+    /* ---- Top nav: rounded pill tabs, always visible + per-tab accent colors ---- */
     .nav {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 8px;
       margin-bottom: 22px;
     }
     .nav a {
+      --accent: var(--aidl-purple);
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      padding: 9px 16px;
-      border-radius: 8px;
+      gap: 8px;
+      padding: 9px 16px 9px 10px;
+      border-radius: 999px;
       border: 1px solid var(--aidl-border);
+      /* solid fill (not transparent) so inactive pills stay visible in dark theme too */
       background: var(--aidl-subtle);
       color: var(--aidl-text);
       text-decoration: none;
       font-size: 13.5px;
       font-weight: 600;
       cursor: pointer;
-      transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+      transition: background-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
     }
+    .nav a[data-tab-link="home"] { --accent: var(--c-home); }
+    .nav a[data-tab-link="add-admin"] { --accent: var(--c-add-admin); }
+    .nav a[data-tab-link="add-user"] { --accent: var(--c-add-user); }
+    .nav a[data-tab-link="policy"] { --accent: var(--c-policy); }
+    .nav a[data-tab-link="cards"] { --accent: var(--c-cards); }
+    .nav a[data-tab-link="ai-apps"] { --accent: var(--c-ai-apps); }
+    .nav a[data-tab-link="it-apps"] { --accent: var(--c-it-apps); }
     .nav a .nav-icon {
-      font-size: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 30%, transparent);
+      font-size: 12px;
       line-height: 1;
+      transition: background-color .18s ease, transform .18s ease;
     }
     .nav a:hover {
-      background: color-mix(in srgb, var(--aidl-purple) 14%, var(--aidl-subtle));
-      border-color: color-mix(in srgb, var(--aidl-purple) 35%, var(--aidl-border));
+      background: color-mix(in srgb, var(--accent) 20%, var(--aidl-subtle));
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--aidl-border));
+      transform: translateY(-1px);
+    }
+    .nav a:hover .nav-icon {
+      transform: scale(1.08);
     }
     .nav a.active {
-      background: var(--aidl-purple);
-      border-color: var(--aidl-purple);
+      background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 78%, black));
+      border-color: transparent;
       color: #fff;
-      box-shadow: 0 2px 8px color-mix(in srgb, var(--aidl-purple) 45%, transparent);
+      box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+    }
+    .nav a.active .nav-icon {
+      background: rgba(255, 255, 255, 0.28);
     }
     .nav a:focus-visible {
-      outline: 2px solid color-mix(in srgb, var(--aidl-purple) 55%, transparent);
+      outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
       outline-offset: 2px;
     }
 
