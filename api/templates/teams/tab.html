@@ -145,6 +145,48 @@
     .tl-section.attention { background: var(--aidl-attention-bg); color: var(--aidl-attention-text); }
     .tl-section ul { margin: 8px 0; padding-left: 20px; }
     .tl-section .tl-action { font-weight: 700; font-size: 13px; margin-top: 6px; }
+    .btn.action {
+      display: inline-block;
+      text-decoration: none;
+      background: var(--aidl-purple);
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin: 8px 0;
+    }
+    .btn.action:disabled { opacity: 0.6; cursor: default; }
+    .signed-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--aidl-good-text);
+      background: var(--aidl-good-bg);
+      font-weight: 700;
+      font-size: 13px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      margin: 8px 0;
+    }
+    .rate-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .rate-row button {
+      border: 1px solid var(--aidl-border);
+      background: var(--aidl-beige);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .rate-row button:disabled { opacity: 0.6; cursor: default; }
   </style>
 </head>
 <body>
@@ -165,6 +207,8 @@
 
   <script>
     const defaultContent = {{ content_json|safe }};
+    const sessionToken = new URLSearchParams(window.location.search).get("access_token") || "";
+    let currentData = defaultContent;
 
     function escapeHtml(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
@@ -209,6 +253,9 @@
     }
 
     function homeHtml(data) {
+      const signAction = data.aup_signed
+        ? '<div class="signed-badge">✓ Policy signed</div>'
+        : '<button type="button" class="btn action" id="signAupBtn">I’ve read this — Sign the policy</button>';
       return (
         '<h1>' + escapeHtml(data.title) + '</h1>' +
         '<p>' + mdBold(data.body) + '</p>' +
@@ -217,6 +264,8 @@
           '<p>' + escapeHtml(data.policy_note_body) + '</p>' +
         '</div>' +
         '<a class="btn block" href="' + escapeHtml(data.policy_url) + '" target="_blank" rel="noopener">Read full policy</a>' +
+        signAction +
+        '<p id="signMsg" class="footer-note"></p>' +
         '<p class="footer-note">' + escapeHtml(data.footer) + '</p>'
       );
     }
@@ -245,6 +294,9 @@
           '<div class="licence-number">' + escapeHtml(data.card_number) + '</div>' +
         '</div>' +
         '<p>' + mdBold(data.body) + '</p>' +
+        (data.download_url
+          ? '<a class="btn action" href="' + escapeHtml(data.download_url) + '" download>Download Licence</a>'
+          : '') +
         '<p class="muted">' + escapeHtml(data.share_note) + '</p>'
       );
     }
@@ -272,11 +324,17 @@
           '<div class="tl-action">→ ' + escapeHtml(s.action) + '</div>' +
         '</div>'
       )).join("");
+      const likes = data.likes || 0;
+      const dislikes = data.dislikes || 0;
       return (
         '<h2>' + escapeHtml(data.title) + '</h2>' +
         '<p>' + escapeHtml(data.body) + '</p>' +
         sections +
-        '<p class="footer-note">' + escapeHtml(data.feedback) + '</p>'
+        '<p class="footer-note">Was this card useful?</p>' +
+        '<div class="rate-row" id="rateRow">' +
+          '<button type="button" data-vote="like">👍 <span id="likeCount">' + likes + '</span></button>' +
+          '<button type="button" data-vote="dislike">👎 <span id="dislikeCount">' + dislikes + '</span></button>' +
+        '</div>'
       );
     }
 
@@ -288,10 +346,71 @@
     };
 
     function renderContent(data) {
+      currentData = data;
       const host = document.getElementById("cardHost");
       const renderer = TAB_RENDERERS[data && data.tab];
       host.innerHTML = renderer ? renderer(data) : "<p>Unknown tab.</p>";
     }
+
+    document.addEventListener("click", (e) => {
+      if (e.target.id === "signAupBtn") {
+        const btn = e.target;
+        const msg = document.getElementById("signMsg");
+        if (!sessionToken) {
+          if (msg) msg.textContent = "Sign in via Teams first.";
+          return;
+        }
+        btn.disabled = true;
+        if (msg) msg.textContent = "Signing…";
+        fetch("{{ teams_base_url }}/admin/aup/sign/", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + sessionToken },
+        })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+          .then(({ ok }) => {
+            if (ok) {
+              currentData.aup_signed = true;
+              renderContent(currentData);
+            } else {
+              btn.disabled = false;
+              if (msg) msg.textContent = "Could not sign — try again.";
+            }
+          })
+          .catch(() => {
+            btn.disabled = false;
+            if (msg) msg.textContent = "Could not sign — try again.";
+          });
+        return;
+      }
+
+      const voteBtn = e.target.closest("[data-vote]");
+      if (voteBtn) {
+        const row = document.getElementById("rateRow");
+        const vote = voteBtn.getAttribute("data-vote");
+        row.querySelectorAll("button").forEach((b) => (b.disabled = true));
+        fetch("{{ teams_base_url }}/cards/traffic-light-check/rate/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vote }),
+        })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+          .then(({ ok, data }) => {
+            if (ok) {
+              const likeEl = document.getElementById("likeCount");
+              const dislikeEl = document.getElementById("dislikeCount");
+              if (likeEl) likeEl.textContent = data.likes;
+              if (dislikeEl) dislikeEl.textContent = data.dislikes;
+              currentData.likes = data.likes;
+              currentData.dislikes = data.dislikes;
+            } else {
+              row.querySelectorAll("button").forEach((b) => (b.disabled = false));
+            }
+          })
+          .catch(() => {
+            row.querySelectorAll("button").forEach((b) => (b.disabled = false));
+          });
+      }
+    });
 
     loadContent();
   </script>

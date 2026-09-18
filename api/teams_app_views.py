@@ -3,7 +3,7 @@
 import json
 
 from django.conf import settings
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.clickjacking import xframe_options_exempt
@@ -20,7 +20,14 @@ from .teams_admin import (
     build_admin_dashboard,
     build_admin_placeholder,
 )
-from .teams_cards import CARD_BUILDERS, TEAMS_TABS, build_card, build_tab_content, org_display_name
+from .teams_cards import (
+    CARD_BUILDERS,
+    TEAMS_TABS,
+    _licence_facts,
+    build_card,
+    build_tab_content,
+    org_display_name,
+)
 from .teams_channel_tabs import ensure_aidl_channel_tabs, is_aidl_dashboard_channel, target_channel_name
 from .teams_messaging import send_channel_adaptive_card
 from .teams_invites import send_user_invite
@@ -171,6 +178,7 @@ def _render_learner_tab(request, tab: str, user_bits: dict):
                 tab,
                 full_name=user_bits.get("full_name", ""),
                 org_name=user_bits.get("org_name", ""),
+                user=user_bits.get("user"),
             )
             or {}
         ),
@@ -252,10 +260,12 @@ def teams_admin_json(request, tab: str):
 @permission_classes([AllowAny])
 def teams_card_json(request, tab: str):
     """Return Adaptive Card JSON for a tab (used by Teams tabs / integrations)."""
+    user_bits = _request_user_bits(request)
     card = build_card(
         tab,
-        full_name=request.query_params.get("full_name", ""),
-        org_name=request.query_params.get("org_name", ""),
+        full_name=user_bits.get("full_name", ""),
+        org_name=user_bits.get("org_name", ""),
+        user=user_bits.get("user"),
     )
     if card is None:
         return Response({"error": "unknown_tab"}, status=status.HTTP_404_NOT_FOUND)
@@ -267,14 +277,75 @@ def teams_card_json(request, tab: str):
 def teams_tab_content_json(request, tab: str):
     """Plain JSON content for a Learner tab (used by the tab's own HTML page
     via fetch — no Adaptive Card parsing, so buttons/links stay in-tab)."""
+    user_bits = _request_user_bits(request)
     content = build_tab_content(
         tab,
-        full_name=request.query_params.get("full_name", ""),
-        org_name=request.query_params.get("org_name", ""),
+        full_name=user_bits.get("full_name", ""),
+        org_name=user_bits.get("org_name", ""),
+        user=user_bits.get("user"),
     )
     if content is None:
         return Response({"error": "unknown_tab"}, status=status.HTTP_404_NOT_FOUND)
     return Response(content)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def teams_licence_download(request):
+    """Downloadable image of the learner's licence card — an SVG (needs no
+    image/PDF library) with the same real licence_number/issued/expires
+    fields the Learner's Permit tab shows on screen."""
+    from django.utils.html import escape
+
+    user_bits = _request_user_bits(request)
+    org_name = org_display_name(user_bits.get("org_name", ""))
+    facts = _licence_facts(
+        full_name=user_bits.get("full_name", ""),
+        org_name=org_name,
+        user=user_bits.get("user"),
+    )
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="640" height="380" viewBox="0 0 640 380">
+  <rect width="640" height="380" rx="20" fill="#ffd335"/>
+  <text x="32" y="48" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">AI DRIVING LICENSE</text>
+  <text x="32" y="70" font-family="Segoe UI, sans-serif" font-size="12" fill="#5c4a00">ISSUED FOR {escape(org_name.upper())}</text>
+  <text x="32" y="130" font-family="Segoe UI, sans-serif" font-size="34" font-weight="800" fill="#201f36">{escape(facts["name"])}</text>
+  <text x="32" y="200" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">CLASS</text>
+  <text x="32" y="222" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">Learner's Permit</text>
+  <text x="32" y="256" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">EXPIRES</text>
+  <text x="32" y="278" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">{escape(facts["expires"])}</text>
+  <text x="330" y="200" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">ISSUED</text>
+  <text x="330" y="222" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">{escape(facts["issued"])}</text>
+  <text x="330" y="256" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">STATUS</text>
+  <text x="330" y="278" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">{escape(facts["status"])}</text>
+  <text x="32" y="340" font-family="Segoe UI, sans-serif" font-size="12" fill="#5c4a00">{escape(facts["licence_number"])}</text>
+</svg>"""
+    response = HttpResponse(svg, content_type="image/svg+xml")
+    filename = f"{facts['licence_number'] or 'aidl-licence'}.svg"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def teams_traffic_light_rate(request):
+    """Record a 👍/👎 vote on the Traffic Light Check card and return the new
+    totals — a single global counter, same one the card's feedback line shows."""
+    from .models import TrafficLightRating
+
+    vote = (request.data.get("vote") or "").strip().lower()
+    if vote not in ("like", "dislike"):
+        return Response({"error": "invalid_vote"}, status=status.HTTP_400_BAD_REQUEST)
+
+    row = TrafficLightRating.objects.first()
+    if row is None:
+        row = TrafficLightRating.objects.create()
+    if vote == "like":
+        row.likes += 1
+        row.save(update_fields=["likes", "updated_at"])
+    else:
+        row.dislikes += 1
+        row.save(update_fields=["dislikes", "updated_at"])
+    return Response({"likes": row.likes, "dislikes": row.dislikes})
 
 
 @api_view(["GET"])
@@ -452,7 +523,7 @@ def teams_send_welcome(request):
 @permission_classes([IsAuthenticated])
 def teams_send_card(request, tab: str):
     """Post any tab Adaptive Card to the user's AIDL channel."""
-    card = build_card(tab, full_name=request.user.full_name, org_name=org_display_name())
+    card = build_card(tab, full_name=request.user.full_name, org_name=org_display_name(), user=request.user)
     if card is None:
         return Response({"error": "unknown_tab"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -642,6 +713,44 @@ def teams_admin_issue_licence(request):
     ).first()
     if target is None:
         return Response({"error": "user_not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    now = timezone.now()
     target.licence_issued = True
-    target.save(update_fields=["licence_issued", "updated_at"])
-    return Response({"ok": True, "email": target.email, "licence_issued": True})
+    if not target.licence_number:
+        target.licence_number = _generate_licence_number()
+    if not target.licence_issued_at:
+        target.licence_issued_at = now
+        target.licence_expires_at = now + timedelta(days=365)
+    target.save(
+        update_fields=[
+            "licence_issued",
+            "licence_number",
+            "licence_issued_at",
+            "licence_expires_at",
+            "updated_at",
+        ]
+    )
+    return Response(
+        {
+            "ok": True,
+            "email": target.email,
+            "licence_issued": True,
+            "licence_number": target.licence_number,
+            "licence_issued_at": target.licence_issued_at,
+            "licence_expires_at": target.licence_expires_at,
+        }
+    )
+
+
+def _generate_licence_number() -> str:
+    import secrets
+
+    for _ in range(5):
+        candidate = f"AIDL-L-{secrets.randbelow(10**8):08d}"
+        if not AIDLUser.objects.filter(licence_number=candidate).exists():
+            return candidate
+    return f"AIDL-L-{secrets.randbelow(10**8):08d}"

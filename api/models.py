@@ -80,6 +80,9 @@ class AIDLUser(models.Model):
     teams_channel_id = models.CharField(max_length=255, blank=True, default="")
     teams_channel_name = models.CharField(max_length=128, blank=True, default="")
     licence_issued = models.BooleanField(default=False)
+    licence_number = models.CharField(max_length=32, blank=True, default="")
+    licence_issued_at = models.DateTimeField(null=True, blank=True)
+    licence_expires_at = models.DateTimeField(null=True, blank=True)
     aup_signed = models.BooleanField(default=False)
     aup_signed_at = models.DateTimeField(null=True, blank=True)
     # Admin Center "Add Admin" permission chips — set when an admin is
@@ -271,6 +274,18 @@ class CardCustomRequest(models.Model):
 
     def __str__(self):
         return f"{self.organization_id} · {self.title}"
+
+
+class TrafficLightRating(models.Model):
+    """Single global like/dislike counter for the Traffic Light Check card's
+    feedback widget — one row total, created on first vote."""
+
+    likes = models.IntegerField(default=128)
+    dislikes = models.IntegerField(default=6)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.likes} likes / {self.dislikes} dislikes"
 
 
 class OAuthState(models.Model):

@@ -221,10 +221,22 @@ def _policy_checklist_block() -> dict:
     }
 
 
-def build_home_card(*, full_name: str = "", org_name: str = "") -> dict:
+def build_home_card(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     """Welcome card shown on Home tab and after Teams signup."""
     org = org_display_name(org_name)
     name = first_name(full_name)
+    signed = bool(user and user.aup_signed)
+    policy_action = (
+        {
+            "type": "TextBlock",
+            "text": "✓ Policy signed",
+            "weight": "Bolder",
+            "color": "good",
+            "spacing": "Medium",
+        }
+        if signed
+        else _pill_button("Read full policy", policy_url())
+    )
     return {
         "type": "AdaptiveCard",
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -251,7 +263,7 @@ def build_home_card(*, full_name: str = "", org_name: str = "") -> dict:
                 "spacing": "Small",
             },
             _policy_checklist_block(),
-            _pill_button("Read full policy", policy_url()),
+            policy_action,
             {
                 "type": "TextBlock",
                 "text": f"Sent automatically on signup · {org}",
@@ -310,8 +322,33 @@ def _level_toggle(active: str) -> dict:
     }
 
 
-def _licence_card_visual(*, full_name: str, org_name: str) -> dict:
-    name = (full_name or "Jordan Ellis").strip().upper()
+def _licence_facts(*, full_name: str = "", org_name: str = "", user=None) -> dict:
+    """Real licence fields from the DB when the learner's licence has been
+    issued; otherwise the same made-up-from-the-name placeholder this card
+    always showed, so a preview with no signed-in user still renders."""
+    name = (full_name or (user.full_name if user else "") or "Jordan Ellis").strip().upper()
+    if user is not None and user.licence_issued and user.licence_number:
+        issued_at = user.licence_issued_at
+        expires_at = user.licence_expires_at
+        return {
+            "name": name,
+            "licence_number": user.licence_number,
+            "issued": issued_at.strftime("%d %b %Y") if issued_at else "—",
+            "expires": expires_at.strftime("%d %b %Y") if expires_at else "—",
+            "status": "ACTIVE",
+        }
+    return {
+        "name": name,
+        "licence_number": "AIDL-L-" + "".join(str(ord(c) % 10) for c in (name[:4] or "AIDL")),
+        "issued": "Today",
+        "expires": "1 year from issue",
+        "status": "ACTIVE" if (user is None or user.licence_issued) else "NOT YET ISSUED",
+    }
+
+
+def _licence_card_visual(*, full_name: str, org_name: str, user=None) -> dict:
+    facts = _licence_facts(full_name=full_name, org_name=org_name, user=user)
+    name = facts["name"]
     return {
         "type": "Container",
         "style": "emphasis",
@@ -376,7 +413,7 @@ def _licence_card_visual(*, full_name: str, org_name: str) -> dict:
                             {"type": "TextBlock", "text": "CLASS", "size": "Small", "isSubtle": True, "spacing": "None"},
                             {"type": "TextBlock", "text": "Learner's Permit", "weight": "Bolder", "spacing": "None"},
                             {"type": "TextBlock", "text": "EXPIRES", "size": "Small", "isSubtle": True, "spacing": "Medium"},
-                            {"type": "TextBlock", "text": "1 year from issue", "weight": "Bolder", "spacing": "None"},
+                            {"type": "TextBlock", "text": facts["expires"], "weight": "Bolder", "spacing": "None"},
                         ],
                     },
                     {
@@ -384,9 +421,9 @@ def _licence_card_visual(*, full_name: str, org_name: str) -> dict:
                         "width": "stretch",
                         "items": [
                             {"type": "TextBlock", "text": "ISSUED", "size": "Small", "isSubtle": True, "spacing": "None"},
-                            {"type": "TextBlock", "text": "Today", "weight": "Bolder", "spacing": "None"},
+                            {"type": "TextBlock", "text": facts["issued"], "weight": "Bolder", "spacing": "None"},
                             {"type": "TextBlock", "text": "STATUS", "size": "Small", "isSubtle": True, "spacing": "Medium"},
-                            {"type": "TextBlock", "text": "ACTIVE", "weight": "Bolder", "spacing": "None"},
+                            {"type": "TextBlock", "text": facts["status"], "weight": "Bolder", "spacing": "None"},
                         ],
                     },
                 ],
@@ -398,7 +435,7 @@ def _licence_card_visual(*, full_name: str, org_name: str) -> dict:
                 "items": [
                     {
                         "type": "TextBlock",
-                        "text": "AIDL-L-" + "".join(str(ord(c) % 10) for c in (name[:4] or "AIDL")),
+                        "text": facts["licence_number"],
                         "size": "Small",
                         "isSubtle": True,
                         "spacing": "None",
@@ -409,8 +446,14 @@ def _licence_card_visual(*, full_name: str, org_name: str) -> dict:
     }
 
 
-def build_learners_permit_card(*, full_name: str = "", org_name: str = "") -> dict:
+def build_learners_permit_card(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
+    email = (user.email if user else "").strip()
+    download_url = f"{_tabs_base_url()}/cards/learners-permit/download/"
+    if email:
+        from urllib.parse import quote
+
+        download_url += f"?email={quote(email)}"
     return {
         "type": "AdaptiveCard",
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -427,7 +470,7 @@ def build_learners_permit_card(*, full_name: str = "", org_name: str = "") -> di
                 "spacing": "Medium",
             },
             _level_toggle("learner"),
-            _licence_card_visual(full_name=full_name, org_name=org),
+            _licence_card_visual(full_name=full_name, org_name=org, user=user),
             {
                 "type": "TextBlock",
                 "text": (
@@ -450,8 +493,8 @@ def build_learners_permit_card(*, full_name: str = "", org_name: str = "") -> di
         "actions": [
             {
                 "type": "Action.OpenUrl",
-                "title": "Download License",
-                "url": f"{_tabs_base_url()}/cards/learners-permit/",
+                "title": "Download Licence",
+                "url": download_url,
             }
         ],
         "msteams": {"width": "Full"},
@@ -545,7 +588,7 @@ def _highway_code_row(icon: str, style: str, title: str, body: str) -> dict:
     }
 
 
-def build_highway_code_card(*, full_name: str = "", org_name: str = "") -> dict:
+def build_highway_code_card(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
     rows = [_highway_code_row(*row) for row in _HIGHWAY_CODE_ROWS]
     return {
@@ -603,8 +646,9 @@ def _traffic_light_section(style: str, title: str, bullets: list[str], action_te
     }
 
 
-def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "") -> dict:
+def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
+    likes, dislikes = _traffic_light_rating()
     return {
         "type": "AdaptiveCard",
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -628,7 +672,7 @@ def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "") -
             *[_traffic_light_section(*section) for section in _TRAFFIC_LIGHT_SECTIONS],
             {
                 "type": "TextBlock",
-                "text": "Was this card useful? 👍 128 · 👎 6",
+                "text": f"Was this card useful? 👍 {likes} · 👎 {dislikes}",
                 "size": "Small",
                 "isSubtle": True,
                 "spacing": "Medium",
@@ -647,11 +691,11 @@ CARD_BUILDERS = {
 }
 
 
-def build_card(tab: str, *, full_name: str = "", org_name: str = "") -> dict | None:
+def build_card(tab: str, *, full_name: str = "", org_name: str = "", user=None) -> dict | None:
     builder = CARD_BUILDERS.get(tab)
     if not builder:
         return None
-    return builder(full_name=full_name, org_name=org_name)
+    return builder(full_name=full_name, org_name=org_name, user=user)
 
 
 # --- Plain JSON content (no Adaptive Card scaffolding) -----------------
@@ -663,7 +707,16 @@ def build_card(tab: str, *, full_name: str = "", org_name: str = "") -> dict | N
 # Teams channel (send_channel_adaptive_card only accepts Adaptive Card JSON).
 
 
-def build_home_content(*, full_name: str = "", org_name: str = "") -> dict:
+def _traffic_light_rating() -> tuple[int, int]:
+    from .models import TrafficLightRating
+
+    row = TrafficLightRating.objects.first()
+    if row is None:
+        row = TrafficLightRating.objects.create()
+    return row.likes, row.dislikes
+
+
+def build_home_content(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
     name = first_name(full_name)
     return {
@@ -678,25 +731,32 @@ def build_home_content(*, full_name: str = "", org_name: str = "") -> dict:
         "policy_note_title": "Acceptable Use of Technology Policy — the short version",
         "policy_note_body": "Read the full policy before you start using AI tools at work.",
         "policy_url": policy_url(),
+        "aup_signed": bool(user and user.aup_signed),
         "footer": f"Sent automatically on signup · {org}",
     }
 
 
-def build_learners_permit_content(*, full_name: str = "", org_name: str = "") -> dict:
+def build_learners_permit_content(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
-    name = (full_name or "Jordan Ellis").strip().upper()
-    card_number = "AIDL-L-" + "".join(str(ord(c) % 10) for c in (name[:4] or "AIDL"))
+    facts = _licence_facts(full_name=full_name, org_name=org, user=user)
+    email = (user.email if user else "").strip()
+    download_url = f"{_tabs_base_url()}/cards/learners-permit/download/"
+    if email:
+        from urllib.parse import quote
+
+        download_url += f"?email={quote(email)}"
     return {
         "tab": "learners-permit",
         "org": org,
         "title": "Your Learner's Permit is ready",
         "level": "learner",
-        "name": name,
+        "name": facts["name"],
         "class_label": "Learner's Permit",
-        "expires": "1 year from issue",
-        "issued": "Today",
-        "status": "ACTIVE",
-        "card_number": card_number,
+        "expires": facts["expires"],
+        "issued": facts["issued"],
+        "status": facts["status"],
+        "card_number": facts["licence_number"],
+        "download_url": download_url,
         "body": (
             "This is your AI Driving Licence. You're currently at **Level L — "
             "Learner**. As you complete lessons and pass checks, you'll move up "
@@ -706,7 +766,7 @@ def build_learners_permit_content(*, full_name: str = "", org_name: str = "") ->
     }
 
 
-def build_highway_code_content(*, full_name: str = "", org_name: str = "") -> dict:
+def build_highway_code_content(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
     return {
         "tab": "highway-code",
@@ -724,8 +784,9 @@ def build_highway_code_content(*, full_name: str = "", org_name: str = "") -> di
     }
 
 
-def build_traffic_light_check_content(*, full_name: str = "", org_name: str = "") -> dict:
+def build_traffic_light_check_content(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
+    likes, dislikes = _traffic_light_rating()
     return {
         "tab": "traffic-light-check",
         "org": org,
@@ -735,7 +796,8 @@ def build_traffic_light_check_content(*, full_name: str = "", org_name: str = ""
             {"style": style, "title": title, "bullets": bullets, "action": action}
             for style, title, bullets, action in _TRAFFIC_LIGHT_SECTIONS
         ],
-        "feedback": "Was this card useful? 👍 128 · 👎 6",
+        "likes": likes,
+        "dislikes": dislikes,
     }
 
 
@@ -747,8 +809,8 @@ CONTENT_BUILDERS = {
 }
 
 
-def build_tab_content(tab: str, *, full_name: str = "", org_name: str = "") -> dict | None:
+def build_tab_content(tab: str, *, full_name: str = "", org_name: str = "", user=None) -> dict | None:
     builder = CONTENT_BUILDERS.get(tab)
     if not builder:
         return None
-    return builder(full_name=full_name, org_name=org_name)
+    return builder(full_name=full_name, org_name=org_name, user=user)

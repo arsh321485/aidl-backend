@@ -129,4 +129,14 @@ urlpatterns = [
         teams_app_views.teams_send_card,
         name="teams-send-card",
     ),
+    path(
+        "teams/cards/learners-permit/download/",
+        teams_app_views.teams_licence_download,
+        name="teams-licence-download",
+    ),
+    path(
+        "teams/cards/traffic-light-check/rate/",
+        teams_app_views.teams_traffic_light_rate,
+        name="teams-traffic-light-rate",
+    ),
 ]
