@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AIDL — {{ active_tab|title }}</title>
   <script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js"></script>
-  <script src="https://unpkg.com/adaptivecards@3.0.1/dist/adaptivecards.min.js"></script>
   <style>
     :root {
       --aidl-purple: #6264a7;
@@ -15,6 +14,15 @@
       --aidl-muted: #616161;
       --aidl-border: #e1dfdd;
       --aidl-beige: #f3ede2;
+      --aidl-yellow: #ffd335;
+      --aidl-good-bg: #dff6dd;
+      --aidl-good-text: #0e6b0e;
+      --aidl-warning-bg: #fff4ce;
+      --aidl-warning-text: #7a5900;
+      --aidl-attention-bg: #fde7e9;
+      --aidl-attention-text: #a4262c;
+      --aidl-accent-bg: #e8ebfa;
+      --aidl-accent-text: #3b3f8f;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -61,25 +69,82 @@
       padding: 20px 24px;
       box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
     }
-    #cardHost .ac-container[style*="emphasis"],
-    #cardHost .ac-container.ac-emphasis {
-      background-color: var(--aidl-beige) !important;
+    .loading { color: var(--aidl-muted); font-size: 14px; }
+    h1, h2 { margin: 0 0 8px; }
+    p { line-height: 1.5; }
+    p.muted, .footer-note { color: var(--aidl-muted); font-size: 13px; }
+    .footer-note { margin-top: 14px; }
+    .note-box {
+      background: var(--aidl-beige);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin: 16px 0;
     }
-    #cardHost .ac-pushButton[style*="positive"],
-    #cardHost button.ac-pushButton {
-      background-color: var(--aidl-purple) !important;
-      border-color: var(--aidl-purple) !important;
-      color: #fff !important;
+    .note-box p { margin: 6px 0 0; }
+    .btn.block {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      background: var(--aidl-purple);
+      color: #fff;
+      font-weight: 700;
+      padding: 12px 16px;
+      border-radius: 10px;
+      margin: 18px 0 8px;
     }
-    .footer-note {
-      margin-top: 14px;
+    .level-toggle { display: flex; gap: 10px; margin: 14px 0; }
+    .level-tile {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+      border-radius: 10px;
+      background: var(--aidl-beige);
+      font-weight: 700;
+      color: var(--aidl-muted);
+    }
+    .level-tile.active { background: var(--aidl-yellow); color: var(--aidl-text); }
+    .licence-card {
+      background: var(--aidl-yellow);
+      border-radius: 12px;
+      padding: 18px;
+      margin: 14px 0;
+    }
+    .licence-kicker { font-weight: 700; }
+    .licence-sub { font-size: 13px; color: #5c4a00; }
+    .licence-name { font-size: 26px; font-weight: 800; margin: 14px 0; }
+    .licence-grid { display: flex; gap: 24px; margin: 10px 0; }
+    .licence-grid > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .licence-grid .label { font-size: 11px; color: #5c4a00; margin-top: 8px; }
+    .licence-number { font-size: 12px; color: #5c4a00; margin-top: 10px; }
+    .hc-row { display: flex; gap: 14px; align-items: flex-start; margin: 16px 0; }
+    .hc-icon {
+      flex: 0 0 56px;
+      width: 56px;
+      min-height: 56px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-weight: 700;
       font-size: 12px;
-      color: var(--aidl-muted);
+      padding: 4px;
     }
-    .loading {
-      color: var(--aidl-muted);
-      font-size: 14px;
+    .hc-icon.attention { background: var(--aidl-attention-bg); color: var(--aidl-attention-text); }
+    .hc-icon.warning { background: var(--aidl-warning-bg); color: var(--aidl-warning-text); }
+    .hc-icon.accent { background: var(--aidl-accent-bg); color: var(--aidl-accent-text); }
+    .hc-icon.default { background: var(--aidl-beige); color: var(--aidl-muted); }
+    .hc-row p { margin: 2px 0 0; font-size: 13px; }
+    .tl-section {
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin: 14px 0;
     }
+    .tl-section.good { background: var(--aidl-good-bg); color: var(--aidl-good-text); }
+    .tl-section.warning { background: var(--aidl-warning-bg); color: var(--aidl-warning-text); }
+    .tl-section.attention { background: var(--aidl-attention-bg); color: var(--aidl-attention-text); }
+    .tl-section ul { margin: 8px 0; padding-left: 20px; }
+    .tl-section .tl-action { font-weight: 700; font-size: 13px; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -96,15 +161,25 @@
     <div class="card-shell">
       <div id="cardHost"><p class="loading">Loading…</p></div>
     </div>
-
-    <p class="footer-note">Sent automatically on signup · {{ org_name }}</p>
   </div>
 
   <script>
-    const defaultCard = {{ card_json|safe }};
+    const defaultContent = {{ content_json|safe }};
 
-    async function loadCard() {
-      let card = defaultCard;
+    function escapeHtml(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+    }
+
+    // Escapes first, then turns **bold** markers into <strong> — safe
+    // against injection since the bolding happens on already-escaped text.
+    function mdBold(value) {
+      return escapeHtml(value).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    }
+
+    async function loadContent() {
+      let data = defaultContent;
       const params = new URLSearchParams(window.location.search);
 
       try {
@@ -119,39 +194,106 @@
         console.warn("Teams SDK context unavailable", e);
       }
 
-      const cardUrl = "{{ teams_base_url }}/cards/{{ active_tab }}/?" + params.toString();
+      const contentUrl = "{{ teams_base_url }}/tab-content/{{ active_tab }}/?" + params.toString();
       try {
-        const resp = await fetch(cardUrl);
+        const resp = await fetch(contentUrl);
         if (resp.ok) {
-          const data = await resp.json();
-          if (data.card) card = data.card;
+          const fetched = await resp.json();
+          if (fetched && !fetched.error) data = fetched;
         }
       } catch (e) {
-        console.warn("Card fetch failed, using server default", e);
+        console.warn("Content fetch failed, using server default", e);
       }
 
-      renderCard(card);
+      renderContent(data);
     }
 
-    function renderCard(card) {
+    function homeHtml(data) {
+      return (
+        '<h1>' + escapeHtml(data.title) + '</h1>' +
+        '<p>' + mdBold(data.body) + '</p>' +
+        '<div class="note-box">' +
+          '<strong>' + escapeHtml(data.policy_note_title) + '</strong>' +
+          '<p>' + escapeHtml(data.policy_note_body) + '</p>' +
+        '</div>' +
+        '<a class="btn block" href="' + escapeHtml(data.policy_url) + '" target="_blank" rel="noopener">Read full policy</a>' +
+        '<p class="footer-note">' + escapeHtml(data.footer) + '</p>'
+      );
+    }
+
+    function learnersPermitHtml(data) {
+      return (
+        '<h2>' + escapeHtml(data.title) + '</h2>' +
+        '<div class="level-toggle">' +
+          '<div class="level-tile active">L · Learner</div>' +
+          '<div class="level-tile">F · Full</div>' +
+        '</div>' +
+        '<div class="licence-card">' +
+          '<div class="licence-kicker">AI DRIVING LICENSE</div>' +
+          '<div class="licence-sub">ISSUED FOR ' + escapeHtml((data.org || "").toUpperCase()) + '</div>' +
+          '<div class="licence-name">' + escapeHtml(data.name) + '</div>' +
+          '<div class="licence-grid">' +
+            '<div>' +
+              '<span class="label">CLASS</span><strong>' + escapeHtml(data.class_label) + '</strong>' +
+              '<span class="label">EXPIRES</span><strong>' + escapeHtml(data.expires) + '</strong>' +
+            '</div>' +
+            '<div>' +
+              '<span class="label">ISSUED</span><strong>' + escapeHtml(data.issued) + '</strong>' +
+              '<span class="label">STATUS</span><strong>' + escapeHtml(data.status) + '</strong>' +
+            '</div>' +
+          '</div>' +
+          '<div class="licence-number">' + escapeHtml(data.card_number) + '</div>' +
+        '</div>' +
+        '<p>' + mdBold(data.body) + '</p>' +
+        '<p class="muted">' + escapeHtml(data.share_note) + '</p>'
+      );
+    }
+
+    function highwayCodeHtml(data) {
+      const rows = (data.rows || []).map((row) => (
+        '<div class="hc-row">' +
+          '<div class="hc-icon ' + escapeHtml(row.style) + '">' + escapeHtml(row.icon) + '</div>' +
+          '<div><strong>' + escapeHtml(row.title) + '</strong><p>' + mdBold(row.body) + '</p></div>' +
+        '</div>'
+      )).join("");
+      return (
+        '<h2>' + escapeHtml(data.title) + '</h2>' +
+        '<p>' + escapeHtml(data.body) + '</p>' +
+        rows +
+        '<a class="btn block" href="' + escapeHtml(data.policy_url) + '" target="_blank" rel="noopener">Open full Highway Code</a>'
+      );
+    }
+
+    function trafficLightHtml(data) {
+      const sections = (data.sections || []).map((s) => (
+        '<div class="tl-section ' + escapeHtml(s.style) + '">' +
+          '<strong>' + escapeHtml(s.title) + '</strong>' +
+          '<ul>' + (s.bullets || []).map((b) => '<li>' + escapeHtml(b) + '</li>').join("") + '</ul>' +
+          '<div class="tl-action">→ ' + escapeHtml(s.action) + '</div>' +
+        '</div>'
+      )).join("");
+      return (
+        '<h2>' + escapeHtml(data.title) + '</h2>' +
+        '<p>' + escapeHtml(data.body) + '</p>' +
+        sections +
+        '<p class="footer-note">' + escapeHtml(data.feedback) + '</p>'
+      );
+    }
+
+    const TAB_RENDERERS = {
+      "home": homeHtml,
+      "learners-permit": learnersPermitHtml,
+      "highway-code": highwayCodeHtml,
+      "traffic-light-check": trafficLightHtml,
+    };
+
+    function renderContent(data) {
       const host = document.getElementById("cardHost");
-      host.innerHTML = "";
-      if (!window.AdaptiveCards) {
-        host.textContent = "Adaptive Cards library failed to load.";
-        return;
-      }
-      const adaptiveCard = new AdaptiveCards.AdaptiveCard();
-      adaptiveCard.onExecuteAction = function (action) {
-        if (action.getJsonTypeName && action.getJsonTypeName() === "Action.OpenUrl") {
-          const url = action.url || (action._processedData && action._processedData.url);
-          if (url) window.open(url, "_blank", "noopener,noreferrer");
-        }
-      };
-      adaptiveCard.parse(card);
-      host.appendChild(adaptiveCard.render());
+      const renderer = TAB_RENDERERS[data && data.tab];
+      host.innerHTML = renderer ? renderer(data) : "<p>Unknown tab.</p>";
     }
 
-    loadCard();
+    loadContent();
   </script>
 </body>
 </html>

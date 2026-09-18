@@ -110,6 +110,11 @@ urlpatterns = [
     ),
     path("teams/cards/<str:tab>/", teams_app_views.teams_card_json, name="teams-card-json"),
     path(
+        "teams/tab-content/<str:tab>/",
+        teams_app_views.teams_tab_content_json,
+        name="teams-tab-content-json",
+    ),
+    path(
         "teams/channel-tabs/install/",
         teams_app_views.teams_install_channel_tabs,
         name="teams-install-channel-tabs",

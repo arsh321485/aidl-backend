@@ -20,7 +20,7 @@ from .teams_admin import (
     build_admin_dashboard,
     build_admin_placeholder,
 )
-from .teams_cards import CARD_BUILDERS, TEAMS_TABS, build_card, org_display_name
+from .teams_cards import CARD_BUILDERS, TEAMS_TABS, build_card, build_tab_content, org_display_name
 from .teams_channel_tabs import ensure_aidl_channel_tabs, is_aidl_dashboard_channel, target_channel_name
 from .teams_messaging import send_channel_adaptive_card
 from .teams_invites import send_user_invite
@@ -132,7 +132,8 @@ def _admin_tab_context(request, active_tab: str, user_bits: dict) -> dict:
 def _render_learner_tab(request, tab: str, user_bits: dict):
     """The Learner's 4-tab dashboard (Home / Learner's Permit / Highway Code /
     Traffic Light Check) — same nav-pill design as Admin Center, personalized
-    Adaptive Cards rendered client-side via teams_card_json."""
+    plain HTML rendered client-side from JSON fetched via teams_tab_content_json
+    (no Adaptive Cards / Action.OpenUrl here, so nothing pops out of the tab)."""
     from urllib.parse import urlencode
 
     from .teams_cards import TEAMS_TABS as LEARNER_TABS
@@ -165,8 +166,8 @@ def _render_learner_tab(request, tab: str, user_bits: dict):
         "active_tab": tab,
         "org_name": user_bits.get("org_name") or org_display_name(),
         "teams_base_url": base,
-        "card_json": json.dumps(
-            build_card(
+        "content_json": json.dumps(
+            build_tab_content(
                 tab,
                 full_name=user_bits.get("full_name", ""),
                 org_name=user_bits.get("org_name", ""),
@@ -259,6 +260,21 @@ def teams_card_json(request, tab: str):
     if card is None:
         return Response({"error": "unknown_tab"}, status=status.HTTP_404_NOT_FOUND)
     return Response({"tab": tab, "card": card})
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def teams_tab_content_json(request, tab: str):
+    """Plain JSON content for a Learner tab (used by the tab's own HTML page
+    via fetch — no Adaptive Card parsing, so buttons/links stay in-tab)."""
+    content = build_tab_content(
+        tab,
+        full_name=request.query_params.get("full_name", ""),
+        org_name=request.query_params.get("org_name", ""),
+    )
+    if content is None:
+        return Response({"error": "unknown_tab"}, status=status.HTTP_404_NOT_FOUND)
+    return Response(content)
 
 
 @api_view(["GET"])

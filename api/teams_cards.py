@@ -458,6 +458,53 @@ def build_learners_permit_card(*, full_name: str = "", org_name: str = "") -> di
     }
 
 
+_HIGHWAY_CODE_ROWS = (
+    (
+        "STOP", "attention", "Keep Private Things Private",
+        "Never paste **passwords, ID numbers, bank details, or your home "
+        "address** into a consumer AI tool. Once it's in, you've lost control of it.",
+    ),
+    (
+        "CHECK", "warning", "Check Before You Trust",
+        "AI can state wrong things confidently. **Verify facts, dates, and "
+        "numbers** against a real source before you rely on them.",
+    ),
+    (
+        "YOU", "warning", "You're Still the Driver",
+        "AI drafts; you decide. **Read and edit every output** and make it "
+        "your own before you use or send it.",
+    ),
+    (
+        "ASK", "accent", "Better Prompt, Better Answer",
+        "Vague questions get vague answers. **Say who the AI should be, what "
+        "you want, and how it should look** — that's the PREP habit.",
+    ),
+    (
+        "ONE WAY", "default", "Mind What You Share",
+        "Free tools may learn from what you type. **Treat every prompt like "
+        "a postcard** — assume it could be read.",
+    ),
+)
+
+_TRAFFIC_LIGHT_SECTIONS = (
+    (
+        "good", "🟢 GO — Public, non-personal.",
+        ["General questions & explanations", "Public articles to summarise", "Story, recipe, and idea prompts"],
+        "Any tool you like — then check facts.",
+    ),
+    (
+        "warning", "🟡 CAUTION — A little personal.",
+        ["Your first name or city", "Your rough plans or preferences", "Non-sensitive everyday details"],
+        "Use a placeholder or remove it first.",
+    ),
+    (
+        "attention", "🔴 STOP — Private, keep it out.",
+        ["Passwords, PINs, verification codes", "Bank/card numbers, national ID", "Home address, other people's data"],
+        "Never paste. Anonymise, then retry.",
+    ),
+)
+
+
 def _highway_code_row(icon: str, style: str, title: str, body: str) -> dict:
     return {
         "type": "ColumnSet",
@@ -500,33 +547,7 @@ def _highway_code_row(icon: str, style: str, title: str, body: str) -> dict:
 
 def build_highway_code_card(*, full_name: str = "", org_name: str = "") -> dict:
     org = org_display_name(org_name)
-    rows = [
-        _highway_code_row(
-            "STOP", "attention", "Keep Private Things Private",
-            "Never paste **passwords, ID numbers, bank details, or your home "
-            "address** into a consumer AI tool. Once it's in, you've lost control of it.",
-        ),
-        _highway_code_row(
-            "CHECK", "warning", "Check Before You Trust",
-            "AI can state wrong things confidently. **Verify facts, dates, and "
-            "numbers** against a real source before you rely on them.",
-        ),
-        _highway_code_row(
-            "YOU", "warning", "You're Still the Driver",
-            "AI drafts; you decide. **Read and edit every output** and make it "
-            "your own before you use or send it.",
-        ),
-        _highway_code_row(
-            "ASK", "accent", "Better Prompt, Better Answer",
-            "Vague questions get vague answers. **Say who the AI should be, what "
-            "you want, and how it should look** — that's the PREP habit.",
-        ),
-        _highway_code_row(
-            "ONE WAY", "default", "Mind What You Share",
-            "Free tools may learn from what you type. **Treat every prompt like "
-            "a postcard** — assume it could be read.",
-        ),
-    ]
+    rows = [_highway_code_row(*row) for row in _HIGHWAY_CODE_ROWS]
     return {
         "type": "AdaptiveCard",
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -604,21 +625,7 @@ def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "") -
                 "text": "Before you paste anything into an AI, check the lights.",
                 "wrap": True,
             },
-            _traffic_light_section(
-                "good", "🟢 GO — Public, non-personal.",
-                ["General questions & explanations", "Public articles to summarise", "Story, recipe, and idea prompts"],
-                "Any tool you like — then check facts.",
-            ),
-            _traffic_light_section(
-                "warning", "🟡 CAUTION — A little personal.",
-                ["Your first name or city", "Your rough plans or preferences", "Non-sensitive everyday details"],
-                "Use a placeholder or remove it first.",
-            ),
-            _traffic_light_section(
-                "attention", "🔴 STOP — Private, keep it out.",
-                ["Passwords, PINs, verification codes", "Bank/card numbers, national ID", "Home address, other people's data"],
-                "Never paste. Anonymise, then retry.",
-            ),
+            *[_traffic_light_section(*section) for section in _TRAFFIC_LIGHT_SECTIONS],
             {
                 "type": "TextBlock",
                 "text": "Was this card useful? 👍 128 · 👎 6",
@@ -642,6 +649,106 @@ CARD_BUILDERS = {
 
 def build_card(tab: str, *, full_name: str = "", org_name: str = "") -> dict | None:
     builder = CARD_BUILDERS.get(tab)
+    if not builder:
+        return None
+    return builder(full_name=full_name, org_name=org_name)
+
+
+# --- Plain JSON content (no Adaptive Card scaffolding) -----------------
+#
+# Used by the Learner tab HTML page (templates/teams/tab.html), which
+# renders these fields directly into the DOM via fetch(), instead of
+# parsing them as an Adaptive Card. The Adaptive Card builders above stay —
+# they're still needed to post the same content as a bot message into the
+# Teams channel (send_channel_adaptive_card only accepts Adaptive Card JSON).
+
+
+def build_home_content(*, full_name: str = "", org_name: str = "") -> dict:
+    org = org_display_name(org_name)
+    name = first_name(full_name)
+    return {
+        "tab": "home",
+        "org": org,
+        "title": f"Welcome to AIDL, {name}! 👋",
+        "body": (
+            f"You've been added to **{org}'s** AI Driving Licence programme. "
+            "Before we issue your permit, take a second to agree to our "
+            "Acceptable Use Policy."
+        ),
+        "policy_note_title": "Acceptable Use of Technology Policy — the short version",
+        "policy_note_body": "Read the full policy before you start using AI tools at work.",
+        "policy_url": policy_url(),
+        "footer": f"Sent automatically on signup · {org}",
+    }
+
+
+def build_learners_permit_content(*, full_name: str = "", org_name: str = "") -> dict:
+    org = org_display_name(org_name)
+    name = (full_name or "Jordan Ellis").strip().upper()
+    card_number = "AIDL-L-" + "".join(str(ord(c) % 10) for c in (name[:4] or "AIDL"))
+    return {
+        "tab": "learners-permit",
+        "org": org,
+        "title": "Your Learner's Permit is ready",
+        "level": "learner",
+        "name": name,
+        "class_label": "Learner's Permit",
+        "expires": "1 year from issue",
+        "issued": "Today",
+        "status": "ACTIVE",
+        "card_number": card_number,
+        "body": (
+            "This is your AI Driving Licence. You're currently at **Level L — "
+            "Learner**. As you complete lessons and pass checks, you'll move up "
+            "to higher levels."
+        ),
+        "share_note": "Share: 𝕏 · LinkedIn · Facebook · WhatsApp",
+    }
+
+
+def build_highway_code_content(*, full_name: str = "", org_name: str = "") -> dict:
+    org = org_display_name(org_name)
+    return {
+        "tab": "highway-code",
+        "org": org,
+        "title": "The Highway Code",
+        "body": (
+            "The everyday rules for using AI safely and confidently. Learn "
+            "them, follow them, drive happy."
+        ),
+        "rows": [
+            {"icon": icon, "style": style, "title": title, "body": body}
+            for icon, style, title, body in _HIGHWAY_CODE_ROWS
+        ],
+        "policy_url": policy_url(),
+    }
+
+
+def build_traffic_light_check_content(*, full_name: str = "", org_name: str = "") -> dict:
+    org = org_display_name(org_name)
+    return {
+        "tab": "traffic-light-check",
+        "org": org,
+        "title": "🚦 Traffic Light Check",
+        "body": "Before you paste anything into an AI, check the lights.",
+        "sections": [
+            {"style": style, "title": title, "bullets": bullets, "action": action}
+            for style, title, bullets, action in _TRAFFIC_LIGHT_SECTIONS
+        ],
+        "feedback": "Was this card useful? 👍 128 · 👎 6",
+    }
+
+
+CONTENT_BUILDERS = {
+    "home": build_home_content,
+    "learners-permit": build_learners_permit_content,
+    "highway-code": build_highway_code_content,
+    "traffic-light-check": build_traffic_light_check_content,
+}
+
+
+def build_tab_content(tab: str, *, full_name: str = "", org_name: str = "") -> dict | None:
+    builder = CONTENT_BUILDERS.get(tab)
     if not builder:
         return None
     return builder(full_name=full_name, org_name=org_name)
