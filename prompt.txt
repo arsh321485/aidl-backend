@@ -1,1 +1,3 @@
-prompt english me text hi but hindi me ho smjhe ese me hindi me direct clear padhte nhi aa rha hai
+i am developing an application which runs inside MS teams
+When ever I click a tab inside teams, it redirects me to another external page. 
+I want to enable all functions inside the teams only and not on external website

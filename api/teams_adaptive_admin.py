@@ -1445,16 +1445,39 @@ def _interactive_policy_blocks(payload: dict) -> tuple[list[dict], list[dict]]:
         },
     ]
     actions = []
-    if payload.get("policy_url"):
-        actions.append({"type": "Action.OpenUrl", "title": "View Current Policy", "url": payload["policy_url"], "style": "positive"})
+    policy_url = payload.get("policy_url") or ""
+    if policy_url:
+        if policy_url.startswith("/"):
+            # Our own PDF endpoint (teams_admin_policy_file) — open it in a
+            # Teams Task Module (in-app modal) instead of a browser tab.
+            actions.append(
+                {
+                    "type": "Action.Submit",
+                    "title": "View Current Policy",
+                    "style": "positive",
+                    "data": {
+                        "msteams": {"type": "task/fetch"},
+                        "action": "view_policy",
+                        "email": payload.get("email", ""),
+                    },
+                }
+            )
+        else:
+            # Default fallback policy lives on an external site we don't
+            # control (not framing-safe) — leave this one as a real link out.
+            actions.append({"type": "Action.OpenUrl", "title": "View Current Policy", "url": policy_url, "style": "positive"})
     # Adaptive Cards have no file-upload input at all — publishing a new PDF
-    # version can only happen on a real webpage, so that one step opens the
-    # Website Tab instead of staying in-card.
+    # version needs a real webpage, so this opens the Website Tab's Policy
+    # page as a Task Module (in-app modal) instead of a browser tab.
     actions.append(
         {
-            "type": "Action.OpenUrl",
+            "type": "Action.Submit",
             "title": "Upload New Policy (PDF)",
-            "url": f"{_nav_base_url()}/tabs/policy/?email={payload.get('email', '')}",
+            "data": {
+                "msteams": {"type": "task/fetch"},
+                "action": "upload_policy",
+                "email": payload.get("email", ""),
+            },
         }
     )
     return body, actions

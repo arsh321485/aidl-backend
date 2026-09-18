@@ -11,6 +11,7 @@ from datetime import datetime
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
@@ -104,9 +105,12 @@ def teams_admin_policy_upload(request):
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@xframe_options_exempt
 def teams_admin_policy_file(request, version_id: str):
     """Serve a stored policy PDF back out — the base64 round-trip is
-    invisible to whoever clicks "View Current Policy"."""
+    invisible to whoever clicks "View Current Policy". Exempted from
+    X-Frame-Options so it can render inside a Teams Task Module iframe
+    instead of forcing a new browser tab."""
     version = PolicyVersion.objects.filter(pk=version_id).first()
     if version is None:
         return Response({"error": "not_found"}, status=status.HTTP_404_NOT_FOUND)

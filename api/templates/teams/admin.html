@@ -1203,7 +1203,16 @@
           .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
           .then(({ ok, data }) => {
             if (msg) msg.textContent = ok ? "Published " + (data.file_name || "new version") + " as the live policy." : (data.message || data.error || "Publish failed");
-            if (ok) loadTab("policy", { pushState: false });
+            if (ok) {
+              loadTab("policy", { pushState: false });
+              // Closes the Teams Task Module automatically if this page is
+              // running inside one; harmless no-op in a normal tab view.
+              try {
+                if (window.microsoftTeams && window.microsoftTeams.tasks && typeof window.microsoftTeams.tasks.submit === "function") {
+                  window.microsoftTeams.tasks.submit({ ok: true });
+                }
+              } catch (e) {}
+            }
           })
           .catch(() => {
             if (msg) msg.textContent = "Publish failed";

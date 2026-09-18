@@ -166,6 +166,49 @@ def _resolve_user(data: dict, activity: dict) -> tuple[AIDLUser | None, str, str
     return user, name, email
 
 
+def _task_module_response(request, data: dict, activity: dict) -> dict:
+    """
+    Response to a Teams Task Module task/fetch invoke — opens an in-app modal
+    (an iframe Teams hosts itself) instead of Action.OpenUrl's browser tab.
+    """
+    from .org_service import build_admin_tab_payload
+    from .teams_adaptive_admin import _nav_base_url
+
+    action = (data.get("action") or "").strip().lower()
+    user, full_name, email = _resolve_user(data, activity)
+    org_name = (user.organization_name if user is not None else "") or ""
+
+    if action == "view_policy":
+        payload = build_admin_tab_payload(
+            "policy", full_name=full_name, org_name=org_name, email=email, user=user
+        )
+        url = payload.get("policy_url") or ""
+        if url.startswith("/"):
+            url = request.build_absolute_uri(url)
+        return {
+            "task": {
+                "type": "continue",
+                "value": {"title": "Current Policy", "width": "large", "height": "large", "url": url},
+            }
+        }
+
+    if action == "upload_policy":
+        suffix = f"?email={email}" if email else ""
+        return {
+            "task": {
+                "type": "continue",
+                "value": {
+                    "title": "Upload New Policy",
+                    "width": "large",
+                    "height": "large",
+                    "url": f"{_nav_base_url()}/tabs/policy/{suffix}",
+                },
+            }
+        }
+
+    return {"task": {"type": "message", "value": "Unsupported action."}}
+
+
 def _card_for_action(data: dict, activity: dict) -> dict:
     user, full_name, email = _resolve_user(data, activity)
     action = (data.get("action") or "nav").strip().lower()
@@ -251,6 +294,17 @@ def teams_bot_messages(request):
                 "value": card,
             }
         )
+
+    # Task Module open request (View Current Policy / Upload New Policy) →
+    # in-app modal instead of Action.OpenUrl's browser tab.
+    if activity_type == "invoke" and activity.get("name") == "task/fetch":
+        data = _extract_action_data(activity)
+        return Response(_task_module_response(request, data, activity))
+
+    # Task Module closed after a successful submit — nothing further to do,
+    # the underlying card re-renders next time its own nav pill is clicked.
+    if activity_type == "invoke" and activity.get("name") == "task/submit":
+        return Response({"task": {"type": "message", "value": "Done."}})
 
     # First install / welcome when bot is added to team
     if activity_type in {"conversationupdate", "installationupdate"}:
