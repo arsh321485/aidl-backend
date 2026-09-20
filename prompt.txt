@@ -1,1 +1,1 @@
-send admin invite par click par ye aa rha hai to esa q uso add admin esa krke api proper krdo ki admin yha se details fetch krke add kr ske
+Send admin invite par click par ab ye open ho rha hai nothing will be shown here to add a teams member

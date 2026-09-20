@@ -54,14 +54,18 @@ def _task_module_deep_link(url: str, title: str, *, width: str = "large", height
     Teams has no bot conversation to route them to. Used as a plain
     Action.OpenUrl target, which Graph-posted cards do support.
     """
-    app_id = (getattr(settings, "MS_BOT_APP_ID", "") or getattr(settings, "MS_CLIENT_ID", "")).strip()
-    return (
+    app_id = (getattr(settings, "MS_CLIENT_ID", "") or getattr(settings, "MS_BOT_APP_ID", "")).strip()
+    bot_id = (getattr(settings, "MS_BOT_APP_ID", "") or app_id).strip()
+    link = (
         "https://teams.microsoft.com/l/task/" + quote(app_id, safe="")
         + "?url=" + quote(url, safe="")
         + "&height=" + quote(height, safe="")
         + "&width=" + quote(width, safe="")
         + "&title=" + quote(title, safe="")
     )
+    if bot_id:
+        link += "&completionBotId=" + quote(bot_id, safe="")
+    return link
 
 
 def _header(org_name: str) -> dict:
