@@ -1041,6 +1041,12 @@
       try {
         if (window.microsoftTeams) {
           await microsoftTeams.app.initialize();
+          // Content is already rendered above (init() calls renderTab before
+          // this) — tell the Teams host so it drops the loading/error state.
+          // A Task Module opening this page waits for this signal and, if it
+          // never comes, eventually shows "There was a problem reaching this
+          // app" even though the page itself loaded fine.
+          microsoftTeams.app.notifySuccess();
           const ctx = await microsoftTeams.app.getContext();
           if (ctx && ctx.user) {
             if (ctx.user.displayName) fullName = ctx.user.displayName;

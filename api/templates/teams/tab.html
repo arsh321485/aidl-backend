@@ -250,6 +250,13 @@
       }
 
       renderContent(data);
+      // Tell the Teams host the app is ready now that content is rendered —
+      // without this, an embedding Teams surface (tab or Task Module) can
+      // time out waiting and show "There was a problem reaching this app"
+      // even though the page itself loaded fine.
+      try {
+        if (window.microsoftTeams) microsoftTeams.app.notifySuccess();
+      } catch (e) {}
     }
 
     function homeHtml(data) {

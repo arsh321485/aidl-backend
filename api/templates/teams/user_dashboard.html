@@ -113,6 +113,10 @@
       try {
         if (window.microsoftTeams) {
           await microsoftTeams.app.initialize();
+          // Content is server-rendered above already — tell the Teams host
+          // so it drops the loading/error state instead of eventually
+          // showing "There was a problem reaching this app".
+          microsoftTeams.app.notifySuccess();
         }
       } catch (e) {
         console.warn("Teams SDK context unavailable", e);
