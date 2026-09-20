@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from django.conf import settings
 
 from .cards_catalog_data import CARD_CATALOG
@@ -38,6 +40,28 @@ def _nav_base_url() -> str:
     if configured:
         return configured.rstrip("/")
     return "https://aidl-backend.onrender.com/api/teams"
+
+
+def _task_module_deep_link(url: str, title: str, *, width: str = "large", height: str = "large") -> str:
+    """
+    Teams "open a task module" deep link — teams.microsoft.com/l/task/... is
+    special-cased by the Teams client itself, which opens `url` in an in-app
+    modal dialog instead of navigating there. Unlike Action.Submit's
+    task/fetch (which needs Teams to invoke a bot over an active bot
+    conversation), this is handled entirely client-side, so it also works on
+    this card — posted into the channel via Graph, not by the bot — where
+    task/fetch invokes fail with "That action isn't supported here" because
+    Teams has no bot conversation to route them to. Used as a plain
+    Action.OpenUrl target, which Graph-posted cards do support.
+    """
+    app_id = (getattr(settings, "MS_BOT_APP_ID", "") or getattr(settings, "MS_CLIENT_ID", "")).strip()
+    return (
+        "https://teams.microsoft.com/l/task/" + quote(app_id, safe="")
+        + "?url=" + quote(url, safe="")
+        + "&height=" + quote(height, safe="")
+        + "&width=" + quote(width, safe="")
+        + "&title=" + quote(title, safe="")
+    )
 
 
 def _header(org_name: str) -> dict:
@@ -260,31 +284,30 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
             "type": "ActionSet",
             "spacing": "Medium",
             "actions": [
-                # Task Module (in-app modal Teams renders itself) instead of
-                # Action.OpenUrl's external browser tab — keeps the whole
-                # add-admin flow, including "Fetch Details" from the Teams
-                # roster, inside Teams.
+                # Teams task-module deep link (see _task_module_deep_link) —
+                # opens admin.html's Add Admin tab, "Fetch Details" picker
+                # included, in an in-app modal. This card is posted via
+                # Graph (not by the bot), so it has no bot conversation for
+                # Action.Submit/task-fetch to invoke — plain Action.OpenUrl
+                # to this special teams.microsoft.com URL is what Graph-
+                # posted cards can actually use to stay inside Teams.
                 {
-                    "type": "Action.Submit",
+                    "type": "Action.OpenUrl",
                     "title": "Send Admin Invite",
                     "style": "positive",
-                    "data": {
-                        "msteams": {"type": "task/fetch"},
-                        "action": "open_add_admin",
-                        "email": email,
-                    },
+                    "url": _task_module_deep_link(
+                        f"{_nav_base_url()}/tabs/add-admin/?email={email}", "Add Admin"
+                    ),
                 },
                 # Add User has its own tab in the Website Tab bar and
                 # admin.html, but not its own pill in this combined card (see
                 # _WELCOME_CARD_TABS) — this keeps it one tap away anyway.
                 {
-                    "type": "Action.Submit",
+                    "type": "Action.OpenUrl",
                     "title": "Add a Team Member instead",
-                    "data": {
-                        "msteams": {"type": "task/fetch"},
-                        "action": "open_add_user",
-                        "email": email,
-                    },
+                    "url": _task_module_deep_link(
+                        f"{_nav_base_url()}/tabs/add-user/?email={email}", "Add User"
+                    ),
                 },
             ],
         },
@@ -310,17 +333,14 @@ def _add_user_blocks(payload: dict) -> list[dict]:
             "type": "ActionSet",
             "spacing": "Medium",
             "actions": [
-                # Task Module instead of Action.OpenUrl — stays inside Teams
-                # (see _add_admin_blocks above for the same fix).
+                # Task-module deep link, not task/fetch — see _add_admin_blocks.
                 {
-                    "type": "Action.Submit",
+                    "type": "Action.OpenUrl",
                     "title": "Issue Licence",
                     "style": "positive",
-                    "data": {
-                        "msteams": {"type": "task/fetch"},
-                        "action": "open_add_user",
-                        "email": email,
-                    },
+                    "url": _task_module_deep_link(
+                        f"{_nav_base_url()}/tabs/add-user/?email={email}", "Add User"
+                    ),
                 }
             ],
         },

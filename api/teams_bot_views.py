@@ -206,25 +206,6 @@ def _task_module_response(request, data: dict, activity: dict) -> dict:
             }
         }
 
-    # "Send Admin Invite" / "Issue Licence" / "Add a Team Member instead" —
-    # in-app modal (same admin.html tab, including its "Fetch Details" Teams
-    # roster picker) instead of Action.OpenUrl's external browser tab.
-    if action in {"open_add_admin", "open_add_user"}:
-        tab = "add-admin" if action == "open_add_admin" else "add-user"
-        title = "Add Admin" if action == "open_add_admin" else "Add User"
-        suffix = f"?email={email}" if email else ""
-        return {
-            "task": {
-                "type": "continue",
-                "value": {
-                    "title": title,
-                    "width": "large",
-                    "height": "large",
-                    "url": f"{_nav_base_url()}/tabs/{tab}/{suffix}",
-                },
-            }
-        }
-
     return {"task": {"type": "message", "value": "Unsupported action."}}
 
 

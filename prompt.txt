@@ -1,2 +1,1 @@
-again ye yha open ho rha hai and yha fetch details dikha rha hai
-see second image mujhe yahi me Send admin invite hai click par niche tab open ho vha fetch ho uski details next tab me new ui se nhi mujhe sb work MS teams me hi krna hai please understand 
+send admin invite par click par ye aa rha hai to esa q uso add admin esa krke api proper krdo ki admin yha se details fetch krke add kr ske
