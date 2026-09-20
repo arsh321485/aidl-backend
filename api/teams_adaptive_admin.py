@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from urllib.parse import quote
-
 from django.conf import settings
 
 from .cards_catalog_data import CARD_CATALOG
@@ -40,32 +38,6 @@ def _nav_base_url() -> str:
     if configured:
         return configured.rstrip("/")
     return "https://aidl-backend.onrender.com/api/teams"
-
-
-def _task_module_deep_link(url: str, title: str, *, width: str = "large", height: str = "large") -> str:
-    """
-    Teams "open a task module" deep link — teams.microsoft.com/l/task/... is
-    special-cased by the Teams client itself, which opens `url` in an in-app
-    modal dialog instead of navigating there. Unlike Action.Submit's
-    task/fetch (which needs Teams to invoke a bot over an active bot
-    conversation), this is handled entirely client-side, so it also works on
-    this card — posted into the channel via Graph, not by the bot — where
-    task/fetch invokes fail with "That action isn't supported here" because
-    Teams has no bot conversation to route them to. Used as a plain
-    Action.OpenUrl target, which Graph-posted cards do support.
-    """
-    app_id = (getattr(settings, "MS_CLIENT_ID", "") or getattr(settings, "MS_BOT_APP_ID", "")).strip()
-    bot_id = (getattr(settings, "MS_BOT_APP_ID", "") or app_id).strip()
-    link = (
-        "https://teams.microsoft.com/l/task/" + quote(app_id, safe="")
-        + "?url=" + quote(url, safe="")
-        + "&height=" + quote(height, safe="")
-        + "&width=" + quote(width, safe="")
-        + "&title=" + quote(title, safe="")
-    )
-    if bot_id:
-        link += "&completionBotId=" + quote(bot_id, safe="")
-    return link
 
 
 def _header(org_name: str) -> dict:
@@ -288,20 +260,20 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
             "type": "ActionSet",
             "spacing": "Medium",
             "actions": [
-                # Teams task-module deep link (see _task_module_deep_link) —
-                # opens admin.html's Add Admin tab, "Fetch Details" picker
-                # included, in an in-app modal. This card is posted via
-                # Graph (not by the bot), so it has no bot conversation for
-                # Action.Submit/task-fetch to invoke — plain Action.OpenUrl
-                # to this special teams.microsoft.com URL is what Graph-
-                # posted cards can actually use to stay inside Teams.
+                # This card is posted via Graph (not the bot), so it has no
+                # bot conversation for any invoke-based action (task/fetch,
+                # Action.Execute) to reach — those all fail with a generic
+                # Teams error. A plain webpage link is the only thing this
+                # variant can reliably do; it's just the degrade path for
+                # orgs the bot hasn't (re)posted an interactive card for yet
+                # (see send_admin_center_card in teams_messaging.py) — once
+                # the bot has posted, this whole card is replaced by the
+                # fully in-place interactive one (_interactive_add_admin_blocks).
                 {
                     "type": "Action.OpenUrl",
                     "title": "Send Admin Invite",
                     "style": "positive",
-                    "url": _task_module_deep_link(
-                        f"{_nav_base_url()}/tabs/add-admin/?email={email}", "Add Admin"
-                    ),
+                    "url": f"{_nav_base_url()}/tabs/add-admin/?email={email}",
                 },
                 # Add User has its own tab in the Website Tab bar and
                 # admin.html, but not its own pill in this combined card (see
@@ -309,9 +281,7 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
                 {
                     "type": "Action.OpenUrl",
                     "title": "Add a Team Member instead",
-                    "url": _task_module_deep_link(
-                        f"{_nav_base_url()}/tabs/add-user/?email={email}", "Add User"
-                    ),
+                    "url": f"{_nav_base_url()}/tabs/add-user/?email={email}",
                 },
             ],
         },
@@ -337,14 +307,12 @@ def _add_user_blocks(payload: dict) -> list[dict]:
             "type": "ActionSet",
             "spacing": "Medium",
             "actions": [
-                # Task-module deep link, not task/fetch — see _add_admin_blocks.
+                # Degrade path only — see _add_admin_blocks above.
                 {
                     "type": "Action.OpenUrl",
                     "title": "Issue Licence",
                     "style": "positive",
-                    "url": _task_module_deep_link(
-                        f"{_nav_base_url()}/tabs/add-user/?email={email}", "Add User"
-                    ),
+                    "url": f"{_nav_base_url()}/tabs/add-user/?email={email}",
                 }
             ],
         },
@@ -1335,7 +1303,45 @@ def _bool_toggle(value: bool = True) -> str:
     return "true" if value else "false"
 
 
-def _interactive_add_admin_blocks(payload: dict) -> tuple[list[dict], list[dict]]:
+def _roster_choice_set(user) -> dict | None:
+    """Input.ChoiceSet of the caller's current Teams roster — Teams renders a
+    compact ChoiceSet as a searchable dropdown natively, giving the same
+    "start typing a name, pick them" picker as VAPTfix's Fetch Details, with
+    no extra fetch round trip needed. Choice values encode "email::Full Name"
+    (split by _split_roster_pick in teams_bot_views.py). Returns None when
+    there's no usable token or the roster is empty, so callers can skip the
+    picker and fall back to manual entry only.
+    """
+    if user is None:
+        return None
+    from .microsoft_auth import get_access_token_for_user, list_team_members
+
+    access_token = get_access_token_for_user(user)
+    if not access_token:
+        return None
+    members = list_team_members(access_token, user.teams_team_id)
+    choices = [
+        {
+            "title": f"{m['full_name']} ({m['email']})" if m.get("full_name") else m["email"],
+            "value": f"{m['email']}::{m.get('full_name', '')}",
+        }
+        for m in members
+        if m.get("email")
+    ]
+    if not choices:
+        return None
+    return {
+        "type": "Input.ChoiceSet",
+        "id": "rosterPick",
+        "label": "Pick someone already in this Teams team",
+        "style": "compact",
+        "placeholder": "Start typing a name…",
+        "choices": [{"title": "— fill in manually below —", "value": ""}] + choices,
+        "value": "",
+    }
+
+
+def _interactive_add_admin_blocks(payload: dict, user=None) -> tuple[list[dict], list[dict]]:
     """Promote-to-admin form (email + the 3 permission chips as toggles) —
     the bot-native equivalent of the Website Tab's Add Admin screen."""
     items = payload.get("items") or []
@@ -1372,8 +1378,21 @@ def _interactive_add_admin_blocks(payload: dict) -> tuple[list[dict], list[dict]
             }
         )
     body = rows or [{"type": "TextBlock", "text": "No admins yet.", "isSubtle": True, "wrap": True}]
+    body.append({"type": "TextBlock", "text": "PROMOTE TO ADMIN", "size": "Small", "weight": "Bolder", "isSubtle": True, "spacing": "Medium"})
+    roster = _roster_choice_set(user)
+    if roster:
+        body.append(roster)
+        body.append(
+            {
+                "type": "TextBlock",
+                "text": "— or fill in manually below for someone not yet in this Teams team —",
+                "size": "Small",
+                "isSubtle": True,
+                "wrap": True,
+                "spacing": "Small",
+            }
+        )
     body += [
-        {"type": "TextBlock", "text": "PROMOTE TO ADMIN", "size": "Small", "weight": "Bolder", "isSubtle": True, "spacing": "Medium"},
         {"type": "Input.Text", "id": "promoteEmail", "label": "Work email", "placeholder": "name@company.com"},
         {"type": "Input.Toggle", "id": "permApproveApps", "title": "Approve Apps", "value": _bool_toggle(True)},
         {"type": "Input.Toggle", "id": "permAccessCards", "title": "Access Cards", "value": _bool_toggle(True)},
@@ -1391,7 +1410,7 @@ def _interactive_add_admin_blocks(payload: dict) -> tuple[list[dict], list[dict]
     return body, actions
 
 
-def _interactive_add_user_blocks(payload: dict) -> tuple[list[dict], list[dict]]:
+def _interactive_add_user_blocks(payload: dict, user=None) -> tuple[list[dict], list[dict]]:
     licences_issued = payload.get("licences_issued") or 0
     seats_purchased = payload.get("seats_purchased") or 0
     body = [
@@ -1402,6 +1421,21 @@ def _interactive_add_user_blocks(payload: dict) -> tuple[list[dict], list[dict]]
             "isSubtle": True,
             "wrap": True,
         },
+    ]
+    roster = _roster_choice_set(user)
+    if roster:
+        body.append(roster)
+        body.append(
+            {
+                "type": "TextBlock",
+                "text": "— or fill in manually below for someone not yet in this Teams team —",
+                "size": "Small",
+                "isSubtle": True,
+                "wrap": True,
+                "spacing": "Small",
+            }
+        )
+    body += [
         {"type": "Input.Text", "id": "inviteName", "label": "Full name", "placeholder": "Full name"},
         {"type": "Input.Text", "id": "inviteEmail", "label": "Work email", "placeholder": "name@company.com"},
     ]
@@ -1695,9 +1729,9 @@ def _section_card(
     org = payload.get("org_name") or org_name or "AIDL"
 
     if tab == "add-admin":
-        content_blocks, actions = _interactive_add_admin_blocks(payload)
+        content_blocks, actions = _interactive_add_admin_blocks(payload, user=user)
     elif tab == "add-user":
-        content_blocks, actions = _interactive_add_user_blocks(payload)
+        content_blocks, actions = _interactive_add_user_blocks(payload, user=user)
     elif tab == "policy":
         content_blocks, actions = _interactive_policy_blocks(payload)
     elif tab == "cards":

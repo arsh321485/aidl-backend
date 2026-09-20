@@ -138,6 +138,57 @@ def delete_channel_message(
         return False
 
 
+def _send_admin_center_card_via_bot(
+    *,
+    team_id: str,
+    channel_id: str,
+    full_name: str,
+    org_name: str,
+    email: str,
+    user,
+    tab: str,
+) -> dict | None:
+    """Try posting the fully-interactive Admin Center card as the bot itself
+    (Bot Framework Connector — see api/bot_framework_client.py), so its nav
+    pills and forms (Add Admin, Add User, ...) work in place with no popup
+    and no browser tab, the way Action.Execute/task-fetch actually require.
+    Returns None (not a failure) when this org has no captured bot
+    conversation yet, or the send itself fails, so the caller falls through
+    to the existing Graph-based post — never a regression, just a missed
+    upgrade until the next login re-tries this."""
+    from .bot_framework_client import send_channel_adaptive_card_via_bot
+    from .models import Organization
+
+    org = Organization.objects.filter(teams_team_id=team_id).first()
+    if org is None or not org.bot_service_url:
+        return None
+
+    try:
+        card = build_admin_adaptive_card(
+            tab,
+            full_name=full_name,
+            org_name=org_name,
+            email=email,
+            user=user,
+            interactive=True,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("build interactive admin adaptive card failed")
+        return None
+
+    result = send_channel_adaptive_card_via_bot(
+        service_url=org.bot_service_url,
+        tenant_id=org.bot_tenant_id,
+        channel_id=channel_id,
+        card=card,
+    )
+    if not result.get("ok"):
+        logger.warning("bot-based admin card send failed, falling back to Graph: %s", result)
+        return None
+    result["card_variant"] = "bot_interactive"
+    return result
+
+
 def send_admin_center_card(
     access_token: str,
     *,
@@ -158,8 +209,21 @@ def send_admin_center_card(
         # Graph often needs a beat before a brand-new channel accepts messages.
         time.sleep(2.5)
 
+    bot_result = _send_admin_center_card_via_bot(
+        team_id=team_id,
+        channel_id=channel_id,
+        full_name=full_name,
+        org_name=org_name,
+        email=email,
+        user=user,
+        tab=tab,
+    )
+    if bot_result is not None:
+        return bot_result
+
     try:
-        # Phase 1: Graph-safe card (no Action.Execute) so Posts is never empty.
+        # Graph-safe card (no Action.Execute) so Posts is never empty — the
+        # fallback for orgs the bot hasn't captured a conversation for yet.
         card = build_admin_adaptive_card(
             tab,
             full_name=full_name,

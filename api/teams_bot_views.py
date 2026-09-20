@@ -18,7 +18,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import AIDLUser
+from .models import AIDLUser, Organization
 from .teams_adaptive_admin import build_admin_adaptive_card
 from .teams_cards import org_display_name
 
@@ -44,6 +44,18 @@ def _bool_from_toggle(value) -> bool:
     return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 
+def _split_roster_pick(value) -> tuple[str, str]:
+    """Input.ChoiceSet roster picks (see _interactive_add_admin_blocks /
+    _interactive_add_user_blocks) encode "email::Full Name" as the choice
+    value. Returns ("", "") when nothing was picked, so callers can fall
+    back to the manual text fields."""
+    raw = (value or "").strip()
+    if not raw:
+        return "", ""
+    email, _, name = raw.partition("::")
+    return email.strip(), name.strip()
+
+
 def _run_write_action(action: str, data: dict, user: AIDLUser | None) -> dict | None:
     """Performs the action; returns None on success or {"code","message"} on
     failure. Reuses the exact same service functions as the REST endpoints
@@ -59,9 +71,10 @@ def _run_write_action(action: str, data: dict, user: AIDLUser | None) -> dict | 
 
     try:
         if action == "promote_admin":
+            roster_email, _roster_name = _split_roster_pick(data.get("rosterPick"))
             promote_to_admin(
                 user,
-                email=data.get("promoteEmail") or "",
+                email=roster_email or data.get("promoteEmail") or "",
                 permissions={
                     "approve_apps": _bool_from_toggle(data.get("permApproveApps", "true")),
                     "access_cards": _bool_from_toggle(data.get("permAccessCards", "true")),
@@ -71,10 +84,11 @@ def _run_write_action(action: str, data: dict, user: AIDLUser | None) -> dict | 
             return None
 
         if action == "invite_user":
+            roster_email, roster_name = _split_roster_pick(data.get("rosterPick"))
             result = send_user_invite(
                 caller=user,
-                email=data.get("inviteEmail") or "",
-                full_name=data.get("inviteName") or "",
+                email=roster_email or data.get("inviteEmail") or "",
+                full_name=roster_name or data.get("inviteName") or "",
             )
             if not result.get("ok"):
                 return {"code": result.get("error") or "invite_failed", "message": result.get("message", "")}
@@ -164,6 +178,34 @@ def _resolve_user(data: dict, activity: dict) -> tuple[AIDLUser | None, str, str
         email = email or user.email
         name = name or user.full_name
     return user, name, email
+
+
+def _capture_bot_conversation(activity: dict) -> None:
+    """Persist this org's bot serviceUrl/tenantId from a conversationUpdate /
+    installationUpdate activity, so api/teams_messaging.py can later post the
+    Admin Center card as the bot (via api/bot_framework_client.py) instead of
+    through Graph. Best-effort only — a team we can't match yet (e.g. it
+    hasn't finished being created) just keeps using the Graph fallback."""
+    service_url = (activity.get("serviceUrl") or "").strip()
+    channel_data = activity.get("channelData") or {}
+    team_id = ((channel_data.get("team") or {}).get("id") or "").strip()
+    tenant_id = ((channel_data.get("tenant") or {}).get("id") or "").strip()
+    if not service_url or not team_id:
+        return
+
+    org = Organization.objects.filter(teams_team_id=team_id).first()
+    if org is None:
+        return
+
+    update_fields = []
+    if org.bot_service_url != service_url:
+        org.bot_service_url = service_url
+        update_fields.append("bot_service_url")
+    if tenant_id and org.bot_tenant_id != tenant_id:
+        org.bot_tenant_id = tenant_id
+        update_fields.append("bot_tenant_id")
+    if update_fields:
+        org.save(update_fields=[*update_fields, "updated_at"])
 
 
 def _task_module_response(request, data: dict, activity: dict) -> dict:
@@ -306,8 +348,14 @@ def teams_bot_messages(request):
     if activity_type == "invoke" and activity.get("name") == "task/submit":
         return Response({"task": {"type": "message", "value": "Done."}})
 
-    # First install / welcome when bot is added to team
+    # First install / welcome when bot is added to team — also the only
+    # place we ever learn this org's bot conversation details (serviceUrl +
+    # tenant), so capture them here for proactive Bot Framework sends (see
+    # api/bot_framework_client.py). Without this, the Admin Center card can
+    # only ever be posted via Graph, which has no bot conversation behind it
+    # and so can't support Action.Execute/task-fetch button clicks at all.
     if activity_type in {"conversationupdate", "installationupdate"}:
+        _capture_bot_conversation(activity)
         return Response({"ok": True})
 
     if activity_type == "message":

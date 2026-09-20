@@ -25,6 +25,12 @@ class Organization(models.Model):
     teams_team_id = models.CharField(max_length=128, blank=True, default="")
     teams_welcome_channel_id = models.CharField(max_length=255, blank=True, default="")
     teams_welcome_message_id = models.CharField(max_length=255, blank=True, default="")
+    # Captured from the bot's conversationUpdate/installationUpdate activity
+    # once it's added to this org's Team — lets the backend post the Admin
+    # Center card via the Bot Framework Connector (a real bot conversation)
+    # instead of Graph, so Action.Execute/task-fetch invokes on it work.
+    bot_service_url = models.CharField(max_length=255, blank=True, default="")
+    bot_tenant_id = models.CharField(max_length=128, blank=True, default="")
     seats_purchased = models.IntegerField(default=50)
     seats_renews_on = models.DateField(null=True, blank=True)
     admin_seat_limit = models.IntegerField(default=3)
