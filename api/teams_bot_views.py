@@ -181,11 +181,16 @@ def _resolve_user(data: dict, activity: dict) -> tuple[AIDLUser | None, str, str
 
 
 def _capture_bot_conversation(activity: dict) -> None:
-    """Persist this org's bot serviceUrl/tenantId from a conversationUpdate /
-    installationUpdate activity, so api/teams_messaging.py can later post the
-    Admin Center card as the bot (via api/bot_framework_client.py) instead of
-    through Graph. Best-effort only — a team we can't match yet (e.g. it
-    hasn't finished being created) just keeps using the Graph fallback."""
+    """Persist this org's bot serviceUrl/tenantId so api/teams_messaging.py
+    can post the Admin Center card as the bot (via api/bot_framework_client.py)
+    instead of through Graph. Every activity Teams ever sends the bot — not
+    just conversationUpdate/installationUpdate — already carries serviceUrl +
+    channelData.team.id, so this runs on every inbound activity: for a team
+    whose bot was installed long before this feature existed, there's no
+    fresh "install" event to wait for, but the very next message/button click
+    from that team captures it just as well. Best-effort only — a team we
+    can't match yet (e.g. it hasn't finished being created) just keeps using
+    the Graph fallback."""
     service_url = (activity.get("serviceUrl") or "").strip()
     channel_data = activity.get("channelData") or {}
     team_id = ((channel_data.get("team") or {}).get("id") or "").strip()
@@ -197,6 +202,7 @@ def _capture_bot_conversation(activity: dict) -> None:
     if org is None:
         return
 
+    was_missing = not org.bot_service_url
     update_fields = []
     if org.bot_service_url != service_url:
         org.bot_service_url = service_url
@@ -206,6 +212,40 @@ def _capture_bot_conversation(activity: dict) -> None:
         update_fields.append("bot_tenant_id")
     if update_fields:
         org.save(update_fields=[*update_fields, "updated_at"])
+        logger.info("captured bot conversation for org %s (team %s)", org.pk, team_id)
+
+    # First time this org gets a usable bot conversation — post the
+    # interactive card right away instead of waiting for the next login's
+    # repost, so switching from Graph to the bot is visible immediately.
+    if was_missing and org.bot_service_url:
+        _repost_interactive_admin_card(org)
+
+
+def _repost_interactive_admin_card(org: Organization) -> None:
+    from .bot_framework_client import send_channel_adaptive_card_via_bot
+
+    if not org.teams_welcome_channel_id:
+        return
+    try:
+        card = build_admin_adaptive_card(
+            "home",
+            org_name=org.name,
+            interactive=True,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("build interactive admin card failed during bootstrap repost")
+        return
+
+    result = send_channel_adaptive_card_via_bot(
+        service_url=org.bot_service_url,
+        tenant_id=org.bot_tenant_id,
+        channel_id=org.teams_welcome_channel_id,
+        card=card,
+    )
+    if not result.get("ok"):
+        logger.warning("bootstrap interactive card repost failed for org %s: %s", org.pk, result)
+    else:
+        logger.info("bootstrap interactive card posted for org %s", org.pk)
 
 
 def _task_module_response(request, data: dict, activity: dict) -> dict:
@@ -321,6 +361,15 @@ def teams_bot_messages(request):
     activity_type = (activity.get("type") or "").lower()
     logger.info("teams bot activity type=%s name=%s", activity_type, activity.get("name"))
 
+    # Every inbound activity carries serviceUrl + the team id — capture it
+    # on all of them, not just install events, since a bot installed long
+    # before this feature existed will never get a fresh install event.
+    # Best-effort: must never break the actual response below.
+    try:
+        _capture_bot_conversation(activity)
+    except Exception:  # noqa: BLE001
+        logger.exception("bot conversation capture failed")
+
     # Adaptive Card button click → replace card in Posts (no browser tab).
     if activity_type == "invoke" and activity.get("name") in {
         "adaptiveCard/action",
@@ -348,14 +397,10 @@ def teams_bot_messages(request):
     if activity_type == "invoke" and activity.get("name") == "task/submit":
         return Response({"task": {"type": "message", "value": "Done."}})
 
-    # First install / welcome when bot is added to team — also the only
-    # place we ever learn this org's bot conversation details (serviceUrl +
-    # tenant), so capture them here for proactive Bot Framework sends (see
-    # api/bot_framework_client.py). Without this, the Admin Center card can
-    # only ever be posted via Graph, which has no bot conversation behind it
-    # and so can't support Action.Execute/task-fetch button clicks at all.
+    # First install / welcome when bot is added to team — conversation
+    # capture already happened above for every activity type, this is just
+    # the plain ack Teams expects for these.
     if activity_type in {"conversationupdate", "installationupdate"}:
-        _capture_bot_conversation(activity)
         return Response({"ok": True})
 
     if activity_type == "message":

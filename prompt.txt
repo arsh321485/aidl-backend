@@ -1,1 +1,4 @@
-explain in hindi
+ye tumne firse new tab me https://aidl-backend.onrender.com/api/teams/tabs/add-admin/?email=ritika@secureitlabservices.com ye yha open krke de diya mujhe esa chahiye mujhe MS teams ke under se hi user admin add karna hai 
+
+
+mujhe code krne ke phle sb plan do
