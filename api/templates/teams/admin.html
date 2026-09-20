@@ -744,6 +744,57 @@
       );
     }
 
+    // "Pick someone already in this Teams team" — lets an admin fetch a
+    // known member's name/email from the AIDL Team roster instead of typing
+    // it, mirroring the VAPTfix Admin Center. idPrefix scopes element ids so
+    // Add Admin and Add User can each have their own picker.
+    function buildMemberPickerHtml(idPrefix) {
+      return (
+        '<p class="progress" style="margin-top:12px;margin-bottom:6px;">Pick someone already in this Teams team:</p>' +
+        '<div class="invite-row">' +
+          '<input type="text" id="' + idPrefix + 'PickMember" list="' + idPrefix + 'MembersList" placeholder="Start typing a name…" autocomplete="off" />' +
+          '<datalist id="' + idPrefix + 'MembersList"></datalist>' +
+          '<button type="button" class="btn" data-fetch-details="' + idPrefix + '">Fetch Details</button>' +
+        '</div>' +
+        '<p id="' + idPrefix + 'PickMsg" class="progress" style="margin-top:4px;"></p>' +
+        '<p class="progress" style="margin-top:14px;margin-bottom:2px;">— or fill in manually for someone not yet in this Teams team —</p>'
+      );
+    }
+
+    let teamMembers = null;
+
+    async function ensureTeamMembers() {
+      if (teamMembers) return teamMembers;
+      if (!sessionToken) return [];
+      try {
+        const resp = await fetch(BASE + "/admin/team-members/", {
+          headers: { "Authorization": "Bearer " + sessionToken },
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          teamMembers = data.members || [];
+          return teamMembers;
+        }
+      } catch (e) {
+        console.warn("Team members fetch failed", e);
+      }
+      teamMembers = [];
+      return teamMembers;
+    }
+
+    function memberOptionLabel(m) {
+      return m.email ? (m.full_name || m.email) + " (" + m.email + ")" : m.full_name;
+    }
+
+    async function populateMemberPicker(idPrefix) {
+      const list = document.getElementById(idPrefix + "MembersList");
+      if (!list) return;
+      const members = await ensureTeamMembers();
+      list.innerHTML = members.map((m) => (
+        '<option value="' + escapeHtml(memberOptionLabel(m)) + '"></option>'
+      )).join("");
+    }
+
     function buildPlaceholderHtml(tab, data) {
       const items = data.items || [];
       const isAppTab = tab === "ai-apps" || tab === "it-apps";
@@ -807,6 +858,7 @@
         extra = (
           '<p class="progress" style="margin-top:4px;">Promote an existing team member to admin — they must ' +
             'have signed in via Teams at least once before they can be promoted.</p>' +
+          buildMemberPickerHtml("admin") +
           '<div class="perm-chips">' +
             '<label class="perm-chip"><input type="checkbox" id="permApproveApps" checked /> Approve Apps</label>' +
             '<label class="perm-chip"><input type="checkbox" id="permAccessCards" checked /> Access Cards</label>' +
@@ -822,6 +874,7 @@
         extra = (
           '<p class="progress" style="margin-top:4px;">Issue a licence to a team member — they get the ' +
             'reference cards and can request more for their channel. No Admin Center access.</p>' +
+          buildMemberPickerHtml("user") +
           '<div class="invite-row">' +
             '<input id="inviteName" type="text" placeholder="Full name" />' +
             '<input id="inviteEmail" type="email" placeholder="name@company.com" />' +
@@ -975,6 +1028,8 @@
       setUserChip(payload);
       setActiveNav(tab);
       applyUserToNav();
+      if (tab === "add-user") populateMemberPicker("user");
+      if (tab === "add-admin") populateMemberPicker("admin");
     }
 
     async function resolveUserFromTeams() {
@@ -1075,6 +1130,36 @@
     });
 
     document.addEventListener("click", (e) => {
+      const fetchDetailsBtn = e.target.closest("[data-fetch-details]");
+      if (fetchDetailsBtn) {
+        const idPrefix = fetchDetailsBtn.getAttribute("data-fetch-details");
+        const pickInput = document.getElementById(idPrefix + "PickMember");
+        const msg = document.getElementById(idPrefix + "PickMsg");
+        const raw = (pickInput && pickInput.value || "").trim();
+        if (!raw) {
+          if (msg) msg.textContent = "Start typing a name to pick from the Teams roster.";
+          return;
+        }
+        const match = raw.match(/^(.*)\s\(([^)]+)\)$/);
+        const fullName = match ? match[1].trim() : raw;
+        const email = match ? match[2].trim() : "";
+        if (!email) {
+          if (msg) msg.textContent = "Pick a name from the suggested list, or use manual entry below.";
+          return;
+        }
+        if (idPrefix === "user") {
+          const nameField = document.getElementById("inviteName");
+          const emailField = document.getElementById("inviteEmail");
+          if (nameField) nameField.value = fullName;
+          if (emailField) emailField.value = email;
+        } else if (idPrefix === "admin") {
+          const emailField = document.getElementById("promoteAdminEmail");
+          if (emailField) emailField.value = email;
+        }
+        if (msg) msg.textContent = "Fetched details for " + (fullName || email) + " — review below and submit.";
+        return;
+      }
+
       const nextLink = e.target.closest("#nextLink");
       if (nextLink) {
         e.preventDefault();

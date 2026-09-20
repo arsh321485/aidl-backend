@@ -1,3 +1,8 @@
-i am developing an application which runs inside MS teams
-When ever I click a tab inside teams, it redirects me to another external page. 
-I want to enable all functions inside the teams only and not on external website
+In my AIDL project, I want the member invitation and addition process to happen entirely within Microsoft Teams. When I add or invite a member, I don’t want them to be redirected to a new tab or another UI/link. Instead, I want you to create tabs within Microsoft Teams itself so that everything can be managed there without needing to open or work on any separate link.
+
+This should be possible because my colleague has implemented something similar in the VAPTfix project directly within Microsoft Teams. I’ll also provide you with screenshots/images of their implementation so you can use them as a reference and create a proper, integrated UI for my AIDL project within Microsoft Teams as well.
+
+
+see first image when i add a member from here this is an ex of vaptfix okay than i go to teams tab of it and fetch the user details and from there the user can properly add so i want that type of fucntionality i dont want to go to an external link and from there than i can add user and do alll things than there is no need to use ms teams i want everything in ms teams it self 
+
+Also see the UI of every page of MS teams of vaptfix project it looks veryu nice and good please work on the UI also and all the integration of apis on admin properly 

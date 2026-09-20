@@ -174,6 +174,36 @@ def list_team_channels(access_token: str, team_id: str) -> list:
     return response.json().get("value") or []
 
 
+def list_team_members(access_token: str, team_id: str) -> list:
+    """List the AIDL Team's current roster (display name + email) for the
+    Admin Center's "pick someone already in this Teams team" picker — lets an
+    admin fetch a known member's details instead of typing them by hand.
+    Returns [] on any failure rather than raising, since this only powers an
+    optional autofill and should never block the manual-entry fallback."""
+    if not access_token or not team_id:
+        return []
+    url = f"{GRAPH_BASE}/teams/{team_id}/members"
+    try:
+        response = requests.get(url, headers=_graph_headers(access_token), timeout=20)
+        response.raise_for_status()
+        members = response.json().get("value") or []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("list team members failed for team %s: %s", team_id, exc)
+        return []
+
+    seen = set()
+    result = []
+    for member in members:
+        email = (member.get("email") or "").strip()
+        name = (member.get("displayName") or "").strip()
+        key = email.lower() or name.lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append({"full_name": name, "email": email})
+    return result
+
+
 def team_is_accessible(access_token: str, team_id: str) -> bool:
     """Return False when the team was deleted or the user lost access."""
     if not team_id:

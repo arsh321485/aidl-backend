@@ -683,6 +683,26 @@ def teams_invite_user(request):
     return Response(result)
 
 
+@api_view(["GET"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def teams_admin_team_members(request):
+    """
+    List members already in the caller's AIDL Teams team, for the Admin
+    Center's "pick someone already in this Teams team" picker on Add User /
+    Add Admin. Lets an admin fetch a known member's name + email instead of
+    typing them by hand, so the whole flow stays inside Teams with no
+    external link. Returns [] (not an error) if Graph is unreachable or the
+    caller has no usable token — the UI falls back to manual entry.
+    """
+    from .microsoft_auth import get_access_token_for_user, list_team_members
+
+    caller = request.user
+    access_token = get_access_token_for_user(caller)
+    members = list_team_members(access_token, caller.teams_team_id) if access_token else []
+    return Response({"ok": True, "members": members})
+
+
 @api_view(["POST"])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
