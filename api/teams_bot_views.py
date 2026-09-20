@@ -180,6 +180,25 @@ def _resolve_user(data: dict, activity: dict) -> tuple[AIDLUser | None, str, str
     return user, name, email
 
 
+def _reply_via_bot(activity: dict, reply: dict) -> None:
+    """Send `reply` back into the conversation a "message" activity came
+    from, via the Bot Framework Connector — the only way to actually reply
+    to a message (unlike invoke activities, Teams does not relay a message
+    handler's HTTP response body to the user). Best-effort: logs and gives
+    up silently rather than raising into the webhook response path."""
+    from .bot_framework_client import send_bot_activity
+
+    service_url = (activity.get("serviceUrl") or "").strip()
+    conversation_id = ((activity.get("conversation") or {}).get("id") or "").strip()
+    if not service_url or not conversation_id:
+        logger.warning("cannot reply: activity missing serviceUrl/conversation id")
+        return
+    reply.setdefault("replyToId", activity.get("id"))
+    result = send_bot_activity(service_url, conversation_id, reply)
+    if not result.get("ok"):
+        logger.warning("bot message reply failed: %s", result)
+
+
 def _capture_bot_conversation(activity: dict) -> None:
     """Persist this org's bot serviceUrl/tenantId so api/teams_messaging.py
     can post the Admin Center card as the bot (via api/bot_framework_client.py)
@@ -404,22 +423,29 @@ def teams_bot_messages(request):
         return Response({"ok": True})
 
     if activity_type == "message":
+        # A plain "message" activity's synchronous HTTP response body is NOT
+        # relayed to the user by Bot Framework/Teams — that shortcut only
+        # exists for "invoke" activities (adaptiveCard/action, task/fetch,
+        # handled above). A real reply here needs an outbound call to the
+        # Bot Framework Connector using THIS activity's own serviceUrl +
+        # conversation id — no stored org lookup needed, they're right here.
         text = ((activity.get("text") or "").strip().lower())
         data = {"action": "nav", "tab": "home"}
         if "admin" in text or "home" in text or "aidl" in text or text in {"hi", "hello", "help"}:
             card = _card_for_action(data, activity)
-            # Reply with Adaptive Card attachment
-            return Response(
-                {
-                    "type": "message",
-                    "attachments": [
-                        {
-                            "contentType": "application/vnd.microsoft.card.adaptive",
-                            "content": card,
-                        }
-                    ],
-                }
-            )
-        return Response({"type": "message", "text": "Type **home** to open AIDL Admin Center."})
+            reply = {
+                "type": "message",
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": card,
+                    }
+                ],
+            }
+        else:
+            reply = {"type": "message", "text": "Type **home** to open AIDL Admin Center."}
+
+        _reply_via_bot(activity, reply)
+        return Response({"ok": True})
 
     return Response({"ok": True})
