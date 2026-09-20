@@ -215,22 +215,6 @@ def _heading_block(payload: dict, tab: str, subtitle: str = "") -> list[dict]:
     return blocks
 
 
-def _add_admin_open_url(user, email: str) -> str:
-    """
-    Always the plain backend webpage. The Teams tab deep link (entity-based,
-    pointing at "aidl-add-admin") was tried and confirmed unreliable in
-    testing: all 6 Admin Center tabs are installed as the same built-in
-    "Website" tab type (com.microsoft.teamspace.tab.web) with different
-    entityIds, and Teams does not reliably disambiguate between them from a
-    deep link — it opened Home instead of Add Admin. Fixing that for real
-    would need a genuine custom Teams app (its own app id, static tabs in
-    the manifest, submitted to the tenant app catalog) which needs a new
-    admin-consent step — out of scope here. A plain https URL always opens
-    the right page, just in a new browser tab instead of staying in Teams.
-    """
-    return f"{_nav_base_url()}/tabs/add-admin/?email={email}"
-
-
 def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
     admin_count = payload.get("admin_count") or 0
     admin_seat_limit = payload.get("admin_seat_limit") or 0
@@ -276,19 +260,31 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
             "type": "ActionSet",
             "spacing": "Medium",
             "actions": [
+                # Task Module (in-app modal Teams renders itself) instead of
+                # Action.OpenUrl's external browser tab — keeps the whole
+                # add-admin flow, including "Fetch Details" from the Teams
+                # roster, inside Teams.
                 {
-                    "type": "Action.OpenUrl",
+                    "type": "Action.Submit",
                     "title": "Send Admin Invite",
                     "style": "positive",
-                    "url": _add_admin_open_url(user, email),
+                    "data": {
+                        "msteams": {"type": "task/fetch"},
+                        "action": "open_add_admin",
+                        "email": email,
+                    },
                 },
                 # Add User has its own tab in the Website Tab bar and
                 # admin.html, but not its own pill in this combined card (see
                 # _WELCOME_CARD_TABS) — this keeps it one tap away anyway.
                 {
-                    "type": "Action.OpenUrl",
+                    "type": "Action.Submit",
                     "title": "Add a Team Member instead",
-                    "url": _add_user_open_url(email),
+                    "data": {
+                        "msteams": {"type": "task/fetch"},
+                        "action": "open_add_user",
+                        "email": email,
+                    },
                 },
             ],
         },
@@ -303,11 +299,6 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
     ]
 
 
-def _add_user_open_url(email: str) -> str:
-    """Same reasoning as _add_admin_open_url — always the plain webpage."""
-    return f"{_nav_base_url()}/tabs/add-user/?email={email}"
-
-
 def _add_user_blocks(payload: dict) -> list[dict]:
     licences_issued = payload.get("licences_issued") or 0
     seats_purchased = payload.get("seats_purchased") or 0
@@ -319,11 +310,17 @@ def _add_user_blocks(payload: dict) -> list[dict]:
             "type": "ActionSet",
             "spacing": "Medium",
             "actions": [
+                # Task Module instead of Action.OpenUrl — stays inside Teams
+                # (see _add_admin_blocks above for the same fix).
                 {
-                    "type": "Action.OpenUrl",
+                    "type": "Action.Submit",
                     "title": "Issue Licence",
                     "style": "positive",
-                    "url": _add_user_open_url(email),
+                    "data": {
+                        "msteams": {"type": "task/fetch"},
+                        "action": "open_add_user",
+                        "email": email,
+                    },
                 }
             ],
         },
