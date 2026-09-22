@@ -12,7 +12,6 @@ ADMIN_TABS = (
     ("home", "Home", "🏠"),
     ("add-admin", "Add Admin", "🧑‍💼"),
     ("add-user", "Add User", "👤"),
-    ("policy", "Policy", "📄"),
     ("cards", "Cards", "💳"),
     ("ai-apps", "AI Apps", "🤖"),
     ("it-apps", "IT Apps", "💻"),
