@@ -399,6 +399,38 @@
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--aidl-purple) 22%, transparent);
       border-color: var(--aidl-purple);
     }
+    .field-group { margin-top: 16px; }
+    .field-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .4px;
+      text-transform: uppercase;
+      color: var(--aidl-muted);
+      margin-bottom: 6px;
+    }
+    .field-input {
+      width: 100%;
+      padding: 11px 16px;
+      border: 1px solid var(--aidl-border);
+      border-radius: 10px;
+      font-size: 13.5px;
+      background: var(--aidl-card);
+      color: var(--aidl-text);
+      transition: border-color .18s ease, box-shadow .18s ease;
+    }
+    .field-input:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--aidl-purple) 22%, transparent);
+      border-color: var(--aidl-purple);
+    }
+    .meta-line {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--aidl-border);
+      font-size: 12px;
+      color: var(--aidl-muted);
+    }
 
     /* ---- AI/IT Apps tabs: flat divider rows + colored status pill ---- */
     .app-list { margin-top: 4px; }
@@ -786,15 +818,21 @@
           '<p id="promoteAdminMsg" class="progress" style="margin-top:8px;"></p>'
         );
       } else if (tab === "add-user") {
+        const licencesIssued = data.licences_issued || 0;
+        const seatsPurchased = data.seats_purchased || 0;
         extra = (
-          '<p class="progress" style="margin-top:4px;">Issue a licence to a team member — they get the ' +
-            'reference cards and can request more for their channel. No Admin Center access.</p>' +
           buildMemberPickerHtml("user") +
-          '<div class="invite-row">' +
-            '<input id="inviteName" type="text" placeholder="Full name" />' +
-            '<input id="inviteEmail" type="email" placeholder="name@company.com" />' +
-            '<button type="button" class="btn primary" id="inviteBtn">Issue Licence</button>' +
+          '<div class="field-group">' +
+            '<label class="field-label">Name</label>' +
+            '<input id="inviteName" type="text" class="field-input" placeholder="e.g. Arjun Mehta" />' +
           '</div>' +
+          '<div class="field-group">' +
+            '<label class="field-label">Email or Teams Handle</label>' +
+            '<input id="inviteEmail" type="email" class="field-input" placeholder="e.g. arjun@northwind.co" />' +
+          '</div>' +
+          '<button type="button" class="btn primary" id="inviteBtn" style="margin-top:18px;">Issue Licence</button>' +
+          '<p class="meta-line">' + licencesIssued + ' of ' + seatsPurchased + ' licences issued' +
+            (data.email ? ' · ' + escapeHtml(data.email) : '') + '</p>' +
           '<p id="inviteMsg" class="progress" style="margin-top:8px;"></p>'
         );
       } else if (tab === "ai-apps" || tab === "it-apps") {

@@ -521,7 +521,6 @@ def build_admin_tab_payload(
             **base,
             "title": "Add User",
             "body": (
-                f"{metrics['licences_issued']} of {metrics['seats_purchased']} licences issued. "
                 "Issue a licence to a team member — they get the reference cards and can request "
                 "more for their channel. No Admin Center access."
             ),
