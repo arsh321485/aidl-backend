@@ -1,5 +1,7 @@
 """Adaptive Card JSON builders for AIDL Microsoft Teams tabs."""
 
+from urllib.parse import quote
+
 from django.conf import settings
 
 TEAMS_TABS = (
@@ -78,6 +80,21 @@ def _tabs_base_url() -> str:
     return "https://aidl-backend.onrender.com/api/teams"
 
 
+def _teams_dialog_url(url: str, title: str) -> str:
+    """Wrap a webpage URL as a Teams task-module deep link so tapping a nav
+    pill opens teams/tab.html inside Teams instead of the external browser —
+    same fix and same reason as teams_adaptive_admin._teams_dialog_url
+    (tab.html also calls microsoftTeams.app.initialize()/notifySuccess()
+    expecting a Teams host). Duplicated rather than imported to avoid a
+    circular import (teams_adaptive_admin already imports from this module)."""
+    app_id = (getattr(settings, "MS_BOT_APP_ID", None) or "aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2").strip()
+    return (
+        "https://teams.microsoft.com/l/task/" + quote(app_id, safe="")
+        + "?url=" + quote(url, safe="")
+        + "&height=large&width=large&title=" + quote(title, safe="")
+    )
+
+
 def _header_block(org_name: str) -> dict:
     return {
         "type": "ColumnSet",
@@ -139,7 +156,7 @@ def _nav_row(active_tab: str) -> dict:
                 "width": "auto",
                 "selectAction": {
                     "type": "Action.OpenUrl",
-                    "url": f"{base}/tabs/{tab_id}/",
+                    "url": _teams_dialog_url(f"{base}/tabs/{tab_id}/", label),
                 },
                 "items": [
                     {
