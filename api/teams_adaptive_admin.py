@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from django.conf import settings
 
 from .cards_catalog_data import CARD_CATALOG
@@ -38,6 +40,21 @@ def _nav_base_url() -> str:
     if configured:
         return configured.rstrip("/")
     return "https://aidl-backend.onrender.com/api/teams"
+
+
+def _teams_dialog_url(url: str, title: str) -> str:
+    """Wrap a webpage URL as a Teams task-module deep link so tapping the
+    button opens admin.html inside Teams (which it expects — it calls
+    microsoftTeams.app.initialize()/notifySuccess(), see admin.html's
+    resolveUserFromTeams()) instead of the external browser. Teams resolves
+    this link client-side, so — unlike Action.Execute/task-fetch — it needs
+    no bot conversation and works from a Graph-posted card too."""
+    app_id = (getattr(settings, "MS_BOT_APP_ID", None) or "aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2").strip()
+    return (
+        "https://teams.microsoft.com/l/task/" + quote(app_id, safe="")
+        + "?url=" + quote(url, safe="")
+        + "&height=large&width=large&title=" + quote(title, safe="")
+    )
 
 
 def _header(org_name: str) -> dict:
@@ -275,7 +292,7 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
                     "type": "Action.OpenUrl",
                     "title": "Send Admin Invite",
                     "style": "positive",
-                    "url": f"{_nav_base_url()}/tabs/add-admin/?email={email}",
+                    "url": _teams_dialog_url(f"{_nav_base_url()}/tabs/add-admin/?email={email}", "Add Admin"),
                 },
                 # Add User has its own tab in the Website Tab bar and
                 # admin.html, but not its own pill in this combined card (see
@@ -283,7 +300,7 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
                 {
                     "type": "Action.OpenUrl",
                     "title": "Add a Team Member instead",
-                    "url": f"{_nav_base_url()}/tabs/add-user/?email={email}",
+                    "url": _teams_dialog_url(f"{_nav_base_url()}/tabs/add-user/?email={email}", "Add User"),
                 },
             ],
         },
@@ -314,7 +331,7 @@ def _add_user_blocks(payload: dict) -> list[dict]:
                     "type": "Action.OpenUrl",
                     "title": "Issue Licence",
                     "style": "positive",
-                    "url": f"{_nav_base_url()}/tabs/add-user/?email={email}",
+                    "url": _teams_dialog_url(f"{_nav_base_url()}/tabs/add-user/?email={email}", "Add User"),
                 }
             ],
         },
