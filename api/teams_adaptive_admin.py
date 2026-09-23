@@ -220,13 +220,15 @@ def _add_admin_blocks(payload: dict, user=None) -> list[dict]:
     admin_seat_limit = payload.get("admin_seat_limit") or 0
     email = payload.get("email") or "name@company.com"
 
-    # Each tile gets its own Adaptive Card container style so the three
-    # permissions read as distinct colored chips instead of one highlighted
-    # tile next to two blank ones.
+    # This card is display-only (see the Action.OpenUrl note below — no
+    # bot conversation is reachable for a Graph-posted card, so Teams can't
+    # give these tiles any tap-to-toggle behavior). All three get the same
+    # neutral style so they read as one consistent panel rather than
+    # looking like three different (but non-functional) toggle states.
     permission_tiles = [
-        ("Approve Apps", "Governance", "warning"),
-        ("Access Cards", "Reference cards", "accent"),
-        ("Create Card", "Add new cards", "good"),
+        ("Approve Apps", "Governance", "emphasis"),
+        ("Access Cards", "Reference cards", "emphasis"),
+        ("Create Card", "Add new cards", "emphasis"),
     ]
 
     def _tile(title: str, sub: str, style: str) -> dict:
