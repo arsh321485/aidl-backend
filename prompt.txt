@@ -1,1 +1,42 @@
-mene ye dala kuch bhi nhi hua message kha dalu kese kya kran hai btao
+We're trying to upload the AIDL Teams app package (manifest.json), and Teams is rejecting it with:
+
+▎ Invalid Bot — "Please make sure the bot is registered and Teams channel is enabled."
+
+This means there's no Azure Bot resource (or the Microsoft Teams channel isn't enabled on it) for the App ID we're using as the bot ID:
+
+App/Client ID: aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2
+
+Could you do the following in the Azure Portal?
+
+1. Go to portal.azure.com → search for "Azure Bot".
+2. Check if a bot resource already exists for App ID aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2.
+
+   If it exists:
+   - Open it → Channels (left menu) → add/enable the Microsoft Teams channel → Save.
+
+   If it does not exist, create one:
+   - + Create → Azure Bot
+   - Bot handle: any name, e.g. aidl-bot
+   - Subscription / Resource group: our existing one
+   - Pricing tier: F0 (free) is fine
+   - Microsoft App ID: choose "Use existing app registration", and enter:
+     - Client ID: aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2
+     - Tenant ID: our app's tenant ID
+   - Create the resource.
+3. Once created (or if it already existed), go to its Configuration tab and set the Messaging endpoint to:
+
+   https://aidl-backend.onrender.com/api/teams/bot/messages/
+
+   Click Apply.
+4. Go to the Channels tab and add/enable the Microsoft Teams channel. Save.
+
+Once this is done, please confirm — we'll re-upload the Teams app package and it should go through.
+
+
+
+
+this prompt you gave me yesterday for deploy engineer for adding this on azure portal so you gave me the zip file also is there need to give the zip file also to the deploy engineer 
+
+
+
+again give me a proper prompt so deploy engineer can easily add this on azure portal

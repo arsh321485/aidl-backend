@@ -17,8 +17,9 @@ Backend-AIDL-Project/
 ├── requirements.txt
 ├── config/                 # Django settings + urls
 ├── api/
-│   ├── models.py           # AIDLUser, OAuthState
-│   ├── auth_views.py       # Teams login/callback/me
+│   ├── models.py           # AIDLUser, Organization, ...
+│   ├── serializers.py      # SignupSerializer, LoginSerializer, AIDLUserSerializer
+│   ├── auth_views.py       # website signup/login + Teams login/callback/me
 │   ├── microsoft_auth.py
 │   ├── auth_jwt.py
 │   ├── views.py
@@ -45,6 +46,55 @@ Frontend local API base:
 ```env
 VITE_API_BASE=http://localhost:8000
 ```
+
+## Website signup / login APIs (for frontend)
+
+| Method | Endpoint | Auth | Notes |
+|--------|----------|------|-------|
+| POST | `/api/auth/signup/` | none | create account, returns JWTs + user |
+| POST | `/api/auth/signin/` | none | email + password + enroll_as, returns JWTs + user |
+| POST | `/api/auth/login/` | none | same as signin (alias) |
+| GET | `/api/auth/me/` | Bearer | current user profile |
+| POST | `/api/auth/refresh/` | none | body: `refresh_token` |
+| POST | `/api/auth/logout/` | none | client deletes tokens |
+
+Local: `http://localhost:8000/api/auth/signup/`  
+Production: `https://aidl-backend.onrender.com/api/auth/signup/`
+
+`POST /api/auth/signup/` JSON body:
+
+```json
+{
+  "enroll_as": "individual",
+  "first_name": "Alex",
+  "last_name": "Morgan",
+  "email": "alex@company.com",
+  "password": "CreateA-StrongPass1",
+  "confirm_password": "CreateA-StrongPass1",
+  "mobile_number": "+15550000000",
+  "country": "United States",
+  "state": "California",
+  "city": "San Francisco",
+  "license_class": "class_l",
+  "organization_name": ""
+}
+```
+
+For organization signup set `"enroll_as": "organization"` and send `organization_name`.
+
+`201` success shape:
+
+```json
+{
+  "message": "Account created successfully.",
+  "access_token": "<jwt>",
+  "refresh_token": "<jwt>",
+  "token_type": "Bearer",
+  "user": { "id": "...", "email": "alex@company.com", "enroll_as": "individual" }
+}
+```
+
+Store `access_token` and send it as `Authorization: Bearer <access_token>` on later calls.
 
 ## Teams auth APIs (for frontend)
 

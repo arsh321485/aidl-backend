@@ -17,12 +17,14 @@ class AIDLUserAdmin(admin.ModelAdmin):
         "full_name",
         "enroll_as",
         "provider",
+        "country",
+        "license_class",
         "is_active",
         "last_login_at",
         "created_at",
     )
-    list_filter = ("enroll_as", "provider", "is_active")
-    search_fields = ("email", "full_name", "microsoft_id")
+    list_filter = ("enroll_as", "provider", "license_class", "is_active")
+    search_fields = ("email", "full_name", "first_name", "last_name", "mobile_number", "microsoft_id")
 
 
 @admin.register(OAuthState)

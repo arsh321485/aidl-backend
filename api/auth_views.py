@@ -27,7 +27,7 @@ from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
 from .org_service import ensure_organization_for_login, replace_welcome_card
 from .models import AIDLUser, Invitation
-from .serializers import AIDLUserSerializer
+from .serializers import AIDLUserSerializer, LoginSerializer, SignupSerializer
 
 
 class JWTAuthentication(BaseAuthentication):
@@ -478,6 +478,55 @@ def me(request):
     )
     data["teams_connected"] = True
     return Response(data)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def signup(request):
+    """
+    Website registration (Individual / Organization).
+    Body matches the public signup form. Returns JWT tokens + user.
+    """
+    serializer = SignupSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
+
+    if user.enroll_as == AIDLUser.EnrollAs.ORGANIZATION:
+        try:
+            ensure_organization_for_login(user, org_name=user.organization_name)
+            user.refresh_from_db()
+        except Exception as exc:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "website signup org bootstrap failed: %s", exc
+            )
+
+    user.last_login_at = timezone.now()
+    user.save(update_fields=["last_login_at", "updated_at"])
+    payload = _issue_tokens(user)
+    payload["message"] = "Account created successfully."
+    return Response(payload, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def login(request):
+    """
+    Website sign-in (Individual / Organization).
+    Body: enroll_as, email, password. Returns JWT tokens + user.
+    """
+    serializer = LoginSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.validated_data["user"]
+    user.last_login_at = timezone.now()
+    user.save(update_fields=["last_login_at", "updated_at"])
+    payload = _issue_tokens(user)
+    payload["message"] = "Signed in successfully."
+    return Response(payload)
+
+
+signin = login
 
 
 @api_view(["POST"])

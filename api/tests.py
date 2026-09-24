@@ -524,3 +524,122 @@ class BotAdaptiveCardActionsTests(TestCase):
         first_block = resp.data["value"]["body"][0]
         self.assertEqual(first_block["style"], "attention")
         self.assertFalse(RegisteredApp.objects.filter(name="Should Not Save").exists())
+
+
+class WebsiteSignupTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.payload = {
+            "enroll_as": "individual",
+            "first_name": "Alex",
+            "last_name": "Morgan",
+            "email": f"alex.{uuid.uuid4().hex[:8]}@company.com",
+            "password": "CreateA-StrongPass9",
+            "confirm_password": "CreateA-StrongPass9",
+            "mobile_number": "+15550000000",
+            "country": "United States",
+            "state": "California",
+            "city": "San Francisco",
+            "license_class": "class_l",
+        }
+
+    def test_individual_signup_returns_tokens(self):
+        resp = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertIn("access_token", resp.data)
+        self.assertIn("refresh_token", resp.data)
+        self.assertEqual(resp.data["token_type"], "Bearer")
+        self.assertNotIn("password", resp.data)
+        self.assertNotIn("password_hash", resp.data.get("user") or {})
+        user = AIDLUser.objects.get(email=self.payload["email"])
+        self.assertEqual(user.provider, "website")
+        self.assertEqual(user.role, AIDLUser.Role.LEARNER)
+        self.assertEqual(user.license_class, AIDLUser.LicenseClass.CLASS_L)
+        self.assertTrue(user.check_password(self.payload["password"]))
+        self.assertTrue(user.microsoft_id.startswith("local:"))
+
+    def test_organization_signup_creates_org_and_admin(self):
+        self.payload["enroll_as"] = "organization"
+        self.payload["organization_name"] = f"Northwind {uuid.uuid4().hex[:6]}"
+        resp = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        user = AIDLUser.objects.get(email=self.payload["email"])
+        self.assertEqual(user.role, AIDLUser.Role.ADMIN)
+        self.assertTrue(user.organization_id)
+        self.assertEqual(user.organization_name, self.payload["organization_name"])
+        self.assertTrue(Organization.objects.filter(pk=user.organization_id).exists())
+
+    def test_duplicate_email_rejected(self):
+        first = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(first.status_code, 201, first.content)
+        again = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(again.status_code, 400)
+        self.assertIn("email", again.data)
+
+    def test_password_mismatch_rejected(self):
+        self.payload["confirm_password"] = "Different-Pass99"
+        resp = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("confirm_password", resp.data)
+
+    def test_missing_required_fields_rejected(self):
+        resp = self.client.post("/api/auth/signup/", {"email": "only@x.com"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("first_name", resp.data)
+        self.assertIn("password", resp.data)
+
+    def test_organization_requires_name(self):
+        self.payload["enroll_as"] = "organization"
+        self.payload["organization_name"] = ""
+        resp = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("organization_name", resp.data)
+
+    def test_login_and_me_after_signup(self):
+        created = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(created.status_code, 201, created.content)
+        login = self.client.post(
+            "/api/auth/signin/",
+            {
+                "enroll_as": "individual",
+                "email": self.payload["email"],
+                "password": self.payload["password"],
+            },
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200, login.content)
+        self.assertEqual(login.data["message"], "Signed in successfully.")
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + login.data["access_token"])
+        me = self.client.get("/api/auth/me/")
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.data["email"], self.payload["email"])
+        self.assertEqual(me.data["first_name"], "Alex")
+
+    def test_wrong_password_login_rejected(self):
+        created = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(created.status_code, 201, created.content)
+        resp = self.client.post(
+            "/api/auth/signin/",
+            {
+                "enroll_as": "individual",
+                "email": self.payload["email"],
+                "password": "Wrong-Password99",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_signin_wrong_enroll_as_rejected(self):
+        created = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(created.status_code, 201, created.content)
+        resp = self.client.post(
+            "/api/auth/signin/",
+            {
+                "enroll_as": "organization",
+                "email": self.payload["email"],
+                "password": self.payload["password"],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("enroll_as", resp.data)
