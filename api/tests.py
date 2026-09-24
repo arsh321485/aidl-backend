@@ -4,6 +4,7 @@ invite-email HTML-link regression."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import timedelta
 from unittest.mock import patch
@@ -15,7 +16,7 @@ from unittest.mock import patch
 # TransactionTestCase run finished in ~12s/test. TransactionTestCase instead
 # flushes collections after each test, which is slower per-test but actually
 # completes.
-from django.test import TransactionTestCase as TestCase
+from django.test import SimpleTestCase, TransactionTestCase as TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -653,3 +654,68 @@ class WebsiteSignupTests(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
         self.assertIn("enroll_as", resp.data)
+
+
+class LocationApiTests(SimpleTestCase):
+    """Signup-form dropdowns — served from the bundled dataset, no DB."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_countries_list(self):
+        resp = self.client.get("/api/locations/countries/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertGreater(resp.data["count"], 200)
+        us = next(c for c in resp.data["results"] if c["code"] == "US")
+        self.assertEqual(us["name"], "United States")
+        self.assertEqual(us["phone_code"], "+1")
+
+    def test_states_by_code_or_name(self):
+        by_code = self.client.get("/api/locations/states/", {"country": "us"})
+        by_name = self.client.get("/api/locations/states/", {"country": "United States"})
+        self.assertEqual(by_code.status_code, 200, by_code.content)
+        self.assertEqual(by_code.data["results"], by_name.data["results"])
+        self.assertIn({"code": "CA", "name": "California"}, by_code.data["results"])
+
+    def test_cities_for_state(self):
+        resp = self.client.get("/api/locations/cities/", {"country": "US", "state": "California"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["state"]["code"], "CA")
+        self.assertIn({"name": "San Francisco"}, resp.data["results"])
+
+    def test_missing_params_rejected(self):
+        self.assertEqual(self.client.get("/api/locations/states/").status_code, 400)
+        resp = self.client.get("/api/locations/cities/", {"country": "US"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_unknown_country_or_state_404(self):
+        resp = self.client.get("/api/locations/states/", {"country": "Atlantis"})
+        self.assertEqual(resp.status_code, 404)
+        resp = self.client.get("/api/locations/cities/", {"country": "US", "state": "Nowhere"})
+        self.assertEqual(resp.status_code, 404)
+
+
+class ApiDocsTests(SimpleTestCase):
+    """Swagger UI / ReDoc / OpenAPI schema are served and cover the key APIs."""
+
+    def test_docs_pages_render(self):
+        for url in ("/api/docs/", "/api/redoc/"):
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200, url)
+
+    def test_schema_documents_frontend_apis(self):
+        resp = self.client.get("/api/schema/?format=json")
+        self.assertEqual(resp.status_code, 200)
+        schema = json.loads(resp.content)
+        paths = schema["paths"]
+        for path in (
+            "/api/auth/signup/",
+            "/api/auth/signin/",
+            "/api/auth/me/",
+            "/api/locations/countries/",
+            "/api/locations/states/",
+            "/api/locations/cities/",
+        ):
+            self.assertIn(path, paths)
+        self.assertEqual(paths["/api/auth/me/"]["get"]["security"], [{"BearerAuth": []}])
+        self.assertIn("SignupRequest", schema["components"]["schemas"])

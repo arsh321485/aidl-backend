@@ -175,6 +175,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_spectacular",
     "corsheaders",
     "api",
 ]
@@ -276,4 +277,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
+    "DEFAULT_SCHEMA_CLASS": "api.schema.AIDLAutoSchema",
+}
+
+# Swagger / OpenAPI — /api/docs/ (Swagger UI), /api/redoc/, /api/schema/
+SPECTACULAR_SETTINGS = {
+    "TITLE": "AIDL API",
+    "DESCRIPTION": (
+        "AIDL backend — website signup/login, signup-form locations, "
+        "Microsoft Teams auth and the Teams admin app.\n\n"
+        "Protected endpoints take `Authorization: Bearer <access_token>` "
+        "from `/api/auth/signup/` or `/api/auth/signin/` — click **Authorize**."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SWAGGER_UI_SETTINGS": {"persistAuthorization": True},
 }
