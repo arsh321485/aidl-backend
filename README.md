@@ -94,6 +94,8 @@ For organization signup set `"enroll_as": "organization"` and send `organization
 }
 ```
 
+Password must be 8–128 characters and include uppercase, lowercase, a number, and a special character (`!@#$%^&*_-` etc.). It cannot be only numbers, a common password, or too similar to the name/email.
+
 Store `access_token` and send it as `Authorization: Bearer <access_token>` on later calls.
 
 ## Teams auth APIs (for frontend)

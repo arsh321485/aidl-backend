@@ -576,6 +576,16 @@ class WebsiteSignupTests(TestCase):
         self.assertEqual(again.status_code, 400)
         self.assertIn("email", again.data)
 
+    def test_password_complexity_required(self):
+        self.payload["password"] = "onlyletters"
+        self.payload["confirm_password"] = "onlyletters"
+        resp = self.client.post("/api/auth/signup/", self.payload, format="json")
+        self.assertEqual(resp.status_code, 400)
+        messages = " ".join(resp.data.get("password") or [])
+        self.assertIn("uppercase", messages.lower())
+        self.assertIn("number", messages.lower())
+        self.assertIn("special", messages.lower())
+
     def test_password_mismatch_rejected(self):
         self.payload["confirm_password"] = "Different-Pass99"
         resp = self.client.post("/api/auth/signup/", self.payload, format="json")

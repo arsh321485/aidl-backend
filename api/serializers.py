@@ -9,6 +9,23 @@ from .models import AIDLUser, Item
 
 _NAME_RE = re.compile(r"^[^\W\d_](?:[^\W\d_]|[ \-'.])*$", re.UNICODE)
 _MOBILE_RE = re.compile(r"^\+?[0-9][0-9\s\-()]{6,19}$")
+_PASSWORD_SPECIAL_RE = re.compile(r"[!@#$%^&*()_+\-=\[\]{}|;:',.<>?/`~\\]")
+
+
+def password_complexity_errors(password: str) -> list[str]:
+    errors = []
+    if not re.search(r"[A-Z]", password):
+        errors.append("Password must include at least one uppercase letter (A-Z).")
+    if not re.search(r"[a-z]", password):
+        errors.append("Password must include at least one lowercase letter (a-z).")
+    if not re.search(r"[0-9]", password):
+        errors.append("Password must include at least one number (0-9).")
+    if not _PASSWORD_SPECIAL_RE.search(password):
+        errors.append(
+            "Password must include at least one special character "
+            "(!@#$%^&*_- etc.)."
+        )
+    return errors
 _LICENSE_ALIASES = {
     "class_l": AIDLUser.LicenseClass.CLASS_L,
     "class l": AIDLUser.LicenseClass.CLASS_L,
@@ -171,10 +188,13 @@ class SignupSerializer(serializers.Serializer):
             last_name=attrs.get("last_name", ""),
             full_name=f"{attrs.get('first_name', '')} {attrs.get('last_name', '')}".strip(),
         )
+        password_errors = password_complexity_errors(password)
         try:
             validate_password(password, user=dummy)
         except DjangoValidationError as exc:
-            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
+            password_errors.extend(exc.messages)
+        if password_errors:
+            raise serializers.ValidationError({"password": password_errors})
 
         enroll_as = attrs.get("enroll_as") or AIDLUser.EnrollAs.INDIVIDUAL
         org_name = attrs.get("organization_name") or ""
