@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import connection
 from rest_framework import generics, status
+from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -8,6 +9,7 @@ from .models import Item
 from .serializers import ItemSerializer
 
 
+@extend_schema(summary="API index — links to every endpoint")
 @api_view(["GET"])
 def api_index(request):
     """List all APIs so frontend/dev can see Teams routes (not only health)."""
@@ -24,6 +26,9 @@ def api_index(request):
             },
             "endpoints": {
                 "health": request.build_absolute_uri("/api/health/"),
+                "swagger_docs": request.build_absolute_uri("/api/docs/"),
+                "redoc": request.build_absolute_uri("/api/redoc/"),
+                "openapi_schema": request.build_absolute_uri("/api/schema/"),
                 "teams_login": request.build_absolute_uri(
                     "/api/auth/teams/login/?enroll_as=organization"
                 ),
@@ -39,6 +44,11 @@ def api_index(request):
                 "me": request.build_absolute_uri("/api/auth/me/"),
                 "refresh": request.build_absolute_uri("/api/auth/refresh/"),
                 "logout": request.build_absolute_uri("/api/auth/logout/"),
+                "countries": request.build_absolute_uri("/api/locations/countries/"),
+                "states": request.build_absolute_uri("/api/locations/states/?country=US"),
+                "cities": request.build_absolute_uri(
+                    "/api/locations/cities/?country=US&state=CA"
+                ),
                 "items": request.build_absolute_uri("/api/items/"),
             },
             "teams_app": {
@@ -50,6 +60,7 @@ def api_index(request):
     )
 
 
+@extend_schema(summary="Health check (server + MongoDB)")
 @api_view(["GET"])
 def health_check(request):
     mongo_ok = False

@@ -5,6 +5,8 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -27,6 +29,7 @@ from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
 from .org_service import ensure_organization_for_login, replace_welcome_card
 from .models import AIDLUser, Invitation
+from .schema import AuthResponseDoc, ErrorDoc, MeDoc, MessageDoc, RefreshRequestDoc, TokenPairDoc
 from .serializers import AIDLUserSerializer, LoginSerializer, SignupSerializer
 
 
@@ -199,6 +202,11 @@ def _redirect_with_tokens(
     return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
 
 
+@extend_schema(
+    summary="Redirect straight to Microsoft sign-in",
+    parameters=[OpenApiParameter("enroll_as", str, enum=["individual", "organization"], default="individual")],
+    responses={302: OpenApiResponse(description="Redirect to Microsoft login"), 503: ErrorDoc},
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def teams_login_redirect(request):
@@ -217,6 +225,11 @@ def teams_login_redirect(request):
     return HttpResponseRedirect(data["auth_url"])
 
 
+@extend_schema(
+    summary="Start Microsoft / Teams login (returns auth_url)",
+    parameters=[OpenApiParameter("enroll_as", str, enum=["individual", "organization"], default="individual")],
+    responses={200: OpenApiTypes.OBJECT, 503: OpenApiTypes.OBJECT},
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def teams_login(request):
@@ -264,6 +277,10 @@ def teams_login(request):
     return Response(data)
 
 
+@extend_schema(
+    summary="Microsoft OAuth callback — do not call from the frontend",
+    responses={302: OpenApiResponse(description="Redirect to AUTH_SUCCESS_REDIRECT with tokens")},
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def teams_callback(request):
@@ -413,6 +430,7 @@ def teams_callback(request):
     )
 
 
+@extend_schema(summary="Teams launch URL for the signed-in user", responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
@@ -455,6 +473,7 @@ def teams_launch(request):
     )
 
 
+@extend_schema(summary="Current user profile", responses=MeDoc)
 @api_view(["GET"])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
@@ -480,6 +499,14 @@ def me(request):
     return Response(data)
 
 
+@extend_schema(
+    summary="Website signup (Individual / Organization)",
+    request=SignupSerializer,
+    responses={
+        201: AuthResponseDoc,
+        400: OpenApiResponse(OpenApiTypes.OBJECT, description="Field errors, e.g. {\"email\": [\"...\"]}"),
+    },
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def signup(request):
@@ -509,6 +536,14 @@ def signup(request):
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    summary="Website sign-in (also served at /api/auth/login/)",
+    request=LoginSerializer,
+    responses={
+        200: AuthResponseDoc,
+        400: OpenApiResponse(OpenApiTypes.OBJECT, description="Field errors, e.g. {\"password\": [\"Incorrect password.\"]}"),
+    },
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def login(request):
@@ -529,6 +564,11 @@ def login(request):
 signin = login
 
 
+@extend_schema(
+    summary="Exchange a refresh token for a new token pair",
+    request=RefreshRequestDoc,
+    responses={200: TokenPairDoc, 400: ErrorDoc, 401: ErrorDoc},
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def refresh(request):
@@ -560,6 +600,7 @@ def refresh(request):
     )
 
 
+@extend_schema(summary="Logout (client deletes its tokens)", request=None, responses=MessageDoc)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def logout(request):

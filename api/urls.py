@@ -1,10 +1,15 @@
 from django.urls import path
+from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from . import auth_views, teams_admin_extra_views, teams_app_views, teams_bot_views, views
+from . import auth_views, location_views, teams_admin_extra_views, teams_app_views, teams_bot_views, views
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
     path("health/", views.health_check, name="health-check"),
+    # Swagger / OpenAPI docs
+    path("schema/", SpectacularAPIView.as_view(), name="api-schema"),
+    path("docs/", SpectacularSwaggerView.as_view(url_name="api-schema"), name="api-docs"),
+    path("redoc/", SpectacularRedocView.as_view(url_name="api-schema"), name="api-redoc"),
     path("items/", views.ItemListCreateView.as_view(), name="item-list-create"),
     path("items/<str:pk>/", views.ItemDetailView.as_view(), name="item-detail"),
     # Teams / Microsoft auth
@@ -28,6 +33,10 @@ urlpatterns = [
     path("auth/me/", auth_views.me, name="auth-me"),
     path("auth/refresh/", auth_views.refresh, name="auth-refresh"),
     path("auth/logout/", auth_views.logout, name="auth-logout"),
+    # Signup form dropdowns — Country -> State -> City
+    path("locations/countries/", location_views.countries, name="location-countries"),
+    path("locations/states/", location_views.states, name="location-states"),
+    path("locations/cities/", location_views.cities, name="location-cities"),
     # AIDL Teams app — menu tabs + Adaptive Cards
     path("teams/", teams_app_views.teams_app_index, name="teams-app-index"),
     path(

@@ -34,3 +34,6 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .mypy_cache/
+
+# Generated OpenAPI schema (served live at /api/schema/)
+schema.yml
