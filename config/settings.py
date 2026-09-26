@@ -37,6 +37,30 @@ AUTH_SUCCESS_REDIRECT = os.getenv(
 
 # Microsoft / Teams OAuth (Azure Entra ID)
 # Supports both MS_* and MICROSOFT_* env names.
+# Sign in with Slack (OpenID Connect). Slack only accepts https redirect
+# URLs, so local testing needs a tunnel (ngrok) — set SLACK_REDIRECT_URI to it.
+SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
+SLACK_REDIRECT_URI = os.getenv(
+    "SLACK_REDIRECT_URI",
+    "https://aidl-backend.onrender.com/api/auth/slack/callback/",
+)
+SLACK_SCOPES = os.getenv("SLACK_SCOPES", "openid,email,profile")
+# Bot scopes for the organization "Add to Slack" install (guide section 7):
+# create/reuse #aidl, invite admins, post the Admin cards.
+SLACK_BOT_SCOPES = os.getenv(
+    "SLACK_BOT_SCOPES",
+    "channels:manage,channels:join,channels:read,chat:write,users:read,users:read.email,im:write",
+)
+# Slack channel names must be lowercase with no spaces ("AIDL Driving License"
+# → "aidl-driving-license").
+SLACK_CHANNEL_NAME = "-".join(os.getenv("SLACK_CHANNEL_NAME", "aidl").strip().lower().split())
+# Basic Information → Signing Secret; verifies button clicks sent to
+# /api/slack/interactions/.
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
+# Tests set this so ephemeral replies are sent inline instead of in a thread.
+SLACK_REPLY_SYNC = False
+
 # Default = production Render callback (override with localhost in local .env).
 _DEFAULT_MS_REDIRECT_URI = (
     "https://aidl-backend.onrender.com/api/auth/teams/callback/"

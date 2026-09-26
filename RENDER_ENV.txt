@@ -67,3 +67,18 @@ AIDL_ORG_DISPLAY_NAME=Northwind Logistics
 #   aidl_channel.auto_create_team → true
 #   aidl_channel.team_name → AIDL
 #   aidl_channel.channel_name → aidl dashboard
+
+# --- Sign in with Slack (api.slack.com → your app → OAuth & Permissions) ---
+# Redirect URL there must be exactly SLACK_REDIRECT_URI below.
+# User Token Scopes: openid, email, profile
+SLACK_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/slack/callback/
+# SLACK_CLIENT_ID=      (Slack app → Basic Information)
+# SLACK_CLIENT_SECRET=  (Slack app → Basic Information — keep secret)
+# Slack app → Basic Information → Signing Secret (verifies Admin card button clicks)
+# SLACK_SIGNING_SECRET=
+# Channel the Admin cards are posted in (lowercase, no spaces)
+SLACK_CHANNEL_NAME=aidl-driving-license
+# Slack app → Interactivity & Shortcuts → Request URL:
+#   https://aidl-backend.onrender.com/api/slack/interactions/
+# Slack app → OAuth & Permissions → Bot Token Scopes:
+#   channels:manage channels:join channels:read chat:write users:read users:read.email im:write

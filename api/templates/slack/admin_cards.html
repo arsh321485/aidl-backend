@@ -1,0 +1,739 @@
+{% extends "slack/base.html" %}
+{% block title %}AIDL · Admin Center{% endblock %}
+
+{% block styles %}
+  /* stat tiles — 3 / 4 across on wide screens, reflow to 2 or 1 on phones */
+  .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+  .stat-grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .stat { background: var(--cream); border-radius: 6px; padding: 10px 8px; text-align: center; }
+  .stat .k { font-size: 9.5px; font-weight: 800; letter-spacing: .3px; color: var(--muted); text-transform: uppercase; }
+  .stat .v { font-size: 22px; font-weight: 900; margin: 3px 0; font-variant-numeric: tabular-nums; }
+  .stat .s { font-size: 11px; color: var(--text-2); }
+  .stat.warn .v { color: var(--bad); }
+  .strip-label { margin: 14px 0 6px; }
+
+  .perm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 8px 0 4px; }
+  .perm-chip {
+    border: 2px solid var(--asphalt); border-radius: 6px; padding: 8px 10px; cursor: pointer;
+    background: #fff; text-align: left; min-height: 48px;
+  }
+  .perm-chip[aria-pressed="true"] { background: var(--sign-yellow); }
+  .perm-chip b { display: block; font-size: 13px; font-weight: 900; }
+  .perm-chip span { font-size: 11px; color: var(--muted); }
+
+  .quota-box { background: var(--cream); border-radius: 8px; padding: 14px; margin: 12px 0; }
+  .quota-num { font-size: 18px; font-weight: 900; font-family: "JetBrains Mono", monospace; margin-top: 4px; }
+  .quota-num b { color: var(--slack-green); }
+  .quota-num.full b { color: var(--bad); }
+  .quota-bar { height: 8px; border-radius: 4px; background: #E3DCC2; margin-top: 8px; overflow: hidden; }
+  .quota-fill { height: 100%; background: var(--slack-green); width: 0; transition: width .3s ease; }
+  .quota-avail { font-size: 12px; color: var(--muted); font-weight: 700; margin-top: 8px; }
+
+  .ref-item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px dashed var(--line); }
+  .ref-item:first-child { border-top: none; }
+  .ref-icon { font-size: 22px; width: 30px; text-align: center; flex-shrink: 0; line-height: 30px; }
+  .ref-body { flex: 1; min-width: 0; }
+  .ref-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .ref-title { font-size: 14.5px; font-weight: 900; }
+  .ref-kicker { margin: 2px 0 3px; font-size: 10px; }
+  .ref-desc { font-size: 13px; color: var(--text-2); line-height: 1.4; }
+  .ref-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+  .price-tag { font-size: 11px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; background: var(--cream); color: var(--asphalt); white-space: nowrap; }
+  .price-tag.requested { background: var(--ok-bg); color: var(--ok); }
+  .rating { font-size: 12px; font-weight: 700; color: #8A8D91; white-space: nowrap; }
+  .rating b { color: var(--text); }
+  .rating .star { color: #E0A800; }
+  .rec-badge { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; background: var(--sign-yellow); color: var(--asphalt); padding: 2px 6px; border-radius: 3px; vertical-align: 2px; margin-left: 4px; }
+  .price-tag.unavailable { background: #EEE; color: var(--text-2); }
+  .state-badge { font-size: 11.5px; font-weight: 800; color: var(--ok); white-space: nowrap; }
+  .state-badge.scheduled { color: var(--wait); }
+  .state-badge.pending { color: var(--muted); }
+  .ref-action { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+
+  .light-picker { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .light-check { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; cursor: pointer; }
+  .light-check + .light-check { border-top: 1px dashed var(--line); }
+  .light-check input { width: 18px; height: 18px; accent-color: var(--asphalt); margin-top: 2px; flex-shrink: 0; }
+  .light-check b { display: block; font-size: 13.5px; }
+  .light-check small { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+
+  .schedule-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 13.5px; font-weight: 700; }
+  .schedule-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; min-height: 32px; }
+  .schedule-row input[type="radio"] { width: 16px; height: 16px; accent-color: var(--asphalt); }
+  .sched-datetime { font-size: 13.5px; padding: 6px 8px; border-radius: 5px; border: 1px solid #BABCBF; min-height: 36px; }
+  .sched-datetime:disabled { opacity: .45; }
+
+  .app-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 4px; border: 0; border-top: 1px dashed var(--line);
+    width: 100%; background: none; text-align: left; cursor: pointer; color: inherit; min-height: 52px;
+  }
+  .app-list .app-row:first-child { border-top: none; }
+  .app-row:hover { background: rgba(0,0,0,.03); }
+  .app-name-col { flex: 1; min-width: 0; }
+  .app-name { font-size: 14px; font-weight: 900; }
+  .app-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; overflow-wrap: anywhere; }
+  .pill { font-size: 10px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; flex-shrink: 0; white-space: nowrap; }
+  .pill.approved { background: var(--ok-bg); color: var(--ok); }
+  .pill.prohibited { background: var(--bad-bg); color: var(--bad); }
+  .data-row { display: flex; align-items: center; gap: 10px; }
+  .data-row select { flex: 1; }
+
+  @media (max-width: 560px) {
+    .ref-head { flex-wrap: wrap; }
+    .stat-grid { gap: 6px; }
+    .stat-grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stat { padding: 9px 6px; }
+    .stat .k { font-size: 8.5px; }
+    .stat .v { font-size: 20px; }
+    .stat .s { font-size: 10px; }
+  }
+{% endblock %}
+
+{% block content %}
+<div class="card-tabs" role="tablist" aria-label="Admin Center">
+  {% for t in d.tab_defs %}
+  <button class="tab-btn" role="tab" data-tab="{{ t.id }}" aria-controls="card-{{ t.id }}" aria-selected="false">{{ t.icon }} {{ t.label }}</button>
+  {% endfor %}
+</div>
+
+{# ================= HOME — DEPOT OVERVIEW (guide 8.1) ================= #}
+<section class="card-section" id="card-home" role="tabpanel" hidden>
+  <h2 class="section-label">Shown the moment an admin opens your Admin Center <span>Depot Overview</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">👋 Welcome to your Admin Center, {{ d.admin_name }}</div>
+        <div class="section-text">You provision the seats, set the house rules, and keep everything running smoothly. Your team does the driving.</div>
+
+        <div class="stat-grid">
+          <div class="stat"><div class="k">Seats Purchased</div><div class="v">{{ d.seats_purchased }}</div><div class="s">renews {{ d.seats_renew }}</div></div>
+          <div class="stat"><div class="k">Licenses Issued</div><div class="v" id="statLicences">{{ d.licences_issued }}</div><div class="s" id="statLicencePct">{{ d.licence_pct }}% of enrolled</div></div>
+          <div class="stat{% if d.aup_warn %} warn{% endif %}"><div class="k">AUP Unsigned</div><div class="v">{{ d.aup_display }}</div><div class="s">blocks ethics gate</div></div>
+        </div>
+
+        <div class="label-caps strip-label">Governance Snapshot</div>
+        <div class="stat-grid cols-4">
+          <div class="stat"><div class="k">Total Admins</div><div class="v" id="statAdmins">{{ d.admin_count }}</div><div class="s">of {{ d.admin_seat_limit }} seats</div></div>
+          <div class="stat"><div class="k">Total Approved</div><div class="v" id="statApproved">{{ d.approved_apps }}</div><div class="s" id="statApprovedOf">of {{ d.total_apps }} apps</div></div>
+          <div class="stat"><div class="k">AI Applications</div><div class="v" id="statAi">{{ d.ai_apps|length }}</div><div class="s">in registry</div></div>
+          <div class="stat"><div class="k">IT Applications</div><div class="v" id="statIt">{{ d.it_apps|length }}</div><div class="s">in registry</div></div>
+        </div>
+
+        <div class="actions-row">
+          <button class="slack-btn" type="button" id="exportCsvBtn">⬇ Export Coverage CSV</button>
+        </div>
+        <div class="context-line">{{ d.rollout_done }} of {{ d.rollout_total }} rollout steps done · {{ d.org_name }}</div>
+        <div class="next-hint">{% if "add-admin" in d.tabs %}→ Next: bring in another admin to help run this{% else %}→ Next: open the tabs your permissions allow{% endif %}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if "add-admin" in d.tabs %}
+{# ================= ADD ADMIN (guide 8.2) ================= #}
+<section class="card-section" id="card-add-admin" role="tabpanel" hidden>
+  <h2 class="section-label">Optional, whenever you need a hand <span>Admin Team · Add more admins</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">🧑‍💼 Add another admin</div>
+        <div class="section-text">Give a colleague access to your Admin Center — choose exactly what they can see and do.</div>
+
+        <form id="addAdminForm" novalidate>
+          <div class="field">
+            <label class="label-caps" for="addAdminEmail">Admin's Email or Slack Handle</label>
+            <input type="text" id="addAdminEmail" autocomplete="email" placeholder="e.g. name@company.com or @name" />
+          </div>
+          <div class="label-caps strip-label">Permissions</div>
+          <div class="perm-grid">
+            <button type="button" class="perm-chip" data-perm="approve_apps" aria-pressed="true"><b>Approve Apps</b><span>Change the AI / IT registry</span></button>
+            <button type="button" class="perm-chip" data-perm="access_cards" aria-pressed="false"><b>Access Cards</b><span>View and send reference cards</span></button>
+            <button type="button" class="perm-chip" data-perm="create_card" aria-pressed="false"><b>Create Card</b><span>Request new cards</span></button>
+          </div>
+          <div class="actions-row">
+            <button class="slack-btn primary" type="submit">Send Admin Invite</button>
+          </div>
+        </form>
+        <div class="context-line" id="adminSeatsLine" aria-live="polite">{{ d.admin_count }} of {{ d.admin_seat_limit }} admin seats used</div>
+        <div class="next-hint">→ Next: add your team members</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if "add-user" in d.tabs %}
+{# ================= ADD USER — ISSUE A LICENSE (guide 8.3) ================= #}
+<section class="card-section" id="card-add-user" role="tabpanel" hidden>
+  <h2 class="section-label">Whenever a new team member joins <span>Team · Issue a license</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">👤 Add a team member</div>
+        <div class="section-text">Issue a license to a team member — they get the reference cards and can request more for their channel. No Admin Center access.</div>
+
+        <form id="addUserForm" novalidate>
+          <div class="field">
+            <label class="label-caps" for="addUserName">Name</label>
+            <input type="text" id="addUserName" autocomplete="name" placeholder="e.g. Arjun Mehta" />
+          </div>
+          <div class="field">
+            <label class="label-caps" for="addUserEmail">Email or Slack Handle</label>
+            <input type="text" id="addUserEmail" autocomplete="email" placeholder="e.g. arjun@company.com" />
+          </div>
+          <div class="actions-row">
+            <button class="slack-btn primary" type="submit">Issue License</button>
+          </div>
+        </form>
+        <div class="context-line" id="userLicencesLine" aria-live="polite">{{ d.licences_issued }} of {{ d.seats_purchased }} licenses issued</div>
+        <div class="next-hint">→ Next: send your team the reference cards they'll need</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if "cards" in d.tabs %}
+{# ================= CARDS (guide 8.4) ================= #}
+<section class="card-section" id="card-cards" role="tabpanel" hidden>
+  <h2 class="section-label">Send once your first team members are enrolled <span>Send Cards · 10 in 1</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">📬 Send Cards to your team</div>
+        <div class="section-text">Pick the reference cards your team needs at the wheel — view one, request it, then send it into the channel where they already work.</div>
+
+        <div class="quota-box">
+          <div class="label-caps">Monthly Card Quota</div>
+          <div class="quota-num" id="quotaNum"><b id="quotaVal">{{ d.quota_used }}</b> of {{ d.quota_max }} cards requested this month</div>
+          <div class="quota-bar" role="progressbar" aria-label="Monthly card quota" aria-valuemin="0" aria-valuemax="{{ d.quota_max }}" aria-valuenow="{{ d.quota_used }}" id="quotaBar"><div class="quota-fill" id="quotaFill"></div></div>
+          <div class="quota-avail">📅 All cards available {{ d.available_from }} – {{ d.available_to }}</div>
+        </div>
+
+        {% if d.can_manage_cards %}
+        <div id="refList">
+          {% for c in d.cards %}
+          <div class="ref-item" data-card="{{ c.id }}">
+            <span class="ref-icon" aria-hidden="true">{% if c.lights %}<span class="tl-icon"><span class="tl-dot on r"></span><span class="tl-dot on a"></span><span class="tl-dot on g"></span></span>{% else %}{{ c.icon }}{% endif %}</span>
+            <div class="ref-body">
+              <div class="ref-head">
+                <div class="ref-title">{{ c.title }}{% if c.recommended %} <span class="rec-badge">⭐ Recommended</span>{% endif %}</div>
+                <div class="ref-action">
+                  <button class="slack-btn sm" type="button" data-view-card="{{ c.id }}">View</button>
+                  <span class="state-badge" data-badge></span>
+                </div>
+              </div>
+              <div class="label-caps ref-kicker">{{ c.kicker }}</div>
+              <div class="ref-desc">{{ c.desc }}</div>
+              <div class="ref-meta">
+                <span class="price-tag" data-price>{{ c.price }} · one-time</span>
+                <span class="rating"><span class="star">★</span> <b>{{ c.rating }}</b> ({{ c.votes }})</span>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if d.can_create_card %}
+        <div class="label-caps strip-label">Need something that's not listed?</div>
+        <div class="section-text" style="margin-top: 0;">Request a brand-new reference card for your team — we'll scope it and follow up with pricing.</div>
+        <div id="customRequests"></div>
+        <div class="actions-row">
+          <button class="slack-btn" type="button" id="openRequestNew">＋ Request a New Card</button>
+        </div>
+        {% endif %}
+        <div class="next-hint">→ Next: set which AI tools your team is allowed to use</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if "ai-apps" in d.tabs %}
+{# ================= AI APPS + IT APPS (guide 8.5 / 8.6) ================= #}
+<section class="card-section" id="card-ai-apps" role="tabpanel" hidden>
+  <h2 class="section-label">Governance, set anytime · tap a row for its guidance <span>Approved Applications · AI</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">🤖 AI Applications</div>
+        <div class="section-text">The AI tools your team is allowed to use.</div>
+        <div class="app-list" id="appList-ai"></div>
+        <div class="actions-row"><button class="slack-btn" type="button" data-add-app="ai">＋ Add AI Application</button></div>
+        <div class="next-hint">→ Next: do the same for your IT systems</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if "it-apps" in d.tabs %}
+<section class="card-section" id="card-it-apps" role="tabpanel" hidden>
+  <h2 class="section-label">Same tab, second list · tap a row for its guidance <span>Approved Applications · IT</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">💻 IT Applications</div>
+        <div class="section-text">The IT systems your team is allowed to use alongside AI.</div>
+        <div class="app-list" id="appList-it"></div>
+        <div class="actions-row"><button class="slack-btn" type="button" data-add-app="it">＋ Add IT Application</button></div>
+        <div class="next-hint done">✓ That's the full admin setup flow</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{# ================= MODAL: reference card (view → request → send / schedule) ================= #}
+<div class="modal-backdrop" id="cardModal" role="dialog" aria-modal="true" aria-labelledby="cardModalTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="label-caps" id="cardModalKicker"></div>
+        <h3 id="cardModalTitle"></h3>
+      </div>
+      <button class="modal-close" type="button" data-close="cardModal" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="cardModalBody"></div>
+    <div class="modal-foot">
+      <div class="modal-foot-row" id="requestRow">
+        <span class="modal-status" id="cardPrice"></span>
+        <button class="slack-btn primary" type="button" id="requestCardBtn">Request Card</button>
+      </div>
+      <div id="sendControls">
+        <div class="schedule-row">
+          <label><input type="radio" name="sendWhen" value="now" checked> Send now</label>
+          <label><input type="radio" name="sendWhen" value="later"> Schedule for later</label>
+          <input type="datetime-local" id="scheduleAt" class="sched-datetime" aria-label="Send date and time" disabled />
+        </div>
+      </div>
+      <div class="modal-foot-row" id="sendRow">
+        <span class="modal-status" id="cardStatus" aria-live="polite">Not sent</span>
+        <button class="slack-btn primary" type="button" id="sendCardBtn">Send Card</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ================= MODAL: request a new card ================= #}
+<div class="modal-backdrop" id="requestNewModal" role="dialog" aria-modal="true" aria-labelledby="requestNewTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="label-caps">Custom Request</div><h3 id="requestNewTitle">Request a New Card</h3></div>
+      <button class="modal-close" type="button" data-close="requestNewModal" aria-label="Close">✕</button>
+    </div>
+    <form id="requestNewForm" novalidate>
+      <div class="modal-body">
+        <div class="field"><label class="label-caps" for="reqName">Card Name</label><input type="text" id="reqName" placeholder="e.g. Vendor Risk Checklist" /></div>
+        <div class="field"><label class="label-caps" for="reqDesc">What should it cover?</label><input type="text" id="reqDesc" placeholder="Brief description of the topic or guidance needed" /></div>
+        <div class="field"><label class="label-caps" for="reqPriority">Priority</label><select id="reqPriority"><option>Standard</option><option>Urgent</option></select></div>
+        <div class="warn-text" id="reqWarn" hidden></div>
+      </div>
+      <div class="modal-foot">
+        <div class="modal-foot-row">
+          <span class="modal-status">Counts toward your monthly quota · pricing scoped after review</span>
+          <button class="slack-btn primary" type="submit">Submit Request</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ================= MODAL: app guidance ================= #}
+<div class="modal-backdrop" id="appModal" role="dialog" aria-modal="true" aria-labelledby="appModalTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="label-caps" id="appModalEyebrow"></div><h3 id="appModalTitle"></h3></div>
+      <button class="modal-close" type="button" data-close="appModal" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-meta" id="appModalMeta"></div>
+    <div class="modal-body"><p id="appModalBody"></p></div>
+    <div class="modal-foot">
+      <div class="modal-foot-row">
+        <span class="modal-status" id="appModalStatus"></span>
+        <button class="slack-btn" type="button" data-close="appModal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ================= MODAL: add AI / IT application ================= #}
+<div class="modal-backdrop" id="addAppModal" role="dialog" aria-modal="true" aria-labelledby="addAppTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="label-caps">Governance · New Entry</div><h3 id="addAppTitle">Add AI Application</h3></div>
+      <button class="modal-close" type="button" data-close="addAppModal" aria-label="Close">✕</button>
+    </div>
+    <form id="addAppForm" novalidate>
+      <div class="modal-body">
+        <div class="field"><label class="label-caps" for="appName">Application Name</label><input type="text" id="appName" placeholder="e.g. Claude Enterprise" /></div>
+        <div class="field"><label class="label-caps" for="appCategory">Category</label><select id="appCategory"></select></div>
+        <div class="field">
+          <label class="label-caps" for="appData">Data Allowed</label>
+          <div class="data-row">
+            <select id="appData">
+              {% for opt in d.data_allowed %}<option value="{{ opt.label }}" data-dot="{{ opt.dot }}">{% if opt.dot == "g" %}🟢{% elif opt.dot == "a" %}🟡{% else %}🔴{% endif %} {{ opt.label }}</option>{% endfor %}
+            </select>
+            <span class="tl-icon" id="appDataIcon" aria-hidden="true"><span class="tl-dot r"></span><span class="tl-dot a"></span><span class="tl-dot g"></span></span>
+          </div>
+        </div>
+        <div class="field"><label class="label-caps" for="appStatus">Status</label><select id="appStatus"><option>Approved</option><option>Prohibited</option></select></div>
+      </div>
+      <div class="modal-foot">
+        <div class="modal-foot-row">
+          <span class="modal-status">Status drives whether your team can use this application</span>
+          <button class="slack-btn primary" type="submit">＋ Add</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ d|json_script:"admin-data" }}
+<script>
+(function () {
+  // All actions below follow the guide's conditions (sections 8.1–8.6). They
+  // update the cards in place; saving to the backend is the separate
+  // "[TO BUILD]" API work listed in guide section 2.8.
+  var D = JSON.parse(document.getElementById('admin-data').textContent);
+  var LIGHT_EMOJI = { green: '🟢', amber: '🟡', red: '🔴' };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function setText(id, value) { var el = $(id); if (el) el.textContent = value; }
+
+  /* ---------- Home: Export Coverage CSV (8.1) ---------- */
+  $('exportCsvBtn').addEventListener('click', function () {
+    if (D.demo) { toast('Export is available once your organization is connected.'); return; }
+    window.location.href = '/api/slack/cards/admin/coverage.csv' + window.location.search;
+  });
+
+  /* ---------- Add Admin (8.2) ---------- */
+  var adminForm = $('addAdminForm');
+  if (adminForm) {
+    adminForm.querySelectorAll('.perm-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chip.setAttribute('aria-pressed', chip.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+      });
+    });
+    adminForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var input = $('addAdminEmail');
+      var email = input.value.trim();
+      if (!email) { input.focus(); return; }
+      if (D.admin_count >= D.admin_seat_limit) {
+        setText('adminSeatsLine', D.admin_seat_limit + ' of ' + D.admin_seat_limit + ' admin seats used · no seats left');
+        return;
+      }
+      D.admin_count += 1;
+      setText('adminSeatsLine', D.admin_count + ' of ' + D.admin_seat_limit + ' admin seats used · invited ' + email);
+      setText('statAdmins', D.admin_count);
+      input.value = '';
+    });
+  }
+
+  /* ---------- Add User (8.3) ---------- */
+  var userForm = $('addUserForm');
+  if (userForm) {
+    userForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var nameInput = $('addUserName');
+      var emailInput = $('addUserEmail');
+      if (!nameInput.value.trim()) { nameInput.focus(); return; }
+      var email = emailInput.value.trim();
+      if (!email) { emailInput.focus(); return; }
+      if (D.licences_issued >= D.seats_purchased) {
+        setText('userLicencesLine', D.seats_purchased + ' of ' + D.seats_purchased + ' licenses issued · no seats left');
+        return;
+      }
+      D.licences_issued += 1;
+      D.enrolled += 1;
+      setText('userLicencesLine', D.licences_issued + ' of ' + D.seats_purchased + ' licenses issued · invited ' + email);
+      setText('statLicences', D.licences_issued);
+      setText('statLicencePct', Math.round(D.licences_issued / D.enrolled * 100) + '% of enrolled');
+      nameInput.value = '';
+      emailInput.value = '';
+    });
+  }
+
+  /* ---------- Cards (8.4) ---------- */
+  var cards = {};
+  D.cards.forEach(function (c) { c.lightsSent = ['green', 'amber', 'red']; cards[c.id] = c; });
+  var current = null;
+
+  function quotaFull() { return D.quota_used >= D.quota_max; }
+  function renderQuota() {
+    if (!$('quotaVal')) return;
+    setText('quotaVal', D.quota_used);
+    $('quotaNum').classList.toggle('full', quotaFull());
+    $('quotaFill').style.width = Math.min(100, D.quota_used / D.quota_max * 100) + '%';
+    $('quotaBar').setAttribute('aria-valuenow', D.quota_used);
+  }
+
+  function statusLabel(c) {
+    var lights = c.lights ? ' · ' + c.lightsSent.map(function (l) { return LIGHT_EMOJI[l]; }).join('') : '';
+    if (c.state === 'sent') return '✓ Sent' + lights;
+    if (c.state === 'scheduled') return '🕒 Scheduled — ' + c.scheduled_for + lights;
+    return 'Not sent';
+  }
+
+  function renderRow(c) {
+    var row = document.querySelector('.ref-item[data-card="' + c.id + '"]');
+    if (!row) return;
+    var price = row.querySelector('[data-price]');
+    var unavailable = c.state === 'unavailable';
+    var requested = c.state !== 'not_requested' && !unavailable;
+    price.textContent = unavailable ? 'Not available yet' : requested ? '✓ Requested' : c.price + ' · one-time';
+    price.classList.toggle('requested', requested);
+    price.classList.toggle('unavailable', unavailable);
+    var badge = row.querySelector('[data-badge]');
+    badge.textContent = c.state === 'sent' ? '✓ Sent' : c.state === 'scheduled' ? '🕒 Scheduled' : '';
+    badge.classList.toggle('scheduled', c.state === 'scheduled');
+  }
+
+  function lightPickerHtml() {
+    var defs = [
+      ['green', 'g', 'Green — Go', 'Public, non-personal prompts. Tells your team: any tool is fine, just check facts after.'],
+      ['amber', 'a', 'Amber — Caution', 'A little personal. Tells your team: use a placeholder or strip it out first.'],
+      ['red', 'r', 'Red — Stop', 'Private, keep it out. Tells your team: never paste it, anonymise and retry.']
+    ];
+    return '<div class="light-picker"><div class="label-caps">Choose which lights to send</div>' +
+      defs.map(function (l) {
+        var dots = ['r', 'a', 'g'].map(function (c) { return '<span class="tl-dot' + (c === l[1] ? ' on ' + c : '') + '"></span>'; }).join('');
+        return '<label class="light-check"><input type="checkbox" class="light-cb" value="' + l[0] + '"' +
+          (current.lightsSent.indexOf(l[0]) >= 0 ? ' checked' : '') + '><span class="tl-icon">' + dots + '</span>' +
+          '<span><b>' + l[2] + '</b><small>' + l[3] + '</small></span></label>';
+      }).join('') +
+      '<div class="warn-text" id="lightWarn" hidden>Select at least one light to send.</div></div>';
+  }
+
+  function renderModalFoot() {
+    var c = current;
+    var unavailable = c.state === 'unavailable';
+    var requested = c.state !== 'not_requested' && !unavailable;
+    var sent = c.state === 'sent';
+    $('requestRow').hidden = requested;
+    $('sendControls').hidden = !requested || sent;
+    $('sendRow').hidden = !requested;
+    $('sendCardBtn').hidden = sent;
+    var reqBtn = $('requestCardBtn');
+    reqBtn.disabled = unavailable || quotaFull();
+    reqBtn.textContent = unavailable ? 'Not available yet' : quotaFull() ? 'Monthly quota reached' : 'Request Card';
+    setText('cardStatus', statusLabel(c));
+    $('cardStatus').classList.toggle('ok', sent);
+  }
+
+  function updateSendLabel() {
+    var later = document.querySelector('input[name="sendWhen"]:checked').value === 'later';
+    $('scheduleAt').disabled = !later;
+    $('sendCardBtn').textContent = later ? 'Schedule Card' : 'Send Card';
+  }
+
+  document.querySelectorAll('[data-view-card]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      current = cards[btn.dataset.viewCard];
+      setText('cardModalKicker', current.kicker);
+      setText('cardModalTitle', current.icon + ' ' + current.title);
+      var body = $('cardModalBody');
+      body.innerHTML = '';
+      current.body.forEach(function (p) {
+        var el = document.createElement('p');
+        el.textContent = p;
+        body.appendChild(el);
+      });
+      if (current.lights && current.state !== 'sent') body.insertAdjacentHTML('beforeend', lightPickerHtml());
+      setText('cardPrice', current.price + ' · one-time');
+      document.querySelector('input[name="sendWhen"][value="now"]').checked = true;
+      $('scheduleAt').value = '';
+      updateSendLabel();
+      renderModalFoot();
+      openModal('cardModal');
+    });
+  });
+
+  if ($('cardModal')) {
+    document.querySelectorAll('input[name="sendWhen"]').forEach(function (r) { r.addEventListener('change', updateSendLabel); });
+    $('cardModalBody').addEventListener('change', function (e) {
+      if (e.target.classList.contains('light-cb')) $('lightWarn').hidden = true;
+    });
+
+    $('requestCardBtn').addEventListener('click', function () {
+      if (!current || current.state !== 'not_requested' || quotaFull()) return;
+      current.state = 'requested';
+      D.quota_used += 1;
+      renderQuota();
+      renderRow(current);
+      renderModalFoot();
+    });
+
+    $('sendCardBtn').addEventListener('click', function () {
+      var c = current;
+      if (!c || c.state === 'sent') return;
+      if (c.lights) {
+        var picked = Array.prototype.map.call(document.querySelectorAll('#cardModalBody .light-cb:checked'), function (cb) { return cb.value; });
+        if (!picked.length) { $('lightWarn').hidden = false; return; }
+        c.lightsSent = picked;
+      }
+      var later = document.querySelector('input[name="sendWhen"]:checked').value === 'later';
+      if (later) {
+        var at = $('scheduleAt');
+        if (!at.value) { at.focus(); return; }
+        var when = new Date(at.value);
+        c.state = 'scheduled';
+        c.scheduled_for = isNaN(when) ? at.value : when.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+      } else {
+        c.state = 'sent';
+        var picker = document.querySelector('#cardModalBody .light-picker');
+        if (picker) picker.remove();
+      }
+      renderRow(c);
+      renderModalFoot();
+    });
+  }
+
+  /* ---------- Request a New Card (8.4) ---------- */
+  if ($('openRequestNew')) {
+    $('openRequestNew').addEventListener('click', function () {
+      $('requestNewForm').reset();
+      $('reqWarn').hidden = true;
+      openModal('requestNewModal');
+    });
+    $('requestNewForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = $('reqName').value.trim();
+      if (!name) { $('reqName').focus(); return; }
+      if (quotaFull()) {
+        $('reqWarn').textContent = 'Monthly quota reached — new requests open next month.';
+        $('reqWarn').hidden = false;
+        return;
+      }
+      D.quota_used += 1;
+      renderQuota();
+      var row = document.createElement('div');
+      row.className = 'ref-item';
+      row.innerHTML = '<span class="ref-icon" aria-hidden="true">🆕</span><div class="ref-body"><div class="ref-head">' +
+        '<div class="ref-title"></div><div class="ref-action"><span class="state-badge pending">⏳ Pending Review</span></div></div>' +
+        '<div class="label-caps ref-kicker"></div><div class="ref-desc"></div></div>';
+      row.querySelector('.ref-title').textContent = name;
+      row.querySelector('.ref-kicker').textContent = 'Custom Request · ' + $('reqPriority').value;
+      row.querySelector('.ref-desc').textContent = $('reqDesc').value.trim() || 'No additional details provided.';
+      $('customRequests').appendChild(row);
+      closeModal('requestNewModal');
+    });
+  }
+
+  /* ---------- AI Apps / IT Apps (8.5, 8.6) ---------- */
+  var apps = { ai: D.ai_apps, it: D.it_apps };
+  var addMode = 'ai';
+
+  function appRow(app) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'app-row';
+    btn.innerHTML = '<span class="app-name-col"><span class="app-name" style="display:block"></span><span class="app-meta" style="display:block"></span></span><span class="pill"></span>';
+    btn.querySelector('.app-name').textContent = app.name;
+    var meta = btn.querySelector('.app-meta');
+    meta.append(app.category + ' · ');
+    var dot = document.createElement('span');
+    dot.className = 'data-dot ' + app.data_dot;
+    meta.append(dot, app.data_allowed + (app.owner ? ' · ' + app.owner : ''));
+    var pill = btn.querySelector('.pill');
+    pill.textContent = app.status;
+    pill.classList.add(app.status === 'Approved' ? 'approved' : 'prohibited');
+    btn.addEventListener('click', function () {
+      setText('appModalEyebrow', app.status + ' Application');
+      setText('appModalTitle', app.name);
+      setText('appModalMeta', app.category + ' · ' + app.data_allowed + (app.owner ? ' · ' + app.owner : ''));
+      setText('appModalBody', app.status === 'Approved'
+        ? app.name + ' is approved for ' + app.data_allowed.toLowerCase() + ' data. Follow your organization\'s setup guide before using it for work, and never go beyond the data class shown above.'
+        : app.name + ' is prohibited for work use. Use an approved alternative from this list instead.');
+      setText('appModalStatus', app.status);
+      $('appModalStatus').classList.toggle('ok', app.status === 'Approved');
+      openModal('appModal');
+    });
+    return btn;
+  }
+
+  function renderApps(kind) {
+    var list = $('appList-' + kind);
+    if (!list) return;
+    list.innerHTML = '';
+    if (!apps[kind].length) {
+      list.innerHTML = '<div class="context-line">No applications yet.</div>';
+      return;
+    }
+    apps[kind].forEach(function (a) { list.appendChild(appRow(a)); });
+  }
+
+  function refreshAppStats() {
+    var all = apps.ai.concat(apps.it);
+    setText('statAi', apps.ai.length);
+    setText('statIt', apps.it.length);
+    setText('statApproved', all.filter(function (a) { return a.status === 'Approved'; }).length);
+    setText('statApprovedOf', 'of ' + all.length + ' apps');
+  }
+
+  function updateDataIcon() {
+    var opt = $('appData').selectedOptions[0];
+    var order = ['r', 'a', 'g'];
+    $('appDataIcon').querySelectorAll('.tl-dot').forEach(function (dot, i) {
+      dot.className = 'tl-dot' + (order[i] === opt.dataset.dot ? ' on ' + order[i] : '');
+    });
+  }
+
+  document.querySelectorAll('[data-add-app]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      addMode = btn.dataset.addApp;
+      setText('addAppTitle', addMode === 'ai' ? 'Add AI Application' : 'Add IT Application');
+      $('addAppForm').reset();
+      var cats = addMode === 'ai' ? D.ai_categories : D.it_categories;
+      var sel = $('appCategory');
+      sel.innerHTML = '';
+      cats.forEach(function (c) { sel.add(new Option(c, c)); });
+      updateDataIcon();
+      openModal('addAppModal');
+    });
+  });
+
+  if ($('addAppForm')) {
+    $('appData').addEventListener('change', updateDataIcon);
+    $('addAppForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = $('appName').value.trim();
+      if (!name) { $('appName').focus(); return; }
+      var opt = $('appData').selectedOptions[0];
+      apps[addMode].push({
+        name: name,
+        category: $('appCategory').value,
+        data_allowed: opt.value,
+        data_dot: opt.dataset.dot,
+        status: $('appStatus').value,
+        owner: ''
+      });
+      renderApps(addMode);
+      refreshAppStats();
+      closeModal('addAppModal');
+    });
+  }
+
+  renderQuota();
+  D.cards.forEach(renderRow);
+  renderApps('ai');
+  renderApps('it');
+})();
+</script>
+{% endblock %}

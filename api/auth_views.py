@@ -1,5 +1,7 @@
 """Microsoft Teams / OAuth auth APIs."""
 
+import json
+
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -16,6 +18,7 @@ from rest_framework.response import Response
 
 from .auth_jwt import create_access_token, create_refresh_token, decode_token
 from .microsoft_auth import (
+    consume_oauth_state_with_payload,
     build_auth_url,
     build_teams_launch_url,
     consume_oauth_state,
@@ -25,10 +28,13 @@ from .microsoft_auth import (
     microsoft_configured,
     resolve_teams_url,
 )
+from .slack_auth import build_slack_auth_url, exchange_slack_code, fetch_slack_profile, slack_configured
+from . import slack_client
+from .org_policy import PolicyAnswersError, clean_answers, policy_completed, save_answers
 from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
-from .org_service import ensure_organization_for_login, replace_welcome_card
-from .models import AIDLUser, Invitation
+from .org_service import ensure_organization_for_login, get_organization_for_user, replace_welcome_card
+from .models import AIDLUser, Invitation, Organization
 from .schema import AuthResponseDoc, ErrorDoc, MeDoc, MessageDoc, RefreshRequestDoc, TokenPairDoc
 from .serializers import AIDLUserSerializer, LoginSerializer, SignupSerializer
 
@@ -471,6 +477,228 @@ def teams_launch(request):
             ),
         }
     )
+
+
+def _slack_error_redirect(error: str, description: str = ""):
+    query = {"mode": "slack", "error": error}
+    if description:
+        query["error_description"] = description
+    return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
+
+
+def _upsert_slack_user(profile: dict, enroll_as: str) -> AIDLUser:
+    """Find the user by Slack id, else by verified email (links an existing
+    website/Teams account), else create one. Slack users reuse the unique
+    microsoft_id field as `slack:<team_id>:<user_id>`."""
+    user = AIDLUser.objects.filter(microsoft_id=profile["slack_id"]).first()
+    if not user and profile["email"] and profile["email_verified"]:
+        user = AIDLUser.objects.filter(email__iexact=profile["email"]).first()
+
+    if user:
+        if not user.is_active:
+            return None
+        user.last_login_at = timezone.now()
+        if not user.avatar_url and profile["avatar_url"]:
+            user.avatar_url = profile["avatar_url"]
+        user.save(update_fields=["last_login_at", "avatar_url", "updated_at"])
+        return user
+
+    is_org = enroll_as == AIDLUser.EnrollAs.ORGANIZATION
+    return AIDLUser.objects.create(
+        microsoft_id=profile["slack_id"],
+        provider="slack",
+        email=profile["email"],
+        first_name=profile["first_name"],
+        last_name=profile["last_name"],
+        full_name=profile["full_name"]
+        or f"{profile['first_name']} {profile['last_name']}".strip(),
+        avatar_url=profile["avatar_url"],
+        enroll_as=enroll_as,
+        role=AIDLUser.Role.ADMIN if is_org else AIDLUser.Role.LEARNER,
+        organization_name=profile["team_name"] if is_org else "",
+        last_login_at=timezone.now(),
+        is_active=True,
+    )
+
+
+def _new_slack_organization(name: str, team_id: str) -> Organization:
+    base = _slack_slug(name)
+    slug, n = base, 1
+    while Organization.objects.filter(slug=slug).exists():
+        n += 1
+        slug = f"{base}-{n}"
+    return Organization.objects.create(
+        name=name,
+        slug=slug,
+        slack_team_id=team_id,
+        seats_purchased=int(getattr(settings, "AIDL_DEFAULT_SEATS", 50) or 50),
+        admin_seat_limit=int(getattr(settings, "AIDL_DEFAULT_ADMIN_SEATS", 3) or 3),
+    )
+
+
+def _slack_slug(name: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-") or "org"
+
+
+def _ensure_slack_organization(user: AIDLUser, profile: dict) -> Organization:
+    """Guide section 6: an organization login creates the AIDL organization,
+    or reuses it when this Slack workspace is already connected.
+
+    Any company can install AIDL, so the Slack workspace id alone decides
+    the organization — never the workspace name (two companies can share a
+    name) and never another workspace's organization."""
+    team_id = profile.get("team_id") or ""
+    team_name = profile.get("team_name") or user.organization_name or "My organization"
+    org = Organization.objects.filter(slack_team_id=team_id, is_active=True).first() if team_id else None
+    if org is None:
+        current = get_organization_for_user(user) if user.organization_id else None
+        if current is not None and not current.slack_team_id:
+            # Same company signed up on the website / Teams first → connect
+            # its Slack workspace to that organization.
+            org = current
+            org.slack_team_id = team_id
+            org.save(update_fields=["slack_team_id", "updated_at"])
+        else:
+            org = _new_slack_organization(team_name, team_id)
+    user.organization_id = str(org.pk)
+    user.organization_name = org.name
+    user.save(update_fields=["organization_id", "organization_name", "updated_at"])
+    # Links the user, seeds the default app registry, and makes them admin
+    # (organization enrollment, or the first member of the organization).
+    return ensure_organization_for_login(user, org_name=org.name)
+
+
+def _setup_slack_workspace(org: Organization, user: AIDLUser, install: dict, profile: dict) -> str:
+    """Guide section 7.1: store the bot install, create/reuse #aidl, add the
+    admin, post the Admin Center card. Returns the channel link ("" if the
+    channel could not be created — the admin is still logged in)."""
+    from .slack_blocks import publish_admin_center
+
+    slack_client.save_install(org, install)
+    if not slack_client.ensure_channel(org, profile.get("slack_user_id", "")):
+        return ""
+    publish_admin_center(org, user)
+    return slack_client.channel_url(org)
+
+
+@extend_schema(
+    summary="Start Sign in with Slack (returns auth_url)",
+    parameters=[OpenApiParameter("enroll_as", str, enum=["individual", "organization"], default="individual")],
+    responses={200: OpenApiTypes.OBJECT, 503: ErrorDoc},
+)
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def slack_login(request):
+    """Query: enroll_as=individual|organization. Returns auth_url for Slack login."""
+    enroll_as = _normalize_enroll_as(request.query_params.get("enroll_as"))
+    # Guide 4.7: the admin isn't logged in while answering the policy
+    # questions, so the answers ride along in the OAuth state.
+    payload = ""
+    raw_policy = request.query_params.get("policy")
+    if raw_policy:
+        try:
+            payload = json.dumps({"policy_answers": clean_answers(json.loads(raw_policy))})
+        except (ValueError, PolicyAnswersError):
+            return Response({"policy": "Answer all 8 policy questions first."}, status=status.HTTP_400_BAD_REQUEST)
+    if not slack_configured():
+        return Response(
+            {
+                "error": "slack_not_configured",
+                "message": "Set SLACK_CLIENT_ID, SLACK_CLIENT_SECRET and SLACK_REDIRECT_URI.",
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    # Organizations install the AIDL app ("Add to Slack") so the backend can
+    # create #aidl and post the Admin cards; individuals just sign in.
+    if enroll_as == AIDLUser.EnrollAs.ORGANIZATION:
+        data = slack_client.build_install_url(enroll_as, payload)
+    else:
+        data = build_slack_auth_url(enroll_as)
+    data["mode"] = "slack"
+    return Response(data)
+
+
+@extend_schema(
+    summary="Slack OAuth callback — do not call from the frontend",
+    responses={302: OpenApiResponse(description="Redirect to AUTH_SUCCESS_REDIRECT with tokens or error")},
+)
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def slack_callback(request):
+    """Slack redirects here with ?code=&state= (or ?error=)."""
+    error = request.query_params.get("error")
+    if error:
+        return _slack_error_redirect(error, "Slack sign-in was cancelled or denied.")
+
+    code = request.query_params.get("code")
+    if not code:
+        return _slack_error_redirect("code_missing", "Slack did not return an authorization code.")
+
+    enroll_as, state_payload, state_error = consume_oauth_state_with_payload(request.query_params.get("state"))
+    if state_error == "state_not_found" or state_error == "state_expired":
+        return _slack_error_redirect(state_error, "Sign-in session expired. Please try again.")
+    enroll_as = _normalize_enroll_as(enroll_as or "individual")
+    try:
+        policy_answers = json.loads(state_payload).get("policy_answers") if state_payload else None
+    except ValueError:
+        policy_answers = None
+
+    if not slack_configured():
+        return _slack_error_redirect("slack_not_configured")
+
+    is_org = enroll_as == AIDLUser.EnrollAs.ORGANIZATION
+    token_result = slack_client.exchange_install_code(code) if is_org else exchange_slack_code(code)
+    if not token_result.get("ok") or not token_result.get("access_token"):
+        return _slack_error_redirect(
+            "token_exchange_failed", str(token_result.get("error") or "Slack token exchange failed.")
+        )
+
+    if is_org:
+        profile = slack_client.installer_profile(token_result)
+    else:
+        profile = fetch_slack_profile(token_result["access_token"])
+    if not profile.get("slack_id"):
+        return _slack_error_redirect("unable_to_fetch_profile", "Could not read your Slack profile.")
+
+    user = _upsert_slack_user(profile, enroll_as)
+    if not user:
+        return _slack_error_redirect("account_disabled", "This AIDL account is disabled.")
+    slack_url = ""
+    if is_org:
+        try:
+            org = _ensure_slack_organization(user, profile)
+            user.refresh_from_db()
+            if policy_answers:
+                save_answers(org, policy_answers)
+            slack_url = _setup_slack_workspace(org, user, token_result, profile)
+        except Exception as exc:  # noqa: BLE001
+            # Login must not break if org / channel setup fails (same as Teams).
+            import logging
+
+            logging.getLogger(__name__).warning("slack workspace setup failed: %s", exc)
+    _accept_pending_invitation(user)
+
+    tokens = _issue_tokens(user)
+    query = {
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"],
+        "mode": "slack",
+        "enroll_as": user.enroll_as,
+        "email": user.email,
+        "full_name": user.full_name,
+    }
+    if is_org:
+        # Guide 7.1: open Slack on #aidl; landed_on=chat when the channel
+        # couldn't be created (the frontend then shows a hint instead).
+        team_id = profile.get("team_id", "")
+        query["slack_url"] = slack_url or f"https://app.slack.com/client/{team_id}"
+        query["landed_on"] = "channel" if slack_url else "chat"
+        query["open_slack"] = "1"
+        # Guide 4.7: tells the frontend whether the org still has to answer.
+        query["policy_completed"] = "1" if policy_completed(get_organization_for_user(user)) else "0"
+    return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
 
 
 @extend_schema(summary="Current user profile", responses=MeDoc)

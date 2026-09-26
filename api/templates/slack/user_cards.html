@@ -1,0 +1,355 @@
+{% extends "slack/base.html" %}
+{% block title %}AIDL · {{ d.first_name }}'s dashboard{% endblock %}
+
+{% block styles %}
+  /* ---------- level strip: shows the real level only (guide 10.2) ---------- */
+  .class-strip { display: flex; gap: 6px; margin: 12px 0 0; }
+  .class-chip { flex: 1; text-align: center; border: 2px solid #D1D1D1; border-radius: 6px; padding: 7px 3px; font-family: "Bungee", sans-serif; font-size: 12px; color: #B0B0B0; }
+  .class-chip span { display: block; font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #8A8A8A; margin-top: 3px; }
+  .class-chip.current { border-color: var(--asphalt); background: var(--sign-yellow); color: var(--asphalt); }
+  .class-chip.current.full { background: var(--signal-green); }
+  .class-chip.current span { color: var(--asphalt); }
+
+  /* ---------- license card: every size is relative to the card's own width
+     (container query units), so it scales cleanly from phone to desktop ---------- */
+  .lic-wrap { container-type: inline-size; margin: 12px 0; }
+  .lic-card {
+    aspect-ratio: 1.586; background: var(--sign-yellow); color: var(--asphalt);
+    border: max(2px, .6cqw) solid var(--asphalt);
+    box-shadow: 0 14px 28px rgba(20,20,15,.28);
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    padding: 2.6cqw 3cqw 1.8cqw; font-family: Arial, sans-serif;
+  }
+  .lic-card.full { background: var(--signal-green); }
+  .lic-card::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image: repeating-linear-gradient(115deg, rgba(20,20,15,.05) 0 1px, transparent 1px 7px);
+  }
+  .lic-card::after { content: ""; position: absolute; inset: 1cqw; border: 1px solid rgba(20,20,15,.3); pointer-events: none; }
+  .lc-watermark {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
+    font-family: "Bungee", sans-serif; font-size: 17cqw; opacity: .06; transform: rotate(-18deg);
+  }
+  .lc-head { display: flex; align-items: center; gap: 2cqw; border-bottom: .6cqw solid var(--asphalt); padding-bottom: 1.5cqw; position: relative; }
+  .lc-seal {
+    width: 6.8cqw; height: 6.8cqw; border-radius: 50%; flex-shrink: 0; background: var(--asphalt); color: var(--sign-yellow);
+    display: flex; align-items: center; justify-content: center; font-family: "Bungee", sans-serif; font-size: 2.1cqw;
+    box-shadow: 0 0 0 .4cqw var(--sign-yellow), 0 0 0 .6cqw var(--asphalt);
+  }
+  .lc-head h5 { font-family: "Bungee", sans-serif; font-size: 2.5cqw; font-weight: 400; line-height: 1.1; }
+  .lc-head small { display: block; font-family: "JetBrains Mono", monospace; font-size: 1.35cqw; letter-spacing: .14em; margin-top: .5cqw; opacity: .75; }
+  .lc-cls { margin-left: auto; font-family: "Bungee", sans-serif; font-size: 2.1cqw; border: .55cqw solid var(--asphalt); padding: .7cqw 1.7cqw; flex-shrink: 0; }
+  .lc-main { display: grid; grid-template-columns: 1fr 12cqw; gap: 2.3cqw; flex: 1; min-height: 0; padding-top: 1.9cqw; position: relative; }
+  .lc-name { font-family: "Bungee", sans-serif; font-size: 3.6cqw; line-height: 1.05; margin-bottom: 1.5cqw; overflow-wrap: anywhere; }
+  .lc-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1cqw 1.9cqw; font-family: "JetBrains Mono", monospace; }
+  .lc-rows span { display: block; opacity: .68; font-size: 1.35cqw; margin-bottom: .3cqw; }
+  .lc-rows b { font-size: 1.8cqw; }
+  .lc-photo {
+    align-self: flex-start; aspect-ratio: 3 / 4; border: .55cqw solid var(--asphalt); background: rgba(20,20,15,.08);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8cqw; overflow: hidden;
+  }
+  .lc-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .lc-photo svg { width: 44%; opacity: .55; }
+  .lc-photo span { font-family: "JetBrains Mono", monospace; font-size: 1.05cqw; letter-spacing: .1em; opacity: .8; }
+  .lc-foot {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5cqw;
+    border-top: .6cqw solid var(--asphalt); padding: 2.8cqw 8cqw 0 0; margin-top: 1.5cqw; position: relative;
+  }
+  .lc-no { font-family: "JetBrains Mono", monospace; font-size: 2.1cqw; font-weight: 700; letter-spacing: .06em; }
+  .lc-sig { font-family: "JetBrains Mono", monospace; font-size: 1.15cqw; letter-spacing: .08em; opacity: .7; text-align: right; }
+  .lc-stamp {
+    position: absolute; right: 2.3cqw; bottom: 1.7cqw; width: 5.7cqw; height: 5.7cqw; border-radius: 50%;
+    border: 1.5px solid var(--asphalt); background: rgba(255,255,255,.5); transform: rotate(-11deg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lc-stamp img { width: 68%; height: 68%; object-fit: contain; }
+  .lc-strip {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 1.3cqw; background: var(--asphalt);
+    background-image: repeating-linear-gradient(90deg, rgba(255,204,0,.55) 0 1px, transparent 1px 3px, rgba(255,204,0,.55) 3px 4px, transparent 4px 8px);
+  }
+
+  .share-row { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+  .share-label { font-size: 12.5px; font-weight: 700; color: var(--text-2); }
+  .share-btn {
+    width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,.25); flex-shrink: 0;
+  }
+  .share-btn:hover { filter: brightness(1.12); }
+  .share-btn svg { width: 17px; height: 17px; }
+  .share-btn.x { background: #000; }
+  .share-btn.linkedin { background: #0A66C2; }
+  .share-btn.facebook { background: #1877F2; }
+  .share-btn.whatsapp { background: #25D366; }
+
+  /* ---------- Highway Code road signs ---------- */
+  .code-card { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px dashed var(--line); }
+  .code-card:first-of-type { border-top: none; }
+  .sign-badge {
+    width: 48px; height: 48px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; font-size: 9px; font-weight: 900; letter-spacing: .2px; color: #fff; line-height: 1.05;
+    padding: 2px; border: 2px solid var(--asphalt);
+  }
+  .sign-stop { background: var(--signal-red); clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+  .sign-check { background: var(--sign-yellow); color: var(--asphalt); width: 38px; height: 38px; transform: rotate(45deg); margin: 5px; }
+  .sign-check span { transform: rotate(-45deg); }
+  .sign-yield { background: #FF9D00; clip-path: polygon(50% 0, 100% 100%, 0 100%); padding-top: 14px; }
+  .sign-ask { background: #6FB3E0; border-radius: 50%; }
+  .sign-oneway { background: var(--asphalt); }
+  .code-text { font-size: 14px; line-height: 1.45; min-width: 0; }
+  .code-text b { display: block; margin-bottom: 2px; font-size: 14.5px; }
+  .modal-body h4 { font-size: 14px; font-weight: 900; margin: 16px 0 4px; }
+  .modal-body h4:first-child { margin-top: 0; }
+
+  /* ---------- Traffic Light Check ---------- */
+  .tl-section { padding: 12px 14px; margin-top: 10px; border-radius: 0 4px 4px 0; border-left: 4px solid #BABCBF; background: #FAFAFA; }
+  .tl-section.green { border-left-color: var(--signal-green); background: #F0FAF3; }
+  .tl-section.amber { border-left-color: var(--signal-amber); background: #FDF8E9; }
+  .tl-section.red { border-left-color: var(--signal-red); background: #FDF0EF; }
+  .tl-heading { font-size: 15px; font-weight: 900; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .tl-tagline { font-size: 13px; color: var(--text-2); font-weight: 400; }
+  .tl-body { font-size: 14px; line-height: 1.5; margin-top: 6px; }
+  .tl-body ul { margin: 4px 0 0 18px; }
+  .tl-action { display: inline-block; font-size: 12px; margin-top: 8px; font-weight: 800; padding: 4px 10px; border-radius: 3px; color: #fff; }
+  .green .tl-action { background: var(--ok); }
+  .amber .tl-action { background: var(--wait); }
+  .red .tl-action { background: var(--bad); }
+
+  .rate-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); flex-wrap: wrap; }
+  .rate-label { font-size: 13px; font-weight: 700; color: var(--text-2); }
+  .like-btn {
+    font-size: 13px; font-weight: 700; padding: 5px 12px; min-height: 34px; border-radius: 20px;
+    border: 1px solid #D8D3C0; background: #fff; color: var(--text); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .like-btn:hover:not(:disabled) { background: #F6F2E8; }
+  .like-btn:disabled { cursor: default; }
+  .like-btn.selected.like { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+  .like-btn.selected.dislike { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+  .rate-confirm { font-size: 12.5px; font-weight: 700; color: var(--ok); }
+
+  @media (max-width: 560px) {
+    .share-row { margin-left: 0; width: 100%; }
+    .actions-row .download-btn { flex: 1 1 100%; }
+  }
+{% endblock %}
+
+{% block content %}
+<div class="card-tabs" role="tablist" aria-label="AIDL dashboard">
+  {% for t in d.tab_defs %}
+  <button class="tab-btn" role="tab" data-tab="{{ t.id }}" aria-controls="card-{{ t.id }}" aria-selected="false">{{ t.icon }} {{ t.label }}</button>
+  {% endfor %}
+</div>
+
+{# ================= HOME — WELCOME (guide 10.1): welcome text only, no buttons ================= #}
+<section class="card-section" id="card-home" role="tabpanel" hidden>
+  <h2 class="section-label">Sent automatically right after you join <span>DM · @{{ d.first_name|lower }}</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">Welcome to AIDL, {{ d.first_name }}! 👋</div>
+        <div class="section-text">You've been added to <strong>{{ d.org_name }}'s</strong> AI Driving License programme.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ================= LICENSE (guide 10.2) ================= #}
+<section class="card-section" id="card-license" role="tabpanel" hidden>
+  <h2 class="section-label">Sent right after the welcome message <span>DM · @{{ d.first_name|lower }}</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">🪪 {% if d.licence_class == "F" %}Your Full License is ready{% else %}Your Learner's Permit is ready{% endif %}</div>
+
+        <div class="class-strip" aria-label="License level">
+          <div class="class-chip{% if d.licence_class == 'L' %} current{% endif %}"{% if d.licence_class == 'L' %} aria-current="true"{% endif %}>L<span>Learner</span></div>
+          <div class="class-chip{% if d.licence_class == 'F' %} current full{% endif %}"{% if d.licence_class == 'F' %} aria-current="true"{% endif %}>F<span>Full</span></div>
+        </div>
+
+        <div class="lic-wrap">
+          <div class="lic-card{% if d.licence_class == 'F' %} full{% endif %}" role="img" aria-label="AI Driving License {{ d.licence_number }} for {{ d.full_name }}">
+            <div class="lc-watermark" aria-hidden="true">AIDL</div>
+            <div class="lc-head">
+              <span class="lc-seal" title="{{ d.org_name }}">{{ d.org_initials }}</span>
+              <div>
+                <h5>AI DRIVING LICENSE</h5>
+                <small>ISSUED FOR {{ d.org_name|upper }}</small>
+              </div>
+              <span class="lc-cls">{{ d.licence_class }}</span>
+            </div>
+            <div class="lc-main">
+              <div>
+                <div class="lc-name">{{ d.full_name|upper }}</div>
+                <div class="lc-rows">
+                  <div><span>CLASS</span><b>{% if d.licence_class == "F" %}Full License{% else %}Learner's Permit{% endif %}</b></div>
+                  <div><span>ISSUED</span><b>{{ d.issued }}</b></div>
+                  <div><span>EXPIRES</span><b>{{ d.expires }}</b></div>
+                  <div><span>STATUS</span><b>{{ d.status }}</b></div>
+                </div>
+              </div>
+              <div class="lc-photo">
+                {% if d.avatar_url %}<img src="{{ d.avatar_url }}" alt="Driver photo" />{% else %}
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 12.4a5.2 5.2 0 1 0 0-10.4 5.2 5.2 0 0 0 0 10.4Zm0 2.4c-4.4 0-9 2.2-9 5v2.6h18v-2.6c0-2.8-4.6-5-9-5Z" /></svg>
+                <span>DRIVER PHOTO</span>{% endif %}
+              </div>
+            </div>
+            <div class="lc-foot">
+              <div class="lc-no">{{ d.licence_number }}</div>
+              <div class="lc-sig">VERIFY AT AIDL.ORG/VERIFY<br>AUTHORISED SIGNATORY</div>
+            </div>
+            <div class="lc-stamp"><img src="/static/aidl/logo.png" alt="" /></div>
+            <div class="lc-strip"></div>
+          </div>
+        </div>
+
+        <div class="section-text">
+          {% if d.licence_class == "F" %}This is your AI Driving License. You've reached <strong>Level F — Full.</strong> You've completed every lesson and cleared the Data Ethics Gate.
+          {% else %}This is your AI Driving License. You're currently at <strong>Level L — Learner.</strong> As you complete lessons and pass checks, you'll move up to higher levels.{% endif %}
+        </div>
+
+        <div class="actions-row">
+          <a class="slack-btn download-btn" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center"
+             href="/api/teams/cards/learners-permit/download/{% if d.download_email %}?email={{ d.download_email|urlencode }}{% endif %}" download>Download License</a>
+          <div class="share-row">
+            <span class="share-label">Share:</span>
+            <a class="share-btn x" target="_blank" rel="noopener" aria-label="Share on X" href="https://twitter.com/intent/tweet?text={{ 'I just earned my AI Driving License'|urlencode }}&url={{ d.verify_url|urlencode }}"><svg viewBox="0 0 24 24" fill="#fff"><path d="M18.9 2H22l-7.6 8.7L23 22h-6.6l-5.2-6.6L5.3 22H2l8.2-9.4L1.5 2h6.8l4.7 6.1L18.9 2Zm-1.2 18h1.8L7.4 4H5.5l12.2 16Z"/></svg></a>
+            <a class="share-btn linkedin" target="_blank" rel="noopener" aria-label="Share on LinkedIn" href="https://www.linkedin.com/sharing/share-offsite/?url={{ d.verify_url|urlencode }}"><svg viewBox="0 0 24 24" fill="#fff"><path d="M4.98 3.5A2.5 2.5 0 1 1 5 8.5a2.5 2.5 0 0 1-.02-5ZM3 9h4v12H3V9Zm7 0h3.8v1.7h.05c.53-1 1.83-2.05 3.77-2.05C21.9 8.65 22 11.1 22 14.1V21h-4v-6.1c0-1.46-.03-3.34-2.04-3.34-2.04 0-2.36 1.6-2.36 3.24V21h-4V9Z"/></svg></a>
+            <a class="share-btn facebook" target="_blank" rel="noopener" aria-label="Share on Facebook" href="https://www.facebook.com/sharer/sharer.php?u={{ d.verify_url|urlencode }}"><svg viewBox="0 0 24 24" fill="#fff"><path d="M13.5 22v-8.4h2.8l.4-3.3h-3.2V8.1c0-.96.27-1.62 1.65-1.62H17V3.5c-.3-.04-1.3-.13-2.46-.13-2.44 0-4.1 1.49-4.1 4.22v2.35H8v3.3h2.44V22h3.06Z"/></svg></a>
+            <a class="share-btn whatsapp" target="_blank" rel="noopener" aria-label="Share on WhatsApp" href="https://wa.me/?text={{ 'I just earned my AI Driving License '|urlencode }}{{ d.verify_url|urlencode }}"><svg viewBox="0 0 24 24" fill="#fff"><path d="M12.02 2C6.5 2 2 6.48 2 12c0 1.87.52 3.62 1.42 5.12L2 22l5.02-1.4A9.96 9.96 0 0 0 12.02 22C17.5 22 22 17.52 22 12S17.5 2 12.02 2Zm4.9 12.4c-.3-.15-1.77-.87-2.04-.97-.28-.1-.48-.15-.68.15-.2.3-.78.97-.96 1.17-.18.2-.35.22-.65.08-.3-.15-1.27-.47-2.42-1.5-.9-.8-1.5-1.78-1.68-2.08-.18-.3-.02-.46.13-.61.14-.14.3-.35.45-.53.15-.18.2-.3.3-.5.1-.2.05-.38-.02-.53-.08-.15-.68-1.64-.93-2.24-.24-.58-.5-.5-.68-.51h-.58c-.2 0-.53.08-.8.38-.28.3-1.05 1.02-1.05 2.5s1.08 2.9 1.23 3.1c.15.2 2.13 3.25 5.15 4.56 1.86.8 2.6.87 3.54.73.58-.09 1.77-.72 2.02-1.42.25-.7.25-1.3.18-1.42-.08-.13-.28-.2-.58-.35Z"/></svg></a>
+          </div>
+        </div>
+        <div class="context-line">Issued under Curriculum {{ d.curriculum_version }} · Org Policy {{ d.policy_version }} — recorded at issuance</div>
+        {% if d.training_note %}<div class="context-line">🔁 {{ d.training_note }}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ================= HIGHWAY CODE (guide 10.3) ================= #}
+<section class="card-section" id="card-highway-code" role="tabpanel" hidden>
+  <h2 class="section-label">Dashboard — Highway Code <span>Section A · Learner Rules</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">📖 The Highway Code</div>
+        <div class="section-text">The everyday rules for using AI safely and confidently. Learn them, follow them, drive happy.</div>
+        {% for rule in d.highway_code %}
+        <div class="code-card">
+          <span class="sign-badge sign-{{ rule.shape }}" aria-hidden="true"><span>{% if rule.shape == "oneway" %}ONE<br>WAY →{% else %}{{ rule.sign }}{% endif %}</span></span>
+          <div class="code-text"><b>{{ rule.title }}</b>{{ rule.text }}</div>
+        </div>
+        {% endfor %}
+        <div class="actions-row">
+          <button class="slack-btn primary" type="button" onclick="openModal('highwayModal')">Open full Highway Code</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ================= TRAFFIC LIGHT CHECK (guide 10.4) — only the lights the admin sent ================= #}
+<section class="card-section" id="card-traffic-light" role="tabpanel" hidden>
+  <h2 class="section-label">Sent by your admin from the Cards tab <span>Traffic Light Check</span></h2>
+  <div class="msg">
+    <div class="msg-row">
+      <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+      <div class="msg-col">
+        <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
+        <div class="header-block">🚦 Traffic Light Check</div>
+        <div class="section-text">Before you paste anything into an AI, check the lights.</div>
+        {% for l in d.lights %}
+        <div class="tl-section {{ l.id }}">
+          <div class="tl-heading">
+            <span class="tl-icon" aria-hidden="true"><span class="tl-dot{% if l.dot == 'r' %} on r{% endif %}"></span><span class="tl-dot{% if l.dot == 'a' %} on a{% endif %}"></span><span class="tl-dot{% if l.dot == 'g' %} on g{% endif %}"></span></span>
+            {{ l.label }} <span class="tl-tagline">— {{ l.tagline }}</span>
+          </div>
+          <div class="tl-body"><ul>{% for item in l.items %}<li>{{ item }}</li>{% endfor %}</ul></div>
+          <div class="tl-action">→ {{ l.action }}</div>
+        </div>
+        {% endfor %}
+        <div class="rate-row">
+          <span class="rate-label" id="rateLabel">Was this card useful?</span>
+          <div role="group" aria-labelledby="rateLabel" style="display:flex;gap:8px">
+            <button class="like-btn like" type="button" data-vote="like">👍 <span data-count>{{ d.likes }}</span></button>
+            <button class="like-btn dislike" type="button" data-vote="dislike">👎 <span data-count>{{ d.dislikes }}</span></button>
+          </div>
+          <span class="rate-confirm" id="rateConfirm" aria-live="polite"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ================= FULL HIGHWAY CODE ================= #}
+<div class="modal-backdrop" id="highwayModal" role="dialog" aria-modal="true" aria-labelledby="highwayTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div><div class="label-caps">{{ d.org_name }} · Learner Rules</div><h3 id="highwayTitle">The Highway Code — Full Edition</h3></div>
+      <button class="modal-close" type="button" data-close="highwayModal" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      {% for rule in d.highway_code %}
+      <h4>{{ rule.title }}</h4>
+      <p>{{ rule.text }} {{ rule.full }}</p>
+      {% endfor %}
+    </div>
+    <div class="modal-foot">
+      <div class="modal-foot-row">
+        <span class="modal-status">Reference only — no sign-off needed</span>
+        <button class="slack-btn primary" type="button" data-close="highwayModal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // Guide 10.4 — one vote per user: count +1, confirmation, both buttons lock.
+  var demo = {{ d.demo|yesno:"true,false" }};
+  var key = 'aidl-tl-vote-{{ d.user_key|escapejs }}';
+  var buttons = document.querySelectorAll('.like-btn');
+  var confirm = document.getElementById('rateConfirm');
+
+  function lock(vote) {
+    buttons.forEach(function (b) {
+      b.disabled = true;
+      if (b.dataset.vote === vote) b.classList.add('selected');
+    });
+    confirm.textContent = vote === 'like' ? '✓ Thanks for the feedback!' : '✓ Feedback noted, thank you';
+  }
+
+  var previous = null;
+  try { previous = localStorage.getItem(key); } catch (e) {}
+  if (previous) lock(previous);
+
+  buttons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      var vote = btn.dataset.vote;
+      var count = btn.querySelector('[data-count]');
+      count.textContent = +count.textContent + 1;
+      lock(vote);
+      try { localStorage.setItem(key, vote); } catch (e) {}
+      if (demo) return;
+      fetch('/api/teams/cards/traffic-light-check/rate/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vote: vote })
+      }).then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
+        if (!data) return;
+        document.querySelector('.like-btn.like [data-count]').textContent = data.likes;
+        document.querySelector('.like-btn.dislike [data-count]').textContent = data.dislikes;
+      }).catch(function () {});
+    });
+  });
+})();
+</script>
+{% endblock %}

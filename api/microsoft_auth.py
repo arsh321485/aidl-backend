@@ -38,12 +38,13 @@ def _msal_app() -> msal.ConfidentialClientApplication:
     )
 
 
-def create_oauth_state(enroll_as: str) -> str:
+def create_oauth_state(enroll_as: str, payload: str = "") -> str:
     state = secrets.token_urlsafe(32)
     try:
         OAuthState.objects.create(
             state=state,
             enroll_as=enroll_as,
+            payload=payload,
             expires_at=timezone.now() + timedelta(minutes=60),
         )
     except Exception as exc:  # noqa: BLE001
@@ -57,27 +58,33 @@ def consume_oauth_state(state: str):
     Returns (enroll_as, error_code).
     error_code is None on success.
     """
+    enroll_as, _payload, error = consume_oauth_state_with_payload(state)
+    return enroll_as, error
+
+
+def consume_oauth_state_with_payload(state: str):
+    """Returns (enroll_as, payload, error_code); error_code is None on success."""
     if not state:
-        return None, "missing_state"
+        return None, "", "missing_state"
     try:
         row = OAuthState.objects.get(state=state)
     except OAuthState.DoesNotExist:
-        return None, "state_not_found"
+        return None, "", "state_not_found"
     except Exception as exc:  # noqa: BLE001
         logger.warning("oauth state lookup failed: %s", exc)
-        return None, "state_lookup_failed"
+        return None, "", "state_lookup_failed"
     if row.expires_at < timezone.now():
         try:
             row.delete()
         except Exception:  # noqa: BLE001
             pass
-        return None, "state_expired"
-    enroll_as = row.enroll_as
+        return None, "", "state_expired"
+    enroll_as, payload = row.enroll_as, row.payload
     try:
         row.delete()
     except Exception:  # noqa: BLE001
         pass
-    return enroll_as, None
+    return enroll_as, payload, None
 
 
 def build_auth_url(enroll_as: str) -> dict:
