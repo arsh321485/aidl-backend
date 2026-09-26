@@ -197,3 +197,15 @@ Azure App Registration Redirect URI must match `MS_REDIRECT_URI` exactly.
 
 Confirm: `GET https://aidl-backend.onrender.com/api/`  
 → `microsoft_redirect_uri` and `auth_success_redirect` must not be localhost in production.
+
+## Slack APIs (AIDL Slack guide)
+
+| Method | Endpoint | Auth | Notes |
+|--------|----------|------|-------|
+| GET | `/api/auth/slack/login/?enroll_as=organization&policy=<json>` | none | returns `auth_url`; organization → "Add to Slack" install, individual → Sign in with Slack |
+| GET | `/api/auth/slack/callback/` | none | Slack redirect (do not call from FE); creates org + `#aidl-driving-license`, posts the Admin card, redirects to `AUTH_SUCCESS_REDIRECT` with tokens, `slack_url`, `policy_completed` |
+| GET / POST | `/api/org/policy-answers/` | Bearer | the 8 policy answers (POST: admins only, body `{"answers": {...}}`) |
+| POST | `/api/slack/interactions/` | Slack signature | Interactivity Request URL for the Admin card buttons |
+| GET | `/api/slack/cards/admin/?token=` · `/api/slack/cards/user/?token=` | JWT in `token` | responsive Admin / User card pages (demo data without a token) |
+
+Env: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_REDIRECT_URI`, `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_NAME` — see `RENDER_ENV.txt`.

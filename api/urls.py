@@ -1,7 +1,7 @@
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from . import auth_views, location_views, teams_admin_extra_views, teams_app_views, teams_bot_views, views
+from . import auth_views, location_views, org_policy_views, slack_card_views, slack_interactions, teams_admin_extra_views, teams_app_views, teams_bot_views, views
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
@@ -27,6 +27,9 @@ urlpatterns = [
         name="teams-callback-azure",
     ),
     path("auth/teams/launch/", auth_views.teams_launch, name="teams-launch"),
+    # Sign in with Slack (OpenID Connect)
+    path("auth/slack/login/", auth_views.slack_login, name="slack-login"),
+    path("auth/slack/callback/", auth_views.slack_callback, name="slack-callback"),
     path("auth/signup/", auth_views.signup, name="auth-signup"),
     path("auth/signin/", auth_views.signin, name="auth-signin"),
     path("auth/login/", auth_views.login, name="auth-login"),
@@ -37,6 +40,17 @@ urlpatterns = [
     path("locations/countries/", location_views.countries, name="location-countries"),
     path("locations/states/", location_views.states, name="location-states"),
     path("locations/cities/", location_views.cities, name="location-cities"),
+    # Organization policy answers (Slack guide 4.7)
+    path("org/policy-answers/", org_policy_views.policy_answers, name="org-policy-answers"),
+    # Slack Admin cards + User cards (AIDL Slack guide, sections 8 and 10)
+    path("slack/cards/admin/", slack_card_views.slack_admin_cards, name="slack-admin-cards"),
+    path(
+        "slack/cards/admin/coverage.csv",
+        slack_card_views.slack_admin_coverage_csv,
+        name="slack-admin-coverage-csv",
+    ),
+    path("slack/cards/user/", slack_card_views.slack_user_cards, name="slack-user-cards"),
+    path("slack/interactions/", slack_interactions.slack_interactions, name="slack-interactions"),
     # AIDL Teams app — menu tabs + Adaptive Cards
     path("teams/", teams_app_views.teams_app_index, name="teams-app-index"),
     path(

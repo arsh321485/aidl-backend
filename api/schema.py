@@ -19,8 +19,11 @@ from .serializers import AIDLUserSerializer
 _TAGS = [
     ("/api/auth/teams/", "Teams auth"),
     ("/api/admin/users/microsoft-teams/", "Teams auth"),
+    ("/api/auth/slack/", "Slack auth"),
     ("/api/auth/", "Auth"),
     ("/api/locations/", "Locations"),
+    ("/api/org/", "Organization"),
+    ("/api/slack/", "Slack app"),
     ("/api/teams/admin/", "Teams admin"),
     ("/api/teams/bot/", "Teams bot"),
     ("/api/teams/", "Teams app"),

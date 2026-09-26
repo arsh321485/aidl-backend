@@ -48,6 +48,16 @@ class ItemSerializer(serializers.ModelSerializer):
 
 class AIDLUserSerializer(serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
+    # Guide 4.7 — has this user's organization answered the 8 policy questions?
+    policy_completed = serializers.SerializerMethodField()
+
+    def get_policy_completed(self, user) -> bool:
+        from .org_policy import policy_completed
+        from .org_service import get_organization_for_user
+
+        if not user.organization_id:
+            return False
+        return policy_completed(get_organization_for_user(user))
 
     class Meta:
         model = AIDLUser
@@ -79,6 +89,7 @@ class AIDLUserSerializer(serializers.ModelSerializer):
             "last_login_at",
             "created_at",
             "updated_at",
+            "policy_completed",
         ]
         read_only_fields = fields
 

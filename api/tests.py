@@ -719,3 +719,360 @@ class ApiDocsTests(SimpleTestCase):
             self.assertIn(path, paths)
         self.assertEqual(paths["/api/auth/me/"]["get"]["security"], [{"BearerAuth": []}])
         self.assertIn("SignupRequest", schema["components"]["schemas"])
+
+
+class SlackCardsTests(TestCase):
+    """Slack Admin cards + User cards pages (Slack guide sections 8 and 10)."""
+
+    def setUp(self):
+        self.org = make_org(name="Secureitlab")
+        self.primary = make_user(self.org, full_name="Priya Raman")
+        self.client = APIClient()
+
+    def _get(self, path, user=None):
+        token = f"?token={create_access_token(user)}" if user else ""
+        return self.client.get(f"/api/slack/cards/{path}/{token}")
+
+    def test_demo_preview_without_token(self):
+        resp = self._get("admin")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Northwind Logistics")
+        self.assertNotContains(resp, 'data-tab="policy"')
+
+    def test_bad_token_is_rejected(self):
+        resp = self.client.get("/api/slack/cards/admin/?token=nope")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_learner_cannot_open_admin_cards(self):
+        learner = make_user(self.org, role=AIDLUser.Role.LEARNER)
+        self.assertEqual(self._get("admin", learner).status_code, 403)
+
+    def test_primary_admin_sees_every_tab_with_real_data(self):
+        resp = self._get("admin", self.primary)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "for Secureitlab")
+        self.assertContains(resp, "Welcome to your Admin Center, Priya")
+        for tab in ("home", "add-admin", "add-user", "cards", "ai-apps", "it-apps"):
+            self.assertContains(resp, f'data-tab="{tab}"')
+
+    def test_invited_admin_sees_only_permitted_tabs(self):
+        invited = make_user(
+            self.org, perm_approve_apps=False, perm_access_cards=True, perm_create_card=False
+        )
+        resp = self._get("admin", invited)
+        self.assertContains(resp, 'data-tab="home"')
+        self.assertContains(resp, 'data-tab="cards"')
+        for tab in ("add-admin", "add-user", "ai-apps", "it-apps"):
+            self.assertNotContains(resp, f'data-tab="{tab}"')
+
+    def test_user_cards_welcome_and_selected_lights(self):
+        learner = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Jordan Ellis")
+        resp = self.client.get(
+            f"/api/slack/cards/user/?token={create_access_token(learner)}&lights=green,amber"
+        )
+        self.assertContains(resp, "Welcome to AIDL, Jordan!")
+        self.assertNotContains(resp, "Acceptable Use")
+        self.assertContains(resp, "tl-section green")
+        self.assertNotContains(resp, "tl-section red")
+
+    def test_coverage_csv_requires_admin(self):
+        self.assertEqual(self.client.get("/api/slack/cards/admin/coverage.csv").status_code, 401)
+        resp = self.client.get(
+            f"/api/slack/cards/admin/coverage.csv?token={create_access_token(self.primary)}"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(self.primary.email, resp.content.decode())
+
+
+class SlackOrganizationBootstrapTests(TestCase):
+    def test_workspace_creates_then_reuses_organization(self):
+        from .auth_views import _ensure_slack_organization
+
+        profile = {"team_id": "T123", "team_name": "Acme Slack"}
+        first = AIDLUser.objects.create(
+            microsoft_id="slack:T123:U1", email="a@acme.example", full_name="A",
+            enroll_as=AIDLUser.EnrollAs.ORGANIZATION, provider="slack",
+        )
+        _ensure_slack_organization(first, profile)
+        first.refresh_from_db()
+        org = Organization.objects.get(slack_team_id="T123")
+        self.assertEqual(first.organization_id, str(org.pk))
+        self.assertEqual(first.role, AIDLUser.Role.ADMIN)
+
+        second = AIDLUser.objects.create(
+            microsoft_id="slack:T123:U2", email="b@acme.example", full_name="B",
+            enroll_as=AIDLUser.EnrollAs.ORGANIZATION, provider="slack",
+        )
+        _ensure_slack_organization(second, {**profile, "team_name": "Renamed"})
+        second.refresh_from_db()
+        self.assertEqual(second.organization_id, str(org.pk))
+        self.assertEqual(Organization.objects.filter(slack_team_id="T123").count(), 1)
+
+
+class SlackWorkspaceSetupTests(TestCase):
+    """Organization login → "Add to Slack" → #aidl + Admin Center card
+    (Slack guide sections 6 and 7). Slack's Web API is mocked."""
+
+    INSTALL = {
+        "ok": True, "access_token": "xoxb-test", "bot_user_id": "UBOT",
+        "team": {"id": "T9", "name": "Acme"}, "authed_user": {"id": "U1"},
+    }
+
+    def _fake_api(self, calls):
+        def fake(method, token, *, json=None, params=None):
+            calls.append((method, json or params))
+            if method == "users.info":
+                return {"ok": True, "user": {"profile": {"email": "owner@acme.example", "real_name": "Ana Owner", "first_name": "Ana"}}}
+            if method == "conversations.create":
+                return {"ok": True, "channel": {"id": "C42"}}
+            if method == "conversations.info":
+                return {"ok": True, "channel": {"id": "C42", "is_archived": False}}
+            if method == "chat.postMessage":
+                return {"ok": True, "ts": "111.222"}
+            return {"ok": True}
+        return fake
+
+    def _login(self):
+        from .microsoft_auth import create_oauth_state
+
+        state = create_oauth_state("organization")
+        return self.client.get(f"/api/auth/slack/callback/?code=abc&state={state}")
+
+    def test_org_login_asks_for_bot_install(self):
+        with self.settings(SLACK_CLIENT_ID="cid", SLACK_CLIENT_SECRET="sec"):
+            resp = self.client.get("/api/auth/slack/login/?enroll_as=organization")
+        self.assertTrue(resp.json()["auth_url"].startswith("https://slack.com/oauth/v2/authorize"))
+        self.assertIn("channels%3Amanage", resp.json()["auth_url"])
+
+    def test_org_login_creates_channel_and_posts_admin_card(self):
+        calls = []
+        with self.settings(SLACK_CLIENT_ID="cid", SLACK_CLIENT_SECRET="sec"), \
+                patch("api.slack_client.exchange_install_code", return_value=self.INSTALL), \
+                patch("api.slack_client.slack_api", side_effect=self._fake_api(calls)):
+            resp = self._login()
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("slack_url=https%3A%2F%2Fapp.slack.com%2Fclient%2FT9%2FC42", resp["Location"])
+        self.assertIn("landed_on=channel", resp["Location"])
+        methods = [m for m, _ in calls]
+        self.assertIn("conversations.create", methods)
+        self.assertIn(("conversations.invite", {"channel": "C42", "users": "U1"}), calls)
+
+        post = next(body for m, body in calls if m == "chat.postMessage")
+        buttons = [b for b in post["blocks"] if b.get("block_id") == "aidl_tabs"][0]["elements"]
+        labels = [b["text"]["text"] for b in buttons]
+        self.assertEqual(len(labels), 6)
+        self.assertFalse(any("Policy" in l for l in labels))
+
+        org = Organization.objects.get(slack_team_id="T9")
+        self.assertEqual(org.slack_channel_id, "C42")
+        self.assertNotIn("xoxb-test", org.slack_bot_token)  # stored encrypted
+        from .slack_client import bot_token
+        self.assertEqual(bot_token(org), "xoxb-test")
+
+    def test_taken_private_name_falls_back_to_next_name(self):
+        calls = []
+        base = self._fake_api(calls)
+
+        def fake(method, token, *, json=None, params=None):
+            if method == "conversations.create" and json["name"] == "aidl":
+                calls.append((method, json))
+                return {"ok": False, "error": "name_taken"}
+            if method == "conversations.list":
+                return {"ok": True, "channels": []}  # the taken #aidl is private
+            return base(method, token, json=json, params=params)
+
+        with self.settings(SLACK_CLIENT_ID="cid", SLACK_CLIENT_SECRET="sec", SLACK_CHANNEL_NAME="aidl"),                 patch("api.slack_client.exchange_install_code", return_value=self.INSTALL),                 patch("api.slack_client.slack_api", side_effect=fake):
+            resp = self._login()
+        self.assertIn("landed_on=channel", resp["Location"])
+        names = [body["name"] for m, body in calls if m == "conversations.create"]
+        self.assertEqual(names, ["aidl", "aidl-app"])
+
+    def test_second_login_reuses_channel_and_updates_card(self):
+        calls = []
+        with self.settings(SLACK_CLIENT_ID="cid", SLACK_CLIENT_SECRET="sec"), \
+                patch("api.slack_client.exchange_install_code", return_value=self.INSTALL), \
+                patch("api.slack_client.slack_api", side_effect=self._fake_api(calls)):
+            self._login()
+            calls.clear()
+            self._login()
+        methods = [m for m, _ in calls]
+        self.assertNotIn("conversations.create", methods)
+        self.assertIn("chat.update", methods)
+        self.assertEqual(Organization.objects.filter(slack_team_id="T9").count(), 1)
+
+
+class SlackInteractionsTests(TestCase):
+    SECRET = "shh"
+
+    def setUp(self):
+        self.org = make_org(slack_team_id="T9")
+        self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Ana Owner")
+
+    def _post(self, action, user_id="U1", secret=None):
+        import hashlib, hmac, time
+        from urllib.parse import urlencode
+
+        payload = {
+            "type": "block_actions", "team": {"id": "T9"}, "user": {"id": user_id},
+            "response_url": "https://hooks.slack.test/r", "container": {"is_ephemeral": False},
+            "actions": [action],
+        }
+        body = urlencode({"payload": json.dumps(payload)})
+        ts = str(int(time.time()))
+        sig = "v0=" + hmac.new((secret or self.SECRET).encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
+        with self.settings(SLACK_SIGNING_SECRET=self.SECRET, SLACK_REPLY_SYNC=True), patch("api.slack_interactions.requests.post") as post:
+            resp = self.client.post(
+                "/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
+                HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig,
+            )
+        return resp, post
+
+    def test_bad_signature_rejected(self):
+        resp, post = self._post({"action_id": "aidl_tab_cards", "value": "cards"}, secret="wrong")
+        self.assertEqual(resp.status_code, 401)
+        post.assert_not_called()
+
+    def test_tab_click_replies_privately_with_that_card(self):
+        resp, post = self._post({"action_id": "aidl_tab_cards", "value": "cards"})
+        self.assertEqual(resp.status_code, 200)
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["response_type"], "ephemeral")
+        text = json.dumps(body["blocks"])
+        self.assertIn("Send Cards to your team", text)
+        self.assertIn("/api/slack/cards/admin/?token=", text)
+
+    def test_tab_outside_permissions_is_refused(self):
+        make_user(self.org, microsoft_id="slack:T9:U2", perm_approve_apps=False, perm_access_cards=True, perm_create_card=False)
+        _resp, post = self._post({"action_id": "aidl_tab_ai-apps", "value": "ai-apps"}, user_id="U2")
+        self.assertIn("permissions don't include", post.call_args.kwargs["json"]["text"])
+
+    def test_non_admin_is_refused(self):
+        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U3")
+        _resp, post = self._post({"action_id": "aidl_tab_home", "value": "home"}, user_id="U3")
+        self.assertIn("only available to AIDL admins", post.call_args.kwargs["json"]["text"])
+
+
+ALL_ANSWERS = {
+    "ai_policy": "No, not yet",
+    "approved_tools": "Only company-approved tools",
+    "confidential_data": "Never",
+    "human_review": "Always",
+    "disclosure": "Yes, always",
+    "regulation": "DPDP Act (India)",
+    "incident_reporting": "Through HR",
+    "training_frequency": "Every quarter",
+}
+
+
+class PolicyAnswersTests(TestCase):
+    """Slack guide 4.7 (saving answers) and 7.3 (answers → card data)."""
+
+    def setUp(self):
+        self.org = make_org()
+        self.admin = make_user(self.org)
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + create_access_token(self.admin))
+
+    def test_save_and_read_answers(self):
+        resp = self.client.post("/api/org/policy-answers/", {"answers": ALL_ANSWERS}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertTrue(resp.data["policy_completed"])
+        self.assertEqual(self.client.get("/api/org/policy-answers/").data["answers"], ALL_ANSWERS)
+        me = self.client.get("/api/auth/me/")
+        self.assertTrue(me.data["policy_completed"])
+
+    def test_incomplete_answers_rejected(self):
+        partial = dict(ALL_ANSWERS, regulation="Mars law")
+        resp = self.client.post("/api/org/policy-answers/", {"answers": partial}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("regulation", resp.data)
+
+    def test_learner_cannot_change_answers(self):
+        learner = make_user(self.org, role=AIDLUser.Role.LEARNER)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Bearer " + create_access_token(learner))
+        self.assertEqual(client.post("/api/org/policy-answers/", {"answers": ALL_ANSWERS}, format="json").status_code, 403)
+
+    def test_answers_travel_through_slack_login_state(self):
+        with self.settings(SLACK_CLIENT_ID="cid", SLACK_CLIENT_SECRET="sec"):
+            resp = self.client.get("/api/auth/slack/login/", {"enroll_as": "organization", "policy": json.dumps(ALL_ANSWERS)})
+        self.assertEqual(resp.status_code, 200)
+        from .models import OAuthState
+        self.assertEqual(json.loads(OAuthState.objects.get(state=resp.data["state"]).payload)["policy_answers"], ALL_ANSWERS)
+
+    def test_answers_change_the_cards(self):
+        from .org_policy import save_answers
+        from .slack_cards import build_admin_cards_context, build_user_cards_context
+
+        save_answers(self.org, ALL_ANSWERS)
+        d = build_admin_cards_context(self.admin)
+        cards = {c["id"]: c for c in d["cards"]}
+        self.assertEqual(d["aup_display"], "—")                               # no written policy
+        self.assertEqual(cards["c0"]["state"], "unavailable")
+        self.assertEqual([c["id"] for c in d["cards"][:2]], ["c7", "c8"])      # recommended first
+        self.assertIn("the DPDP Act", cards["c5"]["desc"])
+        self.assertIn("HR", cards["c9"]["desc"])
+        self.assertEqual(d["ai_apps"][0]["status"], "Prohibited")              # consumer chatbots first
+        self.assertIn("consumer", d["ai_apps"][0]["name"].lower())
+
+        learner = make_user(self.org, role=AIDLUser.Role.LEARNER)
+        u = build_user_cards_context(learner)
+        driver = next(r for r in u["highway_code"] if r["shape"] == "yield")
+        self.assertTrue(driver["text"].endswith("Say when AI helped."))
+        red = next(l for l in u["lights"] if l["id"] == "red")
+        self.assertIn("All confidential and customer data", red["items"])
+        self.assertEqual(u["training_note"], "Refresher reminder every 3 months")
+
+    def test_other_answers(self):
+        from .org_policy import save_answers
+        from .slack_cards import build_admin_cards_context
+
+        save_answers(self.org, dict(ALL_ANSWERS, ai_policy="Yes, but still a draft",
+                                    approved_tools="Any public AI tool",
+                                    confidential_data="Only in approved enterprise tools",
+                                    human_review="No, it is optional"))
+        d = build_admin_cards_context(self.admin)
+        cards = {c["id"]: c for c in d["cards"]}
+        self.assertIn("Draft", cards["c0"]["kicker"])
+        self.assertNotIn("unreviewed", cards["c3"]["desc"])
+        self.assertEqual([a["name"] for a in d["ai_apps"][:3]], ["ChatGPT", "Claude", "Gemini"])
+        self.assertTrue(all(a["data_allowed"] in ("Public only", "Internal", "Internal + Confidential")
+                            for a in d["ai_apps"] if a["status"] == "Approved"))
+
+
+class SlackMultiWorkspaceTests(TestCase):
+    """Any company can install AIDL — each Slack workspace is its own org."""
+
+    def _user(self, uid, team):
+        return AIDLUser.objects.create(
+            microsoft_id=f"slack:{team}:{uid}", email=f"{uid}@{team}.example", full_name=uid,
+            enroll_as=AIDLUser.EnrollAs.ORGANIZATION, provider="slack",
+        )
+
+    def test_same_workspace_name_gets_separate_orgs(self):
+        from .auth_views import _ensure_slack_organization
+
+        a = _ensure_slack_organization(self._user("U1", "TA"), {"team_id": "TA", "team_name": "Acme"})
+        b = _ensure_slack_organization(self._user("U2", "TB"), {"team_id": "TB", "team_name": "Acme"})
+        self.assertNotEqual(a.pk, b.pk)
+        self.assertEqual((a.slack_team_id, b.slack_team_id), ("TA", "TB"))
+
+    def test_second_workspace_never_takes_over_the_first(self):
+        from .auth_views import _ensure_slack_organization
+
+        user = self._user("U1", "TA")
+        first = _ensure_slack_organization(user, {"team_id": "TA", "team_name": "Acme"})
+        second = _ensure_slack_organization(user, {"team_id": "TB", "team_name": "Acme Labs"})
+        first.refresh_from_db()
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(first.slack_team_id, "TA")
+
+    def test_existing_website_org_gets_its_workspace_linked(self):
+        from .auth_views import _ensure_slack_organization
+
+        org = make_org(name="Globex")
+        user = make_user(org, microsoft_id="slack:TG:U9")
+        linked = _ensure_slack_organization(user, {"team_id": "TG", "team_name": "Globex HQ"})
+        self.assertEqual(linked.pk, org.pk)
+        self.assertEqual(Organization.objects.get(pk=org.pk).slack_team_id, "TG")

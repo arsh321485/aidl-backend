@@ -1,0 +1,14 @@
+{% extends "slack/base.html" %}
+{% block title %}AIDL · {{ title }}{% endblock %}
+{% block content %}
+<div class="msg" style="margin-top: 24px;">
+  <div class="msg-row">
+    <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+    <div class="msg-col">
+      <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span></div>
+      <div class="header-block">{{ title }}</div>
+      <div class="section-text">{{ message }}</div>
+    </div>
+  </div>
+</div>
+{% endblock %}

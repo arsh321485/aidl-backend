@@ -23,6 +23,18 @@ class Organization(models.Model):
     name = models.CharField(max_length=255)
     slug = models.CharField(max_length=128, blank=True, default="", unique=True)
     teams_team_id = models.CharField(max_length=128, blank=True, default="")
+    # Slack workspace (team) id — set on the first Slack organization login so
+    # the same workspace always maps to the same organization.
+    slack_team_id = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    # "Add to Slack" install: bot token (encrypted, see slack_client.py), the
+    # #aidl channel and the Admin Center message posted in it.
+    slack_bot_token = models.TextField(blank=True, default="")
+    slack_bot_user_id = models.CharField(max_length=32, blank=True, default="")
+    slack_channel_id = models.CharField(max_length=32, blank=True, default="")
+    slack_home_message_ts = models.CharField(max_length=32, blank=True, default="")
+    # The 8 policy answers from signup (JSON: question id → chosen option),
+    # see org_policy.py. Empty until the questions are answered.
+    policy_answers = models.TextField(blank=True, default="")
     teams_welcome_channel_id = models.CharField(max_length=255, blank=True, default="")
     teams_welcome_message_id = models.CharField(max_length=255, blank=True, default="")
     # Captured from the bot's conversationUpdate/installationUpdate activity
@@ -327,6 +339,9 @@ class OAuthState(models.Model):
 
     state = models.CharField(max_length=128, unique=True)
     enroll_as = models.CharField(max_length=32, default="individual")
+    # Extra data carried through the OAuth round trip (Slack org signup sends
+    # the policy answers here, since the admin isn't logged in yet).
+    payload = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
 
