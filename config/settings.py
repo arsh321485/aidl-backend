@@ -22,6 +22,10 @@ DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes")
 _DEFAULT_ALLOWED_HOSTS = (
     "127.0.0.1,localhost,aidl-backend.onrender.com,vaptbackend.secureitlab.com"
 )
+# ngrok and Render terminate TLS and forward X-Forwarded-Proto: https —
+# trust it so request.build_absolute_uri() (e.g. Slack card links) is https.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv("ALLOWED_HOSTS", _DEFAULT_ALLOWED_HOSTS).split(",")
@@ -50,7 +54,7 @@ SLACK_SCOPES = os.getenv("SLACK_SCOPES", "openid,email,profile")
 # create/reuse #aidl, invite admins, post the Admin cards.
 SLACK_BOT_SCOPES = os.getenv(
     "SLACK_BOT_SCOPES",
-    "channels:manage,channels:join,channels:read,chat:write,users:read,users:read.email,im:write",
+    "channels:manage,channels:join,channels:read,chat:write,users:read,users:read.email,im:write,files:write",
 )
 # Slack channel names must be lowercase with no spaces ("AIDL Driving License"
 # → "aidl-driving-license").

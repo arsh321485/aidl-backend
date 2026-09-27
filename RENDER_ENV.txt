@@ -81,4 +81,4 @@ SLACK_CHANNEL_NAME=aidl-driving-license
 # Slack app → Interactivity & Shortcuts → Request URL:
 #   https://aidl-backend.onrender.com/api/slack/interactions/
 # Slack app → OAuth & Permissions → Bot Token Scopes:
-#   channels:manage channels:join channels:read chat:write users:read users:read.email im:write
+#   channels:manage channels:join channels:read chat:write users:read users:read.email im:write files:write

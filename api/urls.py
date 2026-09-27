@@ -44,6 +44,7 @@ urlpatterns = [
     path("org/policy-answers/", org_policy_views.policy_answers, name="org-policy-answers"),
     # Slack Admin cards + User cards (AIDL Slack guide, sections 8 and 10)
     path("slack/cards/admin/", slack_card_views.slack_admin_cards, name="slack-admin-cards"),
+    path("slack/cards/admin/coverage/", slack_card_views.slack_admin_coverage, name="slack-admin-coverage"),
     path(
         "slack/cards/admin/coverage.csv",
         slack_card_views.slack_admin_coverage_csv,

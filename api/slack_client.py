@@ -225,3 +225,37 @@ def post_admin_center(org: Organization, blocks: list, text: str) -> bool:
     org.slack_home_message_ts = posted.get("ts", "")
     org.save(update_fields=["slack_home_message_ts", "updated_at"])
     return True
+
+
+# ---------- files (guide 8.1: Export Coverage CSV, delivered inside Slack) ----------
+
+def send_file_to_user(token: str, slack_user_id: str, *, filename: str, content: str, title: str, comment: str) -> dict:
+    """DM a file from the AIDL bot using Slack's external-upload flow
+    (files.getUploadURLExternal → upload → files.completeUploadExternal).
+    Needs the files:write bot scope."""
+    dm = slack_api("conversations.open", token, json={"users": slack_user_id})
+    if not dm.get("ok"):
+        return dm
+    channel_id = dm["channel"]["id"]
+    data = content.encode("utf-8")
+    ticket = slack_api("files.getUploadURLExternal", token, params={"filename": filename, "length": len(data)})
+    if not ticket.get("ok"):
+        return ticket
+    try:
+        uploaded = requests.post(ticket["upload_url"], data=data, timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("slack file upload failed: %s", exc)
+        return {"ok": False, "error": "upload_failed"}
+    if uploaded.status_code != 200:
+        return {"ok": False, "error": f"upload_http_{uploaded.status_code}"}
+    done = slack_api(
+        "files.completeUploadExternal",
+        token,
+        json={"files": [{"id": ticket["file_id"], "title": title}], "channel_id": channel_id, "initial_comment": comment},
+    )
+    if done.get("ok"):
+        # Direct download link (Slack's viewer shows CSV snippets as a blank
+        # page). Works for anyone signed in to this Slack workspace.
+        info = (slack_api("files.info", token, params={"file": ticket["file_id"]}).get("file") or {})
+        done["download_url"] = info.get("url_private_download") or info.get("permalink", "")
+    return done

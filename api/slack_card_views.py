@@ -6,8 +6,6 @@ Slack) or `Authorization: Bearer`. With no token the pages render the
 guide's demo data as a design preview.
 """
 
-import csv
-
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.views.decorators.cache import never_cache
@@ -15,7 +13,7 @@ from django.views.decorators.cache import never_cache
 from .auth_jwt import decode_token
 from .models import AIDLUser, CardRequest, TrafficLightRating
 from .org_service import compute_org_metrics, get_organization_for_user
-from .slack_cards import build_admin_cards_context, build_user_cards_context
+from .slack_cards import build_admin_cards_context, build_user_cards_context, coverage_csv, coverage_data
 
 
 class _BadToken(Exception):
@@ -85,38 +83,35 @@ def slack_user_cards(request):
     return render(request, "slack/user_cards.html", {"d": data})
 
 
-@never_cache
-def slack_admin_coverage_csv(request):
-    """Guide 8.1 — Export Coverage CSV: every user with license class, AUP
-    status and how many reference cards the organization has sent."""
+def _coverage(request):
+    """(coverage data, None) for the signed-in admin, or (None, error page)."""
     try:
         user = _user_from_request(request)
     except _BadToken:
         user = None
     if user is None or user.role != AIDLUser.Role.ADMIN:
-        return HttpResponse("Admin sign-in required.", status=401, content_type="text/plain")
+        return None, _error_page(request, "Link expired", "Click Export Coverage CSV in Slack again to get a new link.", 401)
     org = get_organization_for_user(user)
     if org is None:
-        return HttpResponse("No organization found for this admin.", status=404, content_type="text/plain")
+        return None, _error_page(request, "No organization", "No AIDL organization is linked to this admin.", 404)
+    return coverage_data(org), None
 
-    metrics = compute_org_metrics(org)
-    cards_sent = CardRequest.objects.filter(
-        organization_id=str(org.pk), status=CardRequest.Status.SENT
-    ).count()
-    response = HttpResponse(content_type="text/csv")
+
+@never_cache
+def slack_admin_coverage(request):
+    """Guide 8.1 — coverage report page (web fallback for the Slack popup)."""
+    data, error = _coverage(request)
+    if error:
+        return error
+    return render(request, "slack/coverage.html", {**data, "csv_url": f"coverage.csv?token={request.GET.get('token', '')}"})
+
+
+@never_cache
+def slack_admin_coverage_csv(request):
+    """The coverage table as a CSV file download."""
+    data, error = _coverage(request)
+    if error:
+        return error
+    response = HttpResponse(coverage_csv(data["rows"]), content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="aidl-coverage.csv"'
-    writer = csv.writer(response)
-    writer.writerow(["name", "email", "role", "license_class", "license_number", "aup_signed", "cards_received"])
-    for m in metrics["members"]:
-        writer.writerow(
-            [
-                m.full_name,
-                m.email,
-                m.role,
-                "L" if m.licence_issued else "",
-                m.licence_number,
-                "yes" if m.aup_signed else "no",
-                cards_sent,
-            ]
-        )
     return response

@@ -525,3 +525,45 @@ def _traffic_lights(fx: dict, chosen: list[str]) -> list[dict]:
             light["items"].append("All confidential and customer data")
         lights.append(light)
     return lights
+
+
+# ---------- guide 8.1: Export Coverage ----------
+
+COVERAGE_COLUMNS = ("name", "email", "role", "license_class", "license_number", "aup_signed", "cards_received")
+
+
+def coverage_data(org) -> dict:
+    """Every member with license class, AUP status and cards received — used
+    by the Slack popup, the CSV file sent in Slack and the web page."""
+    cards_sent = CardRequest.objects.filter(organization_id=str(org.pk), status=CardRequest.Status.SENT).count()
+    rows = [
+        {
+            "name": m.full_name,
+            "email": m.email,
+            "role": m.role,
+            "license_class": "L" if m.licence_issued else "",
+            "license_number": m.licence_number,
+            "aup_signed": "yes" if m.aup_signed else "no",
+            "cards_received": cards_sent,
+        }
+        for m in compute_org_metrics(org)["members"]
+    ]
+    return {
+        "org_name": org.name,
+        "rows": rows,
+        "licensed": sum(1 for r in rows if r["license_class"]),
+        "unsigned": sum(1 for r in rows if r["aup_signed"] == "no"),
+        "cards_sent": cards_sent,
+    }
+
+
+def coverage_csv(rows: list[dict]) -> str:
+    import csv
+    import io
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(COVERAGE_COLUMNS)
+    for row in rows:
+        writer.writerow([row[c] for c in COVERAGE_COLUMNS])
+    return out.getvalue()
