@@ -775,6 +775,21 @@ class SlackCardsTests(TestCase):
         self.assertContains(resp, "tl-section green")
         self.assertNotContains(resp, "tl-section red")
 
+    def test_coverage_page_lists_members_with_download(self):
+        self.assertEqual(self.client.get("/api/slack/cards/admin/coverage/").status_code, 401)
+        resp = self.client.get(f"/api/slack/cards/admin/coverage/?token={create_access_token(self.primary)}")
+        self.assertContains(resp, "Coverage report")
+        self.assertContains(resp, self.primary.email)
+        self.assertContains(resp, "coverage.csv?token=")
+
+    def test_private_links_use_https_behind_a_proxy(self):
+        from django.test import RequestFactory
+
+        from .slack_interactions import _private_link
+
+        req = RequestFactory().post("/", HTTP_HOST="testserver", HTTP_X_FORWARDED_PROTO="https")
+        self.assertTrue(_private_link(req, self.primary, "home").startswith("https://testserver/api/slack/cards/admin/coverage/?token="))
+
     def test_coverage_csv_requires_admin(self):
         self.assertEqual(self.client.get("/api/slack/cards/admin/coverage.csv").status_code, 401)
         resp = self.client.get(
@@ -940,7 +955,7 @@ class SlackInteractionsTests(TestCase):
         self.assertEqual(body["response_type"], "ephemeral")
         text = json.dumps(body["blocks"])
         self.assertIn("Send Cards to your team", text)
-        self.assertIn("/api/slack/cards/admin/?token=", text)
+        self.assertIn("aidl_open_cards", text)  # opens a Slack modal, not a web page
 
     def test_tab_outside_permissions_is_refused(self):
         make_user(self.org, microsoft_id="slack:T9:U2", perm_approve_apps=False, perm_access_cards=True, perm_create_card=False)
@@ -1076,3 +1091,189 @@ class SlackMultiWorkspaceTests(TestCase):
         linked = _ensure_slack_organization(user, {"team_id": "TG", "team_name": "Globex HQ"})
         self.assertEqual(linked.pk, org.pk)
         self.assertEqual(Organization.objects.get(pk=org.pk).slack_team_id, "TG")
+
+
+class SlackModalTests(TestCase):
+    """Admin card forms as Slack modals (guide 8.2–8.6, 9). Slack API mocked."""
+
+    SECRET = "shh"
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_token=encrypt_token("xoxb-t"))
+        self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def _fake(self, method, token, *, json=None, params=None):
+        self.calls.append((method, json or params))
+        if method in ("users.lookupByEmail", "users.info"):
+            email = (params or {}).get("email", "rahul@acme.example")
+            if email == "stranger@nowhere.example":
+                return {"ok": False, "error": "users_not_found"}
+            return {"ok": True, "user": {"id": "U7", "profile": {"email": email, "real_name": "Rahul K"}}}
+        return {"ok": True, "ts": "1.2"}
+
+    def _post(self, payload):
+        import hashlib
+        import hmac
+        import time
+        from urllib.parse import urlencode
+
+        payload = {"team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"}, "trigger_id": "trig", **payload}
+        body = urlencode({"payload": json.dumps(payload)})
+        ts = str(int(time.time()))
+        sig = "v0=" + hmac.new(self.SECRET.encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
+        with self.settings(SLACK_SIGNING_SECRET=self.SECRET, SLACK_REPLY_SYNC=True), \
+                patch("api.slack_client.slack_api", side_effect=self._fake), \
+                patch("requests.post") as http:
+            http.return_value.status_code = 200
+            self.http = http  # every outgoing HTTP POST (response_url replies, file upload)
+            return self.client.post("/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
+                                    HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
+
+    def _submit(self, callback, values, meta=None):
+        view = {"callback_id": callback, "private_metadata": json.dumps(meta or {"channel_id": "C42"}),
+                "blocks": [{"type": "input", "block_id": next(iter(values), "name")}],
+                "state": {"values": {k: {"v": v} for k, v in values.items()}}}
+        return self._post({"type": "view_submission", "view": view})
+
+    def test_send_admin_invite_opens_a_modal(self):
+        self._post({"type": "block_actions", "channel": {"id": "C42"},
+                    "actions": [{"action_id": "aidl_open_add-admin", "value": "add-admin"}]})
+        opened = [body for m, body in self.calls if m == "views.open"]
+        self.assertEqual(opened[0]["view"]["callback_id"], "aidl_add_admin")
+        self.assertEqual(opened[0]["trigger_id"], "trig")
+
+    def test_add_admin_saves_permissions_and_onboards(self):
+        resp = self._submit("aidl_add_admin", {
+            "email": {"value": "rahul@acme.example"},
+            "perms": {"selected_options": [{"value": "access_cards"}]},
+        })
+        self.assertEqual(resp.json(), {"response_action": "clear"})
+        rahul = AIDLUser.objects.get(microsoft_id="slack:T9:U7")
+        self.assertEqual(rahul.role, AIDLUser.Role.ADMIN)
+        self.assertEqual((rahul.perm_approve_apps, rahul.perm_access_cards, rahul.perm_create_card), (False, True, False))
+        methods = [m for m, _ in self.calls]
+        self.assertIn("conversations.invite", methods)
+        self.assertIn("chat.postEphemeral", methods)
+        dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7")
+        self.assertIn("added you as an AIDL admin", dm["text"])
+
+    def test_add_admin_conditions(self):
+        resp = self._submit("aidl_add_admin", {"email": {"value": ""}})
+        self.assertIn("email", resp.json()["errors"])
+        resp = self._submit("aidl_add_admin", {"email": {"value": "stranger@nowhere.example"}})
+        self.assertIn("isn't in your Slack workspace", resp.json()["errors"]["email"])
+        self.org.admin_seat_limit = 1
+        self.org.save()
+        resp = self._submit("aidl_add_admin", {"email": {"value": "rahul@acme.example"}})
+        self.assertIn("no seats left", resp.json()["errors"]["email"])
+
+    def test_add_user_issues_license_and_sends_user_cards(self):
+        resp = self._submit("aidl_add_user", {"name": {"value": "Arjun Mehta"}, "email": {"value": "arjun@acme.example"}})
+        self.assertEqual(resp.json(), {"response_action": "clear"})
+        arjun = AIDLUser.objects.get(microsoft_id="slack:T9:U7")
+        self.assertTrue(arjun.licence_issued)
+        self.assertTrue(arjun.licence_number.startswith("AIDL-L-"))
+        dms = [b["text"] for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
+        self.assertEqual(dms, ["Welcome to AIDL, Arjun!", "Your Learner's Permit is ready"])
+
+    def test_add_user_requires_name(self):
+        resp = self._submit("aidl_add_user", {"name": {"value": ""}, "email": {"value": "a@acme.example"}})
+        self.assertIn("name", resp.json()["errors"])
+
+    def test_card_request_then_send_with_lights(self):
+        resp = self._submit("aidl_card_request", {}, meta={"channel_id": "C42", "card_id": "c1"})
+        self.assertEqual(resp.json()["view"]["callback_id"], "aidl_card_send")
+        meta = {"channel_id": "C42", "card_id": "c1"}
+        resp = self._submit("aidl_card_send", {"lights": {"selected_options": []}, "when": {"selected_option": {"value": "now"}}}, meta=meta)
+        self.assertIn("Select at least one light", resp.json()["errors"]["lights"])
+        resp = self._submit("aidl_card_send", {"lights": {"selected_options": [{"value": "green"}, {"value": "red"}]},
+                                               "when": {"selected_option": {"value": "now"}}}, meta=meta)
+        self.assertEqual(resp.json(), {"response_action": "clear"})
+        post = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "C42")
+        text = json.dumps(post["blocks"])
+        self.assertIn("GREEN", text)
+        self.assertNotIn("AMBER", text)
+        self.assertEqual(CardRequest.objects.get(organization_id=str(self.org.pk), card_id="c1").status, CardRequest.Status.SENT)
+
+    def test_schedule_needs_a_time(self):
+        meta = {"channel_id": "C42", "card_id": "c8"}
+        self._submit("aidl_card_request", {}, meta=meta)
+        resp = self._submit("aidl_card_send", {"when": {"selected_option": {"value": "later"}}}, meta=meta)
+        self.assertIn("at", resp.json()["errors"])
+
+    def test_add_app_saves_to_registry(self):
+        resp = self._submit("aidl_add_app", {
+            "name": {"value": "Perplexity"},
+            "category": {"selected_option": {"value": "Research & Search"}},
+            "data": {"selected_option": {"value": "Internal"}},
+            "status": {"selected_option": {"value": "Prohibited"}},
+        }, meta={"channel_id": "C42", "kind": "ai"})
+        self.assertEqual(resp.json(), {"response_action": "clear"})
+        app = RegisteredApp.objects.get(organization_id=str(self.org.pk), name="Perplexity")
+        self.assertEqual((app.app_type, app.status, app.data_allowed), ("ai", "rejected", "internal"))
+
+    def test_export_opens_popup_and_dms_the_csv(self):
+        def fake(method, token, *, json=None, params=None):
+            self.calls.append((method, json or params))
+            if method == "conversations.open":
+                return {"ok": True, "channel": {"id": "D1"}}
+            if method == "files.getUploadURLExternal":
+                return {"ok": True, "upload_url": "https://files.slack.test/up", "file_id": "F1"}
+            if method == "views.open":
+                return {"ok": True, "view": {"id": "V1"}}
+            if method == "files.info":
+                return {"ok": True, "file": {"url_private_download": "https://files.slack.com/files-pri/T9-F1/download/aidl-coverage.csv"}}
+            return {"ok": True}
+
+        self._fake = fake
+        self._post({"type": "block_actions", "channel": {"id": "C42"}, "response_url": "https://hooks.slack.test/r",
+                    "actions": [{"action_id": "aidl_open_home", "value": "home"}]})
+        opened = next(b for m, b in self.calls if m == "views.open")
+        self.assertEqual(opened["view"]["callback_id"], "aidl_coverage")
+        self.assertIn(self.admin.email, json.dumps(opened["view"]["blocks"]))
+        upload = next(c for c in self.http.call_args_list if c.args and c.args[0] == "https://files.slack.test/up")
+        self.assertIn(b"name,email,role", upload.kwargs["data"])
+        done = next(b for m, b in self.calls if m == "files.completeUploadExternal")
+        self.assertEqual(done["channel_id"], "D1")
+        self.assertEqual(done["files"][0]["id"], "F1")
+        self.assertIn("/api/slack/cards/admin/coverage.csv?token=", json.dumps(opened["view"]["blocks"]))
+        self.assertFalse([b for m, b in self.calls if m == "views.update"])  # DM copy worked, nothing to change
+
+    def test_export_without_files_scope_explains_the_fix(self):
+        def fake(method, token, *, json=None, params=None):
+            self.calls.append((method, json or params))
+            if method == "conversations.open":
+                return {"ok": True, "channel": {"id": "D1"}}
+            if method == "files.getUploadURLExternal":
+                return {"ok": False, "error": "missing_scope"}
+            if method == "views.open":
+                return {"ok": True, "view": {"id": "V1"}}
+            return {"ok": True}
+
+        self._fake = fake
+        import hashlib, hmac, time
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"}, "trigger_id": "t",
+                   "channel": {"id": "C42"}, "response_url": "https://hooks.slack.test/r",
+                   "actions": [{"action_id": "aidl_open_home", "value": "home"}]}
+        body = urlencode({"payload": json.dumps(payload)})
+        ts = str(int(time.time()))
+        sig = "v0=" + hmac.new(self.SECRET.encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
+        with self.settings(SLACK_SIGNING_SECRET=self.SECRET, SLACK_REPLY_SYNC=True), \
+                patch("api.slack_client.slack_api", side_effect=fake), \
+                patch("api.slack_interactions.requests.post") as reply:
+            self.client.post("/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
+                             HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
+        updated = next(b for m, b in self.calls if m == "views.update")
+        self.assertIn("files:write", json.dumps(updated["view"]["blocks"]))
+
+    def test_invited_admin_without_permission_is_refused(self):
+        make_user(self.org, microsoft_id="slack:T9:U2", perm_approve_apps=False, perm_access_cards=False, perm_create_card=False)
+        view = {"callback_id": "aidl_add_app", "private_metadata": json.dumps({"kind": "ai"}),
+                "blocks": [{"type": "input", "block_id": "name"}], "state": {"values": {"name": {"v": {"value": "X"}}}}}
+        resp = self._post({"type": "view_submission", "user": {"id": "U2", "team_id": "T9"}, "view": view})
+        self.assertIn("permissions", resp.json()["errors"]["name"])

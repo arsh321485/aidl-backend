@@ -1,0 +1,56 @@
+{% extends "slack/base.html" %}
+{% block title %}AIDL · Coverage{% endblock %}
+{% block styles %}
+  .wrap { max-width: 900px; }
+  .cov-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+  .cov-stat { background: var(--cream); border-radius: 6px; padding: 10px 8px; text-align: center; }
+  .cov-stat .k { font-size: 9.5px; font-weight: 800; letter-spacing: .3px; color: var(--muted); text-transform: uppercase; }
+  .cov-stat .v { font-size: 22px; font-weight: 900; margin-top: 3px; }
+  .cov-table-wrap { overflow-x: auto; margin: 12px 0 4px; border: 1px solid var(--line); border-radius: 6px; }
+  .cov-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 600px; }
+  .cov-table th { text-align: left; font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: var(--muted); background: #FAF6EA; padding: 8px 10px; }
+  .cov-table td { padding: 9px 10px; border-top: 1px dashed var(--line); white-space: nowrap; }
+  .cov-table td.cov-email { white-space: normal; word-break: break-all; min-width: 150px; }
+  .cov-no { color: var(--bad); font-weight: 700; }
+  .cov-yes { color: var(--ok); font-weight: 700; }
+  a.slack-btn { text-decoration: none; display: inline-flex; align-items: center; }
+{% endblock %}
+{% block content %}
+<h1 class="section-label" style="margin-top:12px">Export Coverage <span>{{ org_name }}</span></h1>
+<div class="msg">
+  <div class="msg-row">
+    <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
+    <div class="msg-col">
+      <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ org_name }}</span></div>
+      <div class="header-block">⬇ Coverage report</div>
+      <div class="section-text">Every team member with their license class, AUP signature and the reference cards they've received.</div>
+      <div class="cov-stats">
+        <div class="cov-stat"><div class="k">Members</div><div class="v">{{ rows|length }}</div></div>
+        <div class="cov-stat"><div class="k">Licensed</div><div class="v">{{ licensed }}</div></div>
+        <div class="cov-stat"><div class="k">AUP Unsigned</div><div class="v">{{ unsigned }}</div></div>
+      </div>
+      <div class="actions-row">
+        <a class="slack-btn primary" href="{{ csv_url }}" download="aidl-coverage.csv">⬇ Download CSV</a>
+      </div>
+      <div class="cov-table-wrap">
+        <table class="cov-table">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>License</th><th>AUP signed</th><th>Cards received</th></tr></thead>
+          <tbody>
+          {% for r in rows %}
+            <tr>
+              <td>{{ r.name }}</td><td class="cov-email">{{ r.email }}</td><td>{{ r.role|title }}</td>
+              <td>{% if r.license_class %}{{ r.license_class }} · {{ r.license_number }}{% else %}—{% endif %}</td>
+              <td class="{% if r.aup_signed == 'yes' %}cov-yes{% else %}cov-no{% endif %}">{{ r.aup_signed|title }}</td>
+              <td>{{ r.cards_received }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6">No team members yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="context-line">This link works for 60 minutes. Click Export Coverage CSV in Slack again for a new one.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -14,11 +14,11 @@ from .slack_cards import ADMIN_TABS
 _DOT = {"g": "🟢", "a": "🟡", "r": "🔴"}
 _OPEN_LABEL = {
     "home": "⬇ Export Coverage CSV",
-    "add-admin": "Send Admin Invite →",
-    "add-user": "Issue License →",
-    "cards": "View & send cards →",
-    "ai-apps": "＋ Add AI Application →",
-    "it-apps": "＋ Add IT Application →",
+    "add-admin": "Send Admin Invite",
+    "add-user": "Issue License",
+    "cards": "View & send cards",
+    "ai-apps": "＋ Add AI Application",
+    "it-apps": "＋ Add IT Application",
 }
 _NEXT = {
     "home": "→ Next: bring in another admin to help run this",
@@ -66,11 +66,10 @@ def tab_buttons(d: dict, active: str) -> dict:
 
 
 def _open_button(tab: str, open_url: str) -> dict:
-    """In a private (ephemeral) card the button links straight to the form;
-    in the shared channel message it asks for a private link first."""
-    if open_url:
-        return _button(_OPEN_LABEL[tab], f"aidl_link_{tab}", url=open_url, style="primary")
-    return _button(_OPEN_LABEL[tab], f"aidl_open_{tab}", value=tab)
+    """Every card button opens a Slack modal (slack_modals.py) — Export
+    Coverage CSV too: the report shows in the modal and the CSV file is sent
+    to the admin by DM, so nothing opens in the browser."""
+    return _button(_OPEN_LABEL[tab], f"aidl_open_{tab}", value=tab, style="" if tab == "home" else "primary")
 
 
 def _home(d: dict) -> list:
@@ -192,5 +191,74 @@ def publish_admin_center(org, user) -> bool:
     from . import slack_client
     from .slack_cards import build_admin_cards_context
 
-    data = build_admin_cards_context(user)
+    from .models import AIDLUser
+
+    # The shared channel card greets the admin who signed the organization up.
+    primary = (
+        AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True)
+        .order_by("created_at")
+        .first()
+    ) or user
+    data = build_admin_cards_context(primary)
     return slack_client.post_admin_center(org, admin_card_blocks(data, "home"), admin_card_text(data))
+
+
+# ---------- User cards (guide 10.1, 10.2) — sent by DM ----------
+
+def user_welcome_blocks(member, org) -> list:
+    """Welcome message only — no buttons, nothing asked of the user."""
+    first = (member.full_name or "there").split()[0]
+    return [
+        _context(f"*AIDL* · APP  for {org.name}"),
+        {"type": "header", "text": {"type": "plain_text", "text": f"Welcome to AIDL, {first}! 👋", "emoji": True}},
+        _section(f"You've been added to *{org.name}'s* AI Driving License programme."),
+    ]
+
+
+def user_license_blocks(member, org) -> list:
+    from django.conf import settings
+
+    from .org_policy import get_answers, policy_effects
+    from .slack_cards import CURRICULUM_VERSION, DEFAULT_POLICY_VERSION
+
+    issued = member.licence_issued_at.strftime("%m/%d/%Y") if member.licence_issued_at else "—"
+    expires = member.licence_expires_at.strftime("%m/%d/%Y") if member.licence_expires_at else "—"
+    frontend = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+    verify = f"{frontend}/home#verify?lic={member.licence_number}"
+    note = policy_effects(get_answers(org))["training_note"]
+    card = {
+        "type": "section",
+        "text": _md(f"*AI DRIVING LICENSE* · issued for {org.name}\n*{(member.full_name or '').upper()}*"),
+        "fields": [
+            _md("*CLASS*\nLearner's Permit (L)"),
+            _md(f"*STATUS*\n{'ACTIVE' if member.licence_issued else 'PENDING'}"),
+            _md(f"*ISSUED*\n{issued}"),
+            _md(f"*EXPIRES*\n{expires}"),
+        ],
+    }
+    if member.avatar_url:
+        card["accessory"] = {"type": "image", "image_url": member.avatar_url, "alt_text": "Driver photo"}
+    blocks = [
+        _context(f"*AIDL* · APP  for {org.name}"),
+        {"type": "header", "text": {"type": "plain_text", "text": "🪪 Your Learner's Permit is ready", "emoji": True}},
+        card,
+        _context(f"`{member.licence_number}` · verify at aidl.org/verify"),
+        _section("This is your AI Driving License. You're currently at *Level L — Learner.* "
+                 "As you complete lessons and pass checks, you'll move up to higher levels."),
+        {"type": "actions", "elements": [
+            _button("Download License", "aidl_link_download", url=f"{_backend_base()}/api/teams/cards/learners-permit/download/?email={member.email}"),
+            _button("Share on LinkedIn", "aidl_link_linkedin", url=f"https://www.linkedin.com/sharing/share-offsite/?url={verify}"),
+            _button("Share on X", "aidl_link_x", url=f"https://twitter.com/intent/tweet?url={verify}"),
+        ]},
+        _context(f"Issued under Curriculum {CURRICULUM_VERSION} · Org Policy {DEFAULT_POLICY_VERSION} — recorded at issuance"),
+    ]
+    if note:
+        blocks.append(_context(f"🔁 {note}"))
+    return blocks
+
+
+def _backend_base() -> str:
+    from django.conf import settings
+
+    redirect = getattr(settings, "SLACK_REDIRECT_URI", "") or ""
+    return redirect.split("/api/")[0] if "/api/" in redirect else "https://aidl-backend.onrender.com"
