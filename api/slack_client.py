@@ -201,9 +201,12 @@ def ensure_channel(org: Organization, admin_slack_user_id: str) -> str:
     return channel_id
 
 
-def post_admin_center(org: Organization, blocks: list, text: str) -> bool:
+def post_admin_center(org: Organization, blocks: list, text: str, _retry: bool = True) -> bool:
     """Post the Admin Center Home card in #aidl — or refresh the one already
-    there, so logging in again doesn't flood the channel."""
+    there, so logging in again doesn't flood the channel. If Slack can't load
+    the stats image, the card is posted again as plain text."""
+    from .slack_blocks import has_images, text_fallback
+
     token = bot_token(org)
     if not (token and org.slack_channel_id):
         return False
@@ -215,12 +218,16 @@ def post_admin_center(org: Organization, blocks: list, text: str) -> bool:
         )
         if updated.get("ok"):
             return True
+        if updated.get("error") == "invalid_blocks" and _retry and has_images(blocks):
+            return post_admin_center(org, text_fallback(blocks), text, _retry=False)
     posted = slack_api(
         "chat.postMessage",
         token,
         json={"channel": org.slack_channel_id, "blocks": blocks, "text": text, "unfurl_links": False},
     )
     if not posted.get("ok"):
+        if posted.get("error") == "invalid_blocks" and _retry and has_images(blocks):
+            return post_admin_center(org, text_fallback(blocks), text, _retry=False)
         return False
     org.slack_home_message_ts = posted.get("ts", "")
     org.save(update_fields=["slack_home_message_ts", "updated_at"])
@@ -259,3 +266,31 @@ def send_file_to_user(token: str, slack_user_id: str, *, filename: str, content:
         info = (slack_api("files.info", token, params={"file": ticket["file_id"]}).get("file") or {})
         done["download_url"] = info.get("url_private_download") or info.get("permalink", "")
     return done
+
+
+# ---------- direct messages ----------
+
+# Why a DM from the bot can fail even though the install is fine.
+DM_BLOCKED = {
+    "messages_tab_disabled": "the AIDL Slack app's Messages tab is turned off (Slack app settings → App Home → "
+                             "Show Tabs → Messages Tab)",
+    "cannot_dm_bot": "that person is a bot",
+    "user_disabled": "that person's Slack account is deactivated",
+}
+
+
+def send_dm(token: str, org: Organization, slack_user_id: str, *, text: str, blocks: list) -> dict:
+    """DM a message from the AIDL bot. If Slack refuses the DM, show the same
+    message privately to that person in the org's channel instead, so they
+    still see it. The result says whether the DM itself worked."""
+    from .slack_blocks import has_images, text_fallback
+
+    result = slack_api("chat.postMessage", token, json={"channel": slack_user_id, "text": text, "blocks": blocks})
+    if result.get("error") == "invalid_blocks" and has_images(blocks):
+        blocks = text_fallback(blocks)
+        result = slack_api("chat.postMessage", token, json={"channel": slack_user_id, "text": text, "blocks": blocks})
+    if result.get("ok") or not org.slack_channel_id:
+        return result
+    fallback = slack_api("chat.postEphemeral", token, json={
+        "channel": org.slack_channel_id, "user": slack_user_id, "text": text, "blocks": blocks})
+    return {**result, "fallback_ok": bool(fallback.get("ok"))}

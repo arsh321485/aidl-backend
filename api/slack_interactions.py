@@ -25,7 +25,7 @@ from .auth_jwt import create_access_token
 from .models import AIDLUser
 from . import slack_client, slack_modals
 from .org_service import get_organization_for_user
-from .slack_blocks import admin_card_blocks, admin_card_text, publish_admin_center
+from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
 from .slack_cards import build_admin_cards_context
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,15 @@ def verify_slack_signature(request) -> bool:
 
 
 def _post_reply(response_url: str, body: dict) -> None:
+    from .slack_blocks import has_images, text_fallback
+
     try:
         resp = requests.post(response_url, json=body, timeout=10)
+        failed = resp.status_code != 200 or '"ok":false' in resp.text.replace(" ", "")
+        if failed and body.get("blocks") and has_images(body["blocks"]):
+            # Slack couldn't load an image (e.g. the backend isn't reachable) —
+            # send the same card as plain text.
+            resp = requests.post(response_url, json={**body, "blocks": text_fallback(body["blocks"])}, timeout=10)
         if resp.status_code != 200:
             logger.warning("slack response_url -> %s %s", resp.status_code, resp.text[:200])
     except Exception as exc:  # noqa: BLE001
@@ -84,7 +91,7 @@ def _admin_for(payload: dict) -> AIDLUser | None:
     return AIDLUser.objects.filter(microsoft_id=f"slack:{team_id}:{slack_user}", is_active=True).first()
 
 
-def _open_modal(org, trigger_id: str, view: dict, *, push: bool = False) -> str:
+def _open_modal(org, trigger_id: str, view: dict, push: bool = False) -> str:
     """Opens (or pushes) a modal; returns its view id."""
     method = "views.push" if push else "views.open"
     result = slack_client.slack_api(method, slack_client.bot_token(org), json={"trigger_id": trigger_id, "view": view})
@@ -161,9 +168,94 @@ def _send_coverage(org, slack_user: str, view_id: str, download_url: str) -> Non
         note = ("📎 *aidl-coverage.csv* — the DM copy needs the *files:write* bot scope in the Slack app "
                 "(then sign in with Slack again). The Download CSV button works without it.")
     else:
-        note = f"📎 *aidl-coverage.csv* — couldn't send the DM copy ({result.get('error')})."
+        reason = slack_client.DM_BLOCKED.get(result.get("error"), result.get("error"))
+        note = f"📎 *aidl-coverage.csv* — couldn't send the DM copy ({reason}). The Download CSV button works."
     view = slack_modals.coverage_view(org, download_url=download_url, note=note)
     slack_client.slack_api("views.update", slack_client.bot_token(org), json={"view_id": view_id, "view": view})
+
+
+def _open_coverage(org, trigger_id: str, slack_user: str, download_url: str) -> None:
+    view_id = _open_modal(org, trigger_id, slack_modals.coverage_view(org, download_url=download_url))
+    _send_coverage(org, slack_user, view_id, download_url)
+
+
+def _switch_user_tab(org, member, payload: dict, tab: str) -> None:
+    from .slack_blocks import user_dashboard_blocks
+
+    container = payload.get("container") or {}
+    channel = container.get("channel_id") or (payload.get("channel") or {}).get("id", "")
+    ts = container.get("message_ts") or (payload.get("message") or {}).get("ts", "")
+    if not (channel and ts):
+        return
+    slack_client.slack_api("chat.update", slack_client.bot_token(org), json={
+        "channel": channel, "ts": ts, "text": "AIDL dashboard", "blocks": user_dashboard_blocks(member, org, tab)})
+
+
+def _send_aup_reminders(org, admin, response_url: str) -> None:
+    """Home card 'Send reminders': DM every member who hasn't signed the AUP."""
+    token = slack_client.bot_token(org)
+    members = AIDLUser.objects.filter(organization_id=str(org.pk), is_active=True, aup_signed=False,
+                                      microsoft_id__startswith=f"slack:{org.slack_team_id}:")
+    sent = 0
+    for member in members:
+        result = slack_client.send_dm(token, org, member.microsoft_id.split(":")[-1],
+                                      text="Reminder: please sign your organization's AI Acceptable Use Policy",
+                                      blocks=[
+                                          _ctx_line(org.name),
+                                          {"type": "section", "text": {"type": "mrkdwn", "text": (
+                                              f"📄 *Reminder from {admin.full_name or 'your AIDL admin'}*\n"
+                                              f"Please read and sign {org.name}'s AI Acceptable Use Policy. "
+                                              "Until you do, the ethics gate blocks your license upgrade.")}},
+                                      ])
+        sent += 1 if result.get("ok") or result.get("fallback_ok") else 0
+    _reply(response_url, text=f"✓ AUP reminder sent to {sent} of {members.count()} unsigned user(s).")
+
+
+def _ctx_line(org_name: str) -> dict:
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*AIDL* · APP  for {org_name}"}]}
+
+
+def _org_for_team(payload: dict):
+    from .models import Organization
+
+    team_id = (payload.get("team") or {}).get("id") or (payload.get("user") or {}).get("team_id", "")
+    return Organization.objects.filter(slack_team_id=team_id, is_active=True).first() if team_id else None
+
+
+def _rate_traffic_light(org, payload: dict, response_url: str) -> None:
+    """Guide 10.4 — 👍/👎: count +1, 'Thanks for the feedback', one vote per
+    person. The card's counts are updated for everyone in the conversation."""
+    from django.db import IntegrityError
+
+    from .models import TrafficLightRating, TrafficLightVote
+
+    vote = "like" if payload["actions"][0]["action_id"] == "aidl_rate_like" else "dislike"
+    message = payload.get("message") or {}
+    message_ts = message.get("ts") or (payload.get("container") or {}).get("message_ts", "")
+    slack_user = (payload.get("user") or {}).get("id", "")
+    try:
+        TrafficLightVote.objects.create(organization_id=str(org.pk), message_ts=message_ts,
+                                        slack_user_id=slack_user, vote=vote)
+    except IntegrityError:
+        _reply(response_url, text="You've already rated this card — thanks!")
+        return
+
+    rating = TrafficLightRating.objects.first() or TrafficLightRating.objects.create()
+    if vote == "like":
+        rating.likes += 1
+    else:
+        rating.dislikes += 1
+    rating.save()
+
+    blocks = message.get("blocks") or []
+    for block in blocks:
+        if block.get("block_id") == "aidl_rate":
+            block["elements"] = rating_blocks(rating.likes, rating.dislikes)[1]["elements"]
+    channel = (payload.get("channel") or {}).get("id") or (payload.get("container") or {}).get("channel_id", "")
+    if blocks and channel and message_ts:
+        slack_client.slack_api("chat.update", slack_client.bot_token(org), json={
+            "channel": channel, "ts": message_ts, "blocks": blocks, "text": message.get("text", "Traffic Light Check")})
+    _reply(response_url, text="✓ Thanks for the feedback!" if vote == "like" else "✓ Feedback noted, thank you")
 
 
 def _first_block(view: dict) -> str:
@@ -196,6 +288,25 @@ def slack_interactions(request):
     response_url = payload.get("response_url", "")
     is_ephemeral = bool((payload.get("container") or {}).get("is_ephemeral"))
 
+    # User dashboard tabs (guide 10): swap the card shown in that message.
+    if action_id.startswith("aidl_utab_"):
+        org = _org_for_team(payload)
+        member = _admin_for(payload)  # any AIDL account for this Slack user (learner or admin)
+        if org is not None and member is not None:
+            slack_modals.in_background(_switch_user_tab, org, member, payload, action.get("value") or "license")
+        return HttpResponse(status=200)
+
+    # User cards (guide 10.3 / 10.4) — for everyone in the workspace, not only admins.
+    if action_id in ("aidl_hc_full", "aidl_rate_like", "aidl_rate_dislike"):
+        org = _org_for_team(payload)
+        if org is not None:
+            if action_id == "aidl_hc_full":
+                slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
+                                           highway_code_full_view(org))
+            else:
+                slack_modals.in_background(_rate_traffic_light, org, payload, response_url)
+        return HttpResponse(status=200)
+
     user = _admin_for(payload)
     if user is None:
         _reply(
@@ -216,9 +327,16 @@ def slack_interactions(request):
         if action_id == "aidl_card_view":
             card = next((c for c in d["cards"] if c["id"] == action.get("value")), None)
             if card is not None:
-                _open_modal(org, payload.get("trigger_id", ""), slack_modals.card_view(d, card, meta), push=True)
+                slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
+                                           slack_modals.card_view(d, card, meta), push=True)
         elif d["can_create_card"]:
-            _open_modal(org, payload.get("trigger_id", ""), slack_modals.new_card_view(meta), push=True)
+            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
+                                       slack_modals.new_card_view(meta), push=True)
+        return HttpResponse(status=200)
+
+    if action_id == "aidl_aup_remind":
+        if org is not None:
+            slack_modals.in_background(_send_aup_reminders, org, user, response_url)
         return HttpResponse(status=200)
 
     if tab not in d["tabs"]:
@@ -228,8 +346,8 @@ def slack_interactions(request):
     # Export Coverage CSV: report in a modal + the CSV file by DM (guide 8.1).
     if action_id == "aidl_open_home" and org is not None:
         download_url = _private_link(request, user, "csv")
-        view_id = _open_modal(org, payload.get("trigger_id", ""), slack_modals.coverage_view(org, download_url=download_url))
-        slack_modals.in_background(_send_coverage, org, (payload.get("user") or {}).get("id", ""), view_id, download_url)
+        slack_modals.in_background(_open_coverage, org, payload.get("trigger_id", ""),
+                                   (payload.get("user") or {}).get("id", ""), download_url)
         return HttpResponse(status=200)
 
     # Card form buttons ("Send Admin Invite", "Issue License", ...) open a modal.
@@ -237,7 +355,7 @@ def slack_interactions(request):
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
         view = slack_modals.view_for_tab(tab, d, meta)
         if view is not None:
-            _open_modal(org, payload.get("trigger_id", ""), view)
+            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), view)
         return HttpResponse(status=200)
 
     blocks = admin_card_blocks(d, tab, open_url=_private_link(request, user, tab))
