@@ -134,6 +134,10 @@ class AIDLUser(models.Model):
     # open. Only stored for users who have logged in since offline_access was
     # added to MS_SCOPES; older sessions must re-login once to populate it.
     ms_refresh_token = models.TextField(blank=True, default="")
+    # Slack: this admin's DM with the AIDL bot and their Admin Center card in
+    # it (admin cards are private — never posted in the shared channel).
+    slack_dm_channel_id = models.CharField(max_length=32, blank=True, default="")
+    slack_admin_card_ts = models.CharField(max_length=32, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -295,6 +299,8 @@ class CardRequest(models.Model):
     scheduled_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     error = models.CharField(max_length=255, blank=True, default="")
+    # Traffic Light Check only: the lights the admin chose, e.g. "green,red".
+    lights = models.CharField(max_length=32, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -320,6 +326,23 @@ class CardCustomRequest(models.Model):
 
     def __str__(self):
         return f"{self.organization_id} · {self.title}"
+
+
+class TrafficLightVote(models.Model):
+    """Who already rated a Traffic Light Check card posted in Slack (guide
+    10.4: one vote per user). The totals live in TrafficLightRating."""
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    message_ts = models.CharField(max_length=32)
+    slack_user_id = models.CharField(max_length=32)
+    vote = models.CharField(max_length=8)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("organization_id", "message_ts", "slack_user_id")
+
+    def __str__(self):
+        return f"{self.slack_user_id} {self.vote} @ {self.message_ts}"
 
 
 class TrafficLightRating(models.Model):

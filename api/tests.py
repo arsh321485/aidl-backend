@@ -1178,6 +1178,20 @@ class SlackModalTests(TestCase):
         self.assertTrue(arjun.licence_number.startswith("AIDL-L-"))
         dms = [b["text"] for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
         self.assertEqual(dms, ["Welcome to AIDL, Arjun!", "Your Learner's Permit is ready"])
+        posts = [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
+        welcome, licence = (json.dumps(p["blocks"], ensure_ascii=False) for p in posts)
+        for tab in ("aidl_utab_home", "aidl_utab_license", "aidl_utab_highway-code", "aidl_utab_traffic-light"):
+            self.assertIn(tab, licence)                                    # dashboard tab bar
+        from .slack_blocks import user_dashboard_blocks
+
+        highway = json.dumps(user_dashboard_blocks(arjun, self.org, "highway-code"), ensure_ascii=False)
+        self.assertNotIn('"type": "button"', welcome)                     # 10.1: no buttons
+        for label in ("Download License", "Share", "LinkedIn", "Facebook", "WhatsApp", "L · Learner",
+                      "Curriculum v2.4", arjun.licence_number):
+            self.assertIn(label, licence)                                  # 10.2
+        for rule in ("Keep Private Things Private", "Check Before You Trust", "You're Still the Driver",
+                     "Better Prompt, Better Answer", "Mind What You Share", "aidl_hc_full"):
+            self.assertIn(rule, highway)                                   # 10.3
 
     def test_add_user_requires_name(self):
         resp = self._submit("aidl_add_user", {"name": {"value": ""}, "email": {"value": "a@acme.example"}})
@@ -1271,9 +1285,148 @@ class SlackModalTests(TestCase):
         updated = next(b for m, b in self.calls if m == "views.update")
         self.assertIn("files:write", json.dumps(updated["view"]["blocks"]))
 
+    def test_traffic_light_card_has_rating_row(self):
+        meta = {"channel_id": "C42", "card_id": "c1"}
+        self._submit("aidl_card_request", {}, meta=meta)
+        self._submit("aidl_card_send", {"lights": {"selected_options": [{"value": "green"}]},
+                                        "when": {"selected_option": {"value": "now"}}}, meta=meta)
+        post = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "C42")
+        text = json.dumps(post["blocks"])
+        self.assertIn("Was this card useful?", text)
+        self.assertIn("aidl_rate_like", text)
+
+    def test_full_highway_code_opens_for_any_member(self):
+        self._post({"type": "block_actions", "user": {"id": "U99", "team_id": "T9"},  # not an AIDL admin
+                    "actions": [{"action_id": "aidl_hc_full", "value": "full"}]})
+        opened = next(b for m, b in self.calls if m == "views.open")
+        text = json.dumps(opened["view"])
+        self.assertIn("Reference only", text)
+        self.assertIn("Mind What You Share", text)
+
+    def test_rating_counts_once_per_person(self):
+        from .models import TrafficLightRating
+
+        message = {"ts": "111.1", "text": "Traffic Light Check",
+                   "blocks": [{"type": "actions", "block_id": "aidl_rate", "elements": []}]}
+        vote = {"type": "block_actions", "user": {"id": "U5", "team_id": "T9"}, "channel": {"id": "C42"},
+                "message": message, "response_url": "https://hooks.slack.test/r",
+                "actions": [{"action_id": "aidl_rate_like", "value": "like"}]}
+        self._post(vote)
+        rating = TrafficLightRating.objects.get()
+        self.assertEqual(rating.likes, 129)
+        update = next(b for m, b in self.calls if m == "chat.update")
+        self.assertIn("👍 129", json.dumps(update["blocks"], ensure_ascii=False))
+        self.assertIn("Thanks for the feedback", self.http.call_args.kwargs["json"]["text"])
+
+        self._post(vote)  # same person again
+        self.assertEqual(TrafficLightRating.objects.get().likes, 129)
+        self.assertIn("already rated", self.http.call_args.kwargs["json"]["text"])
+
+    def test_user_tab_switches_the_dashboard_message(self):
+        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", full_name="Jordan Ellis",
+                  licence_issued=True, licence_number="AIDL-L-0455-2210")
+        self._post({"type": "block_actions", "user": {"id": "U5", "team_id": "T9"},
+                    "container": {"channel_id": "D5", "message_ts": "222.2"},
+                    "actions": [{"action_id": "aidl_utab_traffic-light", "value": "traffic-light"}]})
+        update = next(b for m, b in self.calls if m == "chat.update")
+        self.assertEqual((update["channel"], update["ts"]), ("D5", "222.2"))
+        text = json.dumps(update["blocks"], ensure_ascii=False)
+        self.assertIn("Traffic Light Check", text)
+        self.assertIn("hasn't sent", text)          # admin hasn't sent it yet
+        self.assertIn("aidl_utab_home", text)
+
+    def test_traffic_light_tab_shows_only_sent_lights(self):
+        from .slack_blocks import user_dashboard_blocks
+
+        meta = {"channel_id": "C42", "card_id": "c1"}
+        self._submit("aidl_card_request", {}, meta=meta)
+        self._submit("aidl_card_send", {"lights": {"selected_options": [{"value": "green"}]},
+                                        "when": {"selected_option": {"value": "now"}}}, meta=meta)
+        text = json.dumps(user_dashboard_blocks(self.admin, self.org, "traffic-light"), ensure_ascii=False)
+        self.assertIn("GREEN", text)
+        self.assertNotIn("RED · STOP", text)
+        self.assertIn("aidl_rate_like", text)
+
     def test_invited_admin_without_permission_is_refused(self):
         make_user(self.org, microsoft_id="slack:T9:U2", perm_approve_apps=False, perm_access_cards=False, perm_create_card=False)
         view = {"callback_id": "aidl_add_app", "private_metadata": json.dumps({"kind": "ai"}),
                 "blocks": [{"type": "input", "block_id": "name"}], "state": {"values": {"name": {"v": {"value": "X"}}}}}
         resp = self._post({"type": "view_submission", "user": {"id": "U2", "team_id": "T9"}, "view": view})
         self.assertIn("permissions", resp.json()["errors"]["name"])
+
+
+class SlackDmFallbackTests(TestCase):
+    """If the Slack app can't DM (e.g. its Messages tab is off), the user still
+    sees their cards privately in the channel and the admin is told why."""
+
+    def test_blocked_dm_falls_back_to_channel_and_warns_admin(self):
+        from .slack_client import encrypt_token
+        from .slack_modals import _onboard_user
+
+        org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_token=encrypt_token("xoxb-t"))
+        admin = make_user(org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        member = make_user(org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U7", full_name="Anshul Chutani",
+                           licence_issued=True, licence_number="AIDL-L-0001-0002")
+        calls = []
+
+        def fake(method, token, *, json=None, params=None):
+            calls.append((method, json))
+            if method == "chat.postMessage":
+                return {"ok": False, "error": "messages_tab_disabled"}
+            return {"ok": True}
+
+        with patch("api.slack_client.slack_api", side_effect=fake):
+            _onboard_user("xoxb-t", org, member, "U7", admin)
+
+        shown = [b["text"] for m, b in calls if m == "chat.postEphemeral" and b["user"] == "U7"]
+        self.assertEqual(shown, ["Welcome to AIDL, Anshul!", "Your Learner's Permit is ready"])
+        warning = next(b["text"] for m, b in calls if m == "chat.postEphemeral" and b["user"] == "U1")
+        self.assertIn("Messages tab", warning)
+
+
+class SlackHomeVisualTests(TestCase):
+    """Admin Home card in the approved layout (aidl_admin_home.json)."""
+
+    def setUp(self):
+        self.org = make_org(name="Secureitlab")
+        self.admin = make_user(self.org, full_name="Priya Raman")
+
+    def _blocks(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        return admin_card_blocks(build_admin_cards_context(self.admin), "home")
+
+    def test_home_layout_matches_design(self):
+        blocks = self._blocks()
+        self.assertEqual(blocks[0].get("block_id"), "aidl_tabs")              # navigation on top
+        self.assertEqual(blocks[1]["text"]["text"], "🚦 AIDL Admin Center")
+        text = json.dumps(blocks, ensure_ascii=False)
+        for label in ("Signed in as *Priya*", "Welcome back, Priya.", "LICENSES & SEATS", "Seats purchased",
+                      "Licenses issued", "GOVERNANCE SNAPSHOT", "👥 Admins", "✅ Apps approved",
+                      "AI applications", "IT applications", "Rollout progress", "Export Coverage CSV"):
+            self.assertIn(label, text)
+        self.assertIn("aidl_aup_remind", text)                                 # unsigned users → alert
+        self.assertIn("aidl_tab_add-admin", json.dumps(next(b for b in blocks if "Rollout" in json.dumps(b))))
+        self.assertEqual(len(blocks[0]["elements"]), 6)
+
+    def test_send_reminders_dms_unsigned_members(self):
+        from .slack_client import encrypt_token
+        from .slack_interactions import _send_aup_reminders
+
+        self.org.slack_team_id = "T9"
+        self.org.slack_channel_id = "C42"
+        self.org.slack_bot_token = encrypt_token("xoxb-t")
+        self.org.save()
+        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U7", aup_signed=False)
+        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U8", aup_signed=True)
+        calls = []
+        with self.settings(SLACK_REPLY_SYNC=True), \
+                patch("api.slack_client.slack_api", side_effect=lambda m, t, **k: calls.append((m, k.get("json"))) or {"ok": True}), \
+                patch("api.slack_interactions.requests.post") as reply:
+            reply.return_value.status_code = 200
+            reply.return_value.text = "ok"
+            _send_aup_reminders(self.org, self.admin, "https://hooks.slack.test/r")
+        dms = [j["channel"] for m, j in calls if m == "chat.postMessage"]
+        self.assertEqual(dms, ["U7"])
+        self.assertIn("reminder sent to 1", reply.call_args.kwargs["json"]["text"])

@@ -302,15 +302,15 @@ def _welcome_to_channel(token: str, org: Organization, slack_user_id: str) -> No
         slack_client.slack_api("conversations.invite", token, json={"channel": org.slack_channel_id, "users": slack_user_id})
 
 
-def in_background(fn, *args) -> None:
+def in_background(fn, *args, **kwargs) -> None:
     """Slack gives a modal submission 3 seconds; slower follow-ups (channel
     invite, DMs) run after the response."""
     from django.conf import settings
 
     if settings.SLACK_REPLY_SYNC:
-        fn(*args)
+        fn(*args, **kwargs)
     else:
-        threading.Thread(target=fn, args=args, daemon=True).start()
+        threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
 
 
 # ---------- submissions ----------
@@ -363,7 +363,7 @@ def submit_add_user(caller: AIDLUser, org: Organization, team_id: str, view: dic
         member.licence_issued_at = now
         member.licence_expires_at = now + timedelta(days=365)
         member.save(update_fields=["licence_issued", "licence_number", "licence_issued_at", "licence_expires_at", "updated_at"])
-    in_background(_onboard_user, token, org, member, slack_user_id)
+    in_background(_onboard_user, token, org, member, slack_user_id, caller)
     return {"notice": f"✓ {d['licences_issued'] + 1} of {d['seats_purchased']} licenses issued · invited {member.email or member.full_name}"}
 
 
@@ -373,25 +373,43 @@ def _onboard_admin(token: str, org: Organization, caller: AIDLUser, admin: AIDLU
     from .slack_blocks import admin_card_blocks
 
     _welcome_to_channel(token, org, slack_user_id)
-    slack_client.slack_api("chat.postMessage", token, json={
-        "channel": slack_user_id,
-        "text": f"{caller.full_name} has added you as an AIDL admin for {org.name}",
-        "blocks": [{"type": "section", "text": _md(f"*{caller.full_name}* has added you as an AIDL admin for *{org.name}*.")}]
+    result = slack_client.send_dm(
+        token, org, slack_user_id,
+        text=f"{caller.full_name} has added you as an AIDL admin for {org.name}",
+        blocks=[{"type": "section", "text": _md(f"*{caller.full_name}* has added you as an AIDL admin for *{org.name}*.")}]
         + admin_card_blocks(build_admin_cards_context(admin), "home"),
-    })
+    )
+    _warn_if_dm_failed(token, org, caller, admin, [result])
 
 
-def _onboard_user(token: str, org: Organization, member: AIDLUser, slack_user_id: str) -> None:
-    """Guide 9 / 10.1–10.2: add the user to the channel, then DM the Welcome
-    message followed by the License card."""
-    from .slack_blocks import user_license_blocks, user_welcome_blocks
+def _warn_if_dm_failed(token: str, org: Organization, caller: AIDLUser, person: AIDLUser, results: list) -> None:
+    """Tell the admin privately when the new person's DMs couldn't be sent."""
+    failed = next((r for r in results if not r.get("ok")), None)
+    if failed is None or not org.slack_channel_id:
+        return
+    reason = slack_client.DM_BLOCKED.get(failed.get("error"), f"Slack said: {failed.get('error')}")
+    where = f" They were shown the cards privately in <#{org.slack_channel_id}> instead." if failed.get("fallback_ok") else ""
+    caller_id = caller.microsoft_id.split(":")[-1]
+    slack_client.slack_api("chat.postEphemeral", token, json={
+        "channel": org.slack_channel_id, "user": caller_id,
+        "text": f"⚠️ AIDL couldn't send {person.full_name or person.email} a direct message: {reason}.{where}"})
+
+
+def _onboard_user(token: str, org: Organization, member: AIDLUser, slack_user_id: str, caller: AIDLUser | None = None) -> None:
+    """Guide 9 / 10.1–10.3: add the user to the channel, then DM the Welcome
+    message, the License card and the Highway Code."""
+    from .slack_blocks import user_dashboard_blocks, user_welcome_blocks
 
     _welcome_to_channel(token, org, slack_user_id)
     first = (member.full_name or "there").split()[0]
-    slack_client.slack_api("chat.postMessage", token, json={
-        "channel": slack_user_id, "text": f"Welcome to AIDL, {first}!", "blocks": user_welcome_blocks(member, org)})
-    slack_client.slack_api("chat.postMessage", token, json={
-        "channel": slack_user_id, "text": "Your Learner's Permit is ready", "blocks": user_license_blocks(member, org)})
+    results = [
+        slack_client.send_dm(token, org, slack_user_id, text=f"Welcome to AIDL, {first}!",
+                             blocks=user_welcome_blocks(member, org)),
+        slack_client.send_dm(token, org, slack_user_id, text="Your Learner's Permit is ready",
+                             blocks=user_dashboard_blocks(member, org, "license")),
+    ]
+    if caller is not None:
+        _warn_if_dm_failed(token, org, caller, member, results)
 
 
 def _card(d: dict, card_id: str) -> dict | None:
@@ -427,6 +445,11 @@ def _reference_card_blocks(card: dict, org: Organization, lights: list[str]) -> 
             blocks.append({"type": "section", "text": _md(
                 f"{_LIGHT_EMOJI[light['id']]} *{light['label']}* — _{light['tagline']}_\n"
                 + "\n".join(f"• {i}" for i in items) + f"\n*→ {light['action']}*")})
+        from .models import TrafficLightRating
+        from .slack_blocks import rating_blocks
+
+        rating = TrafficLightRating.objects.first()
+        blocks += rating_blocks(rating.likes if rating else 128, rating.dislikes if rating else 6)
     else:
         blocks += [{"type": "section", "text": _md(p)} for p in card["body"]]
     return blocks
@@ -471,6 +494,8 @@ def submit_card_send(caller: AIDLUser, org: Organization, view: dict) -> dict | 
         else:
             row.status = CardRequest.Status.SENT
             row.sent_at = timezone.now()
+        if card.get("lights"):
+            row.lights = ",".join(lights)
         row.save()
     dots = "".join(_LIGHT_EMOJI[l] for l in lights) if card.get("lights") else ""
     status = "🕒 Scheduled" if later else "✓ Sent"

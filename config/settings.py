@@ -62,6 +62,11 @@ SLACK_CHANNEL_NAME = "-".join(os.getenv("SLACK_CHANNEL_NAME", "aidl").strip().lo
 # Basic Information → Signing Secret; verifies button clicks sent to
 # /api/slack/interactions/.
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
+# Local-network workaround: when the network's IPv6 DNS server doesn't answer,
+# every outbound lookup (Slack, Microsoft) waits ~11s before falling back to
+# IPv4 — longer than Slack's 3-second limit for opening a modal. True = only
+# look up IPv4 addresses. Leave unset on Render.
+FORCE_IPV4_OUTBOUND = os.getenv("FORCE_IPV4_OUTBOUND", "False").lower() in ("1", "true", "yes")
 # Tests set this so ephemeral replies are sent inline instead of in a thread.
 SLACK_REPLY_SYNC = False
 
