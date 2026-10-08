@@ -112,11 +112,11 @@ def _notify(org, channel_id: str, slack_user: str, text: str, admin: AIDLUser) -
 # Which tab a modal belongs to, for the permission check on submit.
 _SUBMIT_TAB = {
     "aidl_add_admin": "add-admin",
-    "aidl_add_user": "add-user",
     "aidl_card_request": "cards",
     "aidl_card_send": "cards",
     "aidl_card_new": "cards",
     "aidl_add_app": "ai-apps",
+    "aidl_policy": "home",
 }
 
 
@@ -142,11 +142,11 @@ def _handle_submission(payload: dict):
     team_id = org.slack_team_id
     handlers = {
         "aidl_add_admin": lambda: slack_modals.submit_add_admin(admin, org, team_id, view),
-        "aidl_add_user": lambda: slack_modals.submit_add_user(admin, org, team_id, view),
         "aidl_card_request": lambda: slack_modals.submit_card_request(admin, org, view),
         "aidl_card_send": lambda: slack_modals.submit_card_send(admin, org, view),
         "aidl_card_new": lambda: slack_modals.submit_new_card(admin, org, view),
         "aidl_add_app": lambda: slack_modals.submit_add_app(admin, org, view),
+        "aidl_policy": lambda: slack_modals.submit_policy(admin, org, view),
     }
     result = handlers[callback]() or {}
     if "response_action" in result:
@@ -154,6 +154,8 @@ def _handle_submission(payload: dict):
     meta = json.loads(view.get("private_metadata") or "{}")
     notice = result.get("notice", "")
     slack_modals.in_background(_notify, org, meta.get("channel_id", ""), payload["user"]["id"], notice, admin)
+    if "view" in result:  # show a result page instead of closing (policy answers report)
+        return JsonResponse({"response_action": "update", "view": result["view"]})
     # Close every stacked modal (e.g. Send Cards list → card detail).
     return JsonResponse({"response_action": "clear"})
 
@@ -195,7 +197,8 @@ def _send_aup_reminders(org, admin, response_url: str) -> None:
     """Home card 'Send reminders': DM every member who hasn't signed the AUP."""
     token = slack_client.bot_token(org)
     members = AIDLUser.objects.filter(organization_id=str(org.pk), is_active=True, aup_signed=False,
-                                      microsoft_id__startswith=f"slack:{org.slack_team_id}:")
+                                      microsoft_id__startswith=f"slack:{org.slack_team_id}:").exclude(
+                                      role=AIDLUser.Role.ADMIN)
     sent = 0
     for member in members:
         result = slack_client.send_dm(token, org, member.microsoft_id.split(":")[-1],
@@ -211,8 +214,91 @@ def _send_aup_reminders(org, admin, response_url: str) -> None:
     _reply(response_url, text=f"✓ AUP reminder sent to {sent} of {members.count()} unsigned user(s).")
 
 
+def _send_aup_to_team(org, response_url: str) -> None:
+    """Admin 'Send AUP to team': DM every team member their personal AUP
+    (dashboard opened on the AUP tab, with the accept button)."""
+    from .licensing import learners
+    from .slack_blocks import user_dashboard_blocks
+
+    token = slack_client.bot_token(org)
+    members = learners(org).filter(microsoft_id__startswith=f"slack:{org.slack_team_id}:")
+    sent = 0
+    for member in members:
+        result = slack_client.send_dm(token, org, member.microsoft_id.split(":")[-1],
+                                      text="📄 Your AI Acceptable Use Policy",
+                                      blocks=user_dashboard_blocks(member, org, "aup"))
+        sent += 1 if result.get("ok") or result.get("fallback_ok") else 0
+    _reply(response_url, text=f"✓ AUP sent to {sent} of {members.count()} team member(s).")
+
+
 def _ctx_line(org_name: str) -> dict:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*AIDL* · APP  for {org_name}"}]}
+
+
+_ACK_TAB = {"highway_code": "highway-code", "traffic_light": "traffic-light", "aup": "aup"}
+
+
+def _acknowledge(org, member, payload: dict, item: str) -> None:
+    """Record the acknowledgement; once both are done the Learner licence is
+    issued automatically and the message flips to the License tab."""
+    from .licensing import acknowledge, issue_learner_if_ready
+    from .slack_blocks import user_dashboard_blocks
+
+    if item not in _ACK_TAB:
+        return
+    if item == "aup":
+        from .aup import generate_aup
+
+        acknowledge(member, item, generate_aup(org)["version"])
+    else:
+        acknowledge(member, item)
+    result = issue_learner_if_ready(member, org)
+    member.refresh_from_db()
+    tab = "license" if result in ("issued", "no_seats") else _ACK_TAB[item]
+    container = payload.get("container") or {}
+    channel = container.get("channel_id") or (payload.get("channel") or {}).get("id", "")
+    ts = container.get("message_ts") or (payload.get("message") or {}).get("ts", "")
+    token = slack_client.bot_token(org)
+    if channel and ts:
+        slack_client.slack_api("chat.update", token, json={
+            "channel": channel, "ts": ts, "text": "AIDL dashboard", "blocks": user_dashboard_blocks(member, org, tab)})
+    slack_user = (payload.get("user") or {}).get("id", "")
+    if result == "issued":
+        slack_client.send_dm(token, org, slack_user, text="🎉 Your Learner's Permit is ready!", blocks=[
+            {"type": "section", "text": {"type": "mrkdwn", "text":
+                f"🎉 *Your Learner's Permit is ready!*  `{member.licence_number}`\nOpen the *License* tab above to download or share it."}}])
+        from .package_delivery import sync_package
+
+        sync_package(org, member)  # card 1 now, the rest of the plan's package scheduled
+    elif result == "no_seats":
+        from .plans import user_limit
+        from .slack_onboarding import primary_admin
+
+        admin = primary_admin(org)
+        if admin is not None:
+            slack_client.send_dm(token, org, admin.microsoft_id.split(":")[-1],
+                                 text="AIDL: no free license seats", blocks=[
+                {"type": "section", "text": {"type": "mrkdwn", "text":
+                    f"⏳ *{member.full_name or member.email}* finished the Highway Code and Traffic Light Check, "
+                    f"but all {user_limit(org)} licenses on your plan are used. Their license is waiting for a free seat."}}])
+
+
+def _remove_person(org, admin, action_id: str, user_id: str, view_id: str, meta: str) -> None:
+    """Remove an admin / team member, then redraw the popup with the result."""
+    from .admin_people import remove_admin, remove_member
+
+    if action_id == "aidl_admin_remove":
+        done, message = remove_admin(org, admin, user_id)
+        d = build_admin_cards_context(admin)
+        d["notice"] = message if done else f"⚠️ {message}"
+        view = slack_modals.add_admin_view(d, json.loads(meta))
+    else:
+        done, message = remove_member(org, admin, user_id)
+        view = slack_modals.team_progress_view(org, notice=message if done else f"⚠️ {message}")
+    if view_id:
+        slack_client.slack_api("views.update", slack_client.bot_token(org), json={"view_id": view_id, "view": view})
+    if done:
+        publish_admin_center(org, admin)  # numbers on Home changed
 
 
 def _org_for_team(payload: dict):
@@ -288,6 +374,14 @@ def slack_interactions(request):
     response_url = payload.get("response_url", "")
     is_ephemeral = bool((payload.get("container") or {}).get("is_ephemeral"))
 
+    # "I've read and accept" on the Highway Code / Traffic Light Check.
+    if action_id.startswith("aidl_ack_"):
+        org = _org_for_team(payload)
+        member = _admin_for(payload)
+        if org is not None and member is not None:
+            slack_modals.in_background(_acknowledge, org, member, payload, action.get("value", ""))
+        return HttpResponse(status=200)
+
     # User dashboard tabs (guide 10): swap the card shown in that message.
     if action_id.startswith("aidl_utab_"):
         org = _org_for_team(payload)
@@ -332,6 +426,38 @@ def slack_interactions(request):
         elif d["can_create_card"]:
             slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
                                        slack_modals.new_card_view(meta), push=True)
+        return HttpResponse(status=200)
+
+    # Remove buttons in the Add Admin and Team progress popups.
+    if action_id in ("aidl_admin_remove", "aidl_member_remove") and org is not None:
+        view = payload.get("view") or {}
+        slack_modals.in_background(_remove_person, org, user, action_id, action.get("value", ""),
+                                   view.get("id", ""), view.get("private_metadata") or "{}")
+        return HttpResponse(status=200)
+
+    # The 8 policy questions (asked in Slack, not on the website). Until they're
+    # answered, the AUP buttons open them too.
+    policy_set = d["policy"].get("has_answers")
+    if org is not None and (action_id == "aidl_policy_open"
+                            or (action_id in ("aidl_aup_view", "aidl_aup_send") and not policy_set)):
+        meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
+        slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), slack_modals.policy_view(org, meta))
+        return HttpResponse(status=200)
+
+    if action_id == "aidl_aup_view":
+        if org is not None:
+            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), slack_modals.aup_view(org))
+        return HttpResponse(status=200)
+
+    if action_id == "aidl_aup_send":
+        if org is not None:
+            slack_modals.in_background(_send_aup_to_team, org, response_url)
+        return HttpResponse(status=200)
+
+    if action_id == "aidl_team_progress":
+        if org is not None:
+            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
+                                       slack_modals.team_progress_view(org))
         return HttpResponse(status=200)
 
     if action_id == "aidl_aup_remind":

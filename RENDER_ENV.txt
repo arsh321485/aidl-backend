@@ -82,3 +82,20 @@ SLACK_CHANNEL_NAME=aidl-driving-license
 #   https://aidl-backend.onrender.com/api/slack/interactions/
 # Slack app → OAuth & Permissions → Bot Token Scopes:
 #   channels:manage channels:join channels:read chat:write users:read users:read.email im:write files:write
+# Slack app → Event Subscriptions → Request URL (bot events
+# member_joined_channel, member_left_channel):
+#   https://aidl-backend.onrender.com/api/slack/events/
+# Slack app → App Home → Messages Tab: ON (employee cards arrive by DM)
+
+# --- Website sign-up / sign-in checks (api/auth_verification.py) ---
+# Picture captcha on sign-in + emailed 6-digit code on sign-up and sign-in.
+# The code goes by email: set EMAIL_HOST_USER / EMAIL_HOST_PASSWORD (Gmail App
+# Password) BEFORE turning AUTH_EMAIL_OTP on, or nobody can finish sign-up.
+AUTH_CAPTCHA=True
+AUTH_EMAIL_OTP=False
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+# EMAIL_HOST_USER=        (secret — set in Render only)
+# EMAIL_HOST_PASSWORD=    (secret — set in Render only)
+# DEFAULT_FROM_EMAIL=AIDL <no-reply@your-domain>

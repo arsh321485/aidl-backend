@@ -1,7 +1,7 @@
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from . import auth_views, location_views, org_policy_views, slack_card_views, slack_interactions, teams_admin_extra_views, teams_app_views, teams_bot_views, views
+from . import auth_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
@@ -33,6 +33,10 @@ urlpatterns = [
     path("auth/signup/", auth_views.signup, name="auth-signup"),
     path("auth/signin/", auth_views.signin, name="auth-signin"),
     path("auth/login/", auth_views.login, name="auth-login"),
+    path("auth/signup/verify/", auth_views.signup_verify, name="auth-signup-verify"),
+    path("auth/signin/verify/", auth_views.signin_verify, name="auth-signin-verify"),
+    path("auth/captcha/", auth_views.captcha, name="auth-captcha"),
+    path("auth/otp/resend/", auth_views.otp_resend, name="auth-otp-resend"),
     path("auth/me/", auth_views.me, name="auth-me"),
     path("auth/refresh/", auth_views.refresh, name="auth-refresh"),
     path("auth/logout/", auth_views.logout, name="auth-logout"),
@@ -52,6 +56,7 @@ urlpatterns = [
     ),
     path("slack/cards/user/", slack_card_views.slack_user_cards, name="slack-user-cards"),
     path("slack/interactions/", slack_interactions.slack_interactions, name="slack-interactions"),
+    path("slack/events/", slack_onboarding.slack_events, name="slack-events"),
     # AIDL Teams app — menu tabs + Adaptive Cards
     path("teams/", teams_app_views.teams_app_index, name="teams-app-index"),
     path(

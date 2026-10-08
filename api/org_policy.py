@@ -22,6 +22,17 @@ POLICY_QUESTIONS: dict[str, tuple[str, ...]] = {
     "training_frequency": ("Only when they join", "Every year", "Every quarter", "Not required"),
 }
 
+# Question wording (same as the frontend file) — the Slack policy popup asks these.
+QUESTION_TEXT: dict[str, str] = {
+    "ai_policy": "Does your organization have a written AI acceptable-use policy?",
+    "approved_tools": "Which AI tools are employees allowed to use for work?",
+    "confidential_data": "Can employees enter confidential or customer data into AI tools?",
+    "human_review": "Must AI-generated work be reviewed by a person before it is shared externally?",
+    "disclosure": "Do employees have to disclose when content was created with AI?",
+    "regulation": "Which data-protection regulation mainly applies to your organization?",
+    "incident_reporting": "How should employees report misuse of AI or a policy violation?",
+    "training_frequency": "How often must employees complete AI and policy training?",
+}
 
 class PolicyAnswersError(ValueError):
     def __init__(self, errors: dict[str, str]):

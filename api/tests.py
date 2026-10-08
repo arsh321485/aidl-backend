@@ -16,7 +16,7 @@ from unittest.mock import patch
 # TransactionTestCase run finished in ~12s/test. TransactionTestCase instead
 # flushes collections after each test, which is slower per-test but actually
 # completes.
-from django.test import SimpleTestCase, TransactionTestCase as TestCase
+from django.test import SimpleTestCase, TransactionTestCase as TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -35,6 +35,12 @@ def make_org(**kwargs) -> Organization:
     )
     defaults.update(kwargs)
     return Organization.objects.create(**defaults)
+
+
+def _answer_policy(org: Organization) -> None:
+    from .org_policy import POLICY_QUESTIONS, save_answers
+
+    save_answers(org, {qid: options[0] for qid, options in POLICY_QUESTIONS.items()})
 
 
 def make_user(org: Organization, *, role=AIDLUser.Role.ADMIN, **kwargs) -> AIDLUser:
@@ -527,6 +533,7 @@ class BotAdaptiveCardActionsTests(TestCase):
         self.assertFalse(RegisteredApp.objects.filter(name="Should Not Save").exists())
 
 
+@override_settings(AUTH_EMAIL_OTP=False, AUTH_CAPTCHA=False)  # direct path; OTP/captcha tested below
 class WebsiteSignupTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -727,6 +734,7 @@ class SlackCardsTests(TestCase):
     def setUp(self):
         self.org = make_org(name="Secureitlab")
         self.primary = make_user(self.org, full_name="Priya Raman")
+        self.learner = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Jordan Ellis")
         self.client = APIClient()
 
     def _get(self, path, user=None):
@@ -752,8 +760,9 @@ class SlackCardsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "for Secureitlab")
         self.assertContains(resp, "Welcome to your Admin Center, Priya")
-        for tab in ("home", "add-admin", "add-user", "cards", "ai-apps", "it-apps"):
+        for tab in ("home", "add-admin", "cards", "ai-apps", "it-apps"):
             self.assertContains(resp, f'data-tab="{tab}"')
+        self.assertNotContains(resp, 'data-tab="add-user"')   # users join the channel instead
 
     def test_invited_admin_sees_only_permitted_tabs(self):
         invited = make_user(
@@ -762,7 +771,7 @@ class SlackCardsTests(TestCase):
         resp = self._get("admin", invited)
         self.assertContains(resp, 'data-tab="home"')
         self.assertContains(resp, 'data-tab="cards"')
-        for tab in ("add-admin", "add-user", "ai-apps", "it-apps"):
+        for tab in ("add-admin", "ai-apps", "it-apps"):
             self.assertNotContains(resp, f'data-tab="{tab}"')
 
     def test_user_cards_welcome_and_selected_lights(self):
@@ -779,7 +788,8 @@ class SlackCardsTests(TestCase):
         self.assertEqual(self.client.get("/api/slack/cards/admin/coverage/").status_code, 401)
         resp = self.client.get(f"/api/slack/cards/admin/coverage/?token={create_access_token(self.primary)}")
         self.assertContains(resp, "Coverage report")
-        self.assertContains(resp, self.primary.email)
+        self.assertContains(resp, self.learner.email)          # team member listed
+        self.assertNotContains(resp, self.primary.email)       # admins aren't part of the team
         self.assertContains(resp, "coverage.csv?token=")
 
     def test_private_links_use_https_behind_a_proxy(self):
@@ -796,7 +806,8 @@ class SlackCardsTests(TestCase):
             f"/api/slack/cards/admin/coverage.csv?token={create_access_token(self.primary)}"
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(self.primary.email, resp.content.decode())
+        self.assertIn(self.learner.email, resp.content.decode())
+        self.assertNotIn(self.primary.email, resp.content.decode())
 
 
 class SlackOrganizationBootstrapTests(TestCase):
@@ -876,7 +887,7 @@ class SlackWorkspaceSetupTests(TestCase):
         post = next(body for m, body in calls if m == "chat.postMessage")
         buttons = [b for b in post["blocks"] if b.get("block_id") == "aidl_tabs"][0]["elements"]
         labels = [b["text"]["text"] for b in buttons]
-        self.assertEqual(len(labels), 6)
+        self.assertEqual(len(labels), 5)
         self.assertFalse(any("Policy" in l for l in labels))
 
         org = Organization.objects.get(slack_team_id="T9")
@@ -1170,33 +1181,6 @@ class SlackModalTests(TestCase):
         resp = self._submit("aidl_add_admin", {"email": {"value": "rahul@acme.example"}})
         self.assertIn("no seats left", resp.json()["errors"]["email"])
 
-    def test_add_user_issues_license_and_sends_user_cards(self):
-        resp = self._submit("aidl_add_user", {"name": {"value": "Arjun Mehta"}, "email": {"value": "arjun@acme.example"}})
-        self.assertEqual(resp.json(), {"response_action": "clear"})
-        arjun = AIDLUser.objects.get(microsoft_id="slack:T9:U7")
-        self.assertTrue(arjun.licence_issued)
-        self.assertTrue(arjun.licence_number.startswith("AIDL-L-"))
-        dms = [b["text"] for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
-        self.assertEqual(dms, ["Welcome to AIDL, Arjun!", "Your Learner's Permit is ready"])
-        posts = [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
-        welcome, licence = (json.dumps(p["blocks"], ensure_ascii=False) for p in posts)
-        for tab in ("aidl_utab_home", "aidl_utab_license", "aidl_utab_highway-code", "aidl_utab_traffic-light"):
-            self.assertIn(tab, licence)                                    # dashboard tab bar
-        from .slack_blocks import user_dashboard_blocks
-
-        highway = json.dumps(user_dashboard_blocks(arjun, self.org, "highway-code"), ensure_ascii=False)
-        self.assertNotIn('"type": "button"', welcome)                     # 10.1: no buttons
-        for label in ("Download License", "Share", "LinkedIn", "Facebook", "WhatsApp", "L · Learner",
-                      "Curriculum v2.4", arjun.licence_number):
-            self.assertIn(label, licence)                                  # 10.2
-        for rule in ("Keep Private Things Private", "Check Before You Trust", "You're Still the Driver",
-                     "Better Prompt, Better Answer", "Mind What You Share", "aidl_hc_full"):
-            self.assertIn(rule, highway)                                   # 10.3
-
-    def test_add_user_requires_name(self):
-        resp = self._submit("aidl_add_user", {"name": {"value": ""}, "email": {"value": "a@acme.example"}})
-        self.assertIn("name", resp.json()["errors"])
-
     def test_card_request_then_send_with_lights(self):
         resp = self._submit("aidl_card_request", {}, meta={"channel_id": "C42", "card_id": "c1"})
         self.assertEqual(resp.json()["view"]["callback_id"], "aidl_card_send")
@@ -1243,11 +1227,13 @@ class SlackModalTests(TestCase):
             return {"ok": True}
 
         self._fake = fake
+        learner = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Jordan Ellis")
         self._post({"type": "block_actions", "channel": {"id": "C42"}, "response_url": "https://hooks.slack.test/r",
                     "actions": [{"action_id": "aidl_open_home", "value": "home"}]})
         opened = next(b for m, b in self.calls if m == "views.open")
         self.assertEqual(opened["view"]["callback_id"], "aidl_coverage")
-        self.assertIn(self.admin.email, json.dumps(opened["view"]["blocks"]))
+        self.assertIn(learner.email, json.dumps(opened["view"]["blocks"]))
+        self.assertNotIn(self.admin.email, json.dumps(opened["view"]["blocks"]))
         upload = next(c for c in self.http.call_args_list if c.args and c.args[0] == "https://files.slack.test/up")
         self.assertIn(b"name,email,role", upload.kwargs["data"])
         done = next(b for m, b in self.calls if m == "files.completeUploadExternal")
@@ -1332,20 +1318,8 @@ class SlackModalTests(TestCase):
         self.assertEqual((update["channel"], update["ts"]), ("D5", "222.2"))
         text = json.dumps(update["blocks"], ensure_ascii=False)
         self.assertIn("Traffic Light Check", text)
-        self.assertIn("hasn't sent", text)          # admin hasn't sent it yet
+        self.assertIn("RED · STOP", text)            # lights come from the policy, not the admin
         self.assertIn("aidl_utab_home", text)
-
-    def test_traffic_light_tab_shows_only_sent_lights(self):
-        from .slack_blocks import user_dashboard_blocks
-
-        meta = {"channel_id": "C42", "card_id": "c1"}
-        self._submit("aidl_card_request", {}, meta=meta)
-        self._submit("aidl_card_send", {"lights": {"selected_options": [{"value": "green"}]},
-                                        "when": {"selected_option": {"value": "now"}}}, meta=meta)
-        text = json.dumps(user_dashboard_blocks(self.admin, self.org, "traffic-light"), ensure_ascii=False)
-        self.assertIn("GREEN", text)
-        self.assertNotIn("RED · STOP", text)
-        self.assertIn("aidl_rate_like", text)
 
     def test_invited_admin_without_permission_is_refused(self):
         make_user(self.org, microsoft_id="slack:T9:U2", perm_approve_apps=False, perm_access_cards=False, perm_create_card=False)
@@ -1361,25 +1335,25 @@ class SlackDmFallbackTests(TestCase):
 
     def test_blocked_dm_falls_back_to_channel_and_warns_admin(self):
         from .slack_client import encrypt_token
-        from .slack_modals import _onboard_user
+        from .slack_onboarding import onboard_member
 
         org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_token=encrypt_token("xoxb-t"))
         admin = make_user(org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
-        member = make_user(org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U7", full_name="Anshul Chutani",
-                           licence_issued=True, licence_number="AIDL-L-0001-0002")
         calls = []
 
         def fake(method, token, *, json=None, params=None):
             calls.append((method, json))
+            if method == "users.info":
+                return {"ok": True, "user": {"id": "U7", "profile": {"email": "anshul@acme.example", "real_name": "Anshul Chutani"}}}
             if method == "chat.postMessage":
                 return {"ok": False, "error": "messages_tab_disabled"}
             return {"ok": True}
 
         with patch("api.slack_client.slack_api", side_effect=fake):
-            _onboard_user("xoxb-t", org, member, "U7", admin)
+            self.assertEqual(onboard_member(org, "U7"), "onboarded")
 
         shown = [b["text"] for m, b in calls if m == "chat.postEphemeral" and b["user"] == "U7"]
-        self.assertEqual(shown, ["Welcome to AIDL, Anshul!", "Your Learner's Permit is ready"])
+        self.assertEqual(shown, ["Welcome to AIDL, Anshul!", "Start here: your AI Acceptable Use Policy"])
         warning = next(b["text"] for m, b in calls if m == "chat.postEphemeral" and b["user"] == "U1")
         self.assertIn("Messages tab", warning)
 
@@ -1390,6 +1364,7 @@ class SlackHomeVisualTests(TestCase):
     def setUp(self):
         self.org = make_org(name="Secureitlab")
         self.admin = make_user(self.org, full_name="Priya Raman")
+        make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Jordan Ellis")  # hasn't signed the AUP
 
     def _blocks(self):
         from .slack_blocks import admin_card_blocks
@@ -1398,17 +1373,18 @@ class SlackHomeVisualTests(TestCase):
         return admin_card_blocks(build_admin_cards_context(self.admin), "home")
 
     def test_home_layout_matches_design(self):
+        _answer_policy(self.org)
         blocks = self._blocks()
         self.assertEqual(blocks[0].get("block_id"), "aidl_tabs")              # navigation on top
         self.assertEqual(blocks[1]["text"]["text"], "🚦 AIDL Admin Center")
         text = json.dumps(blocks, ensure_ascii=False)
-        for label in ("Signed in as *Priya*", "Welcome back, Priya.", "LICENSES & SEATS", "Seats purchased",
+        for label in ("Signed in as *Priya*", "Welcome back, Priya.", "LICENSES & SEATS", "Trial plan",
                       "Licenses issued", "GOVERNANCE SNAPSHOT", "👥 Admins", "✅ Apps approved",
                       "AI applications", "IT applications", "Rollout progress", "Export Coverage CSV"):
             self.assertIn(label, text)
         self.assertIn("aidl_aup_remind", text)                                 # unsigned users → alert
         self.assertIn("aidl_tab_add-admin", json.dumps(next(b for b in blocks if "Rollout" in json.dumps(b))))
-        self.assertEqual(len(blocks[0]["elements"]), 6)
+        self.assertEqual(len(blocks[0]["elements"]), 5)
 
     def test_send_reminders_dms_unsigned_members(self):
         from .slack_client import encrypt_token
@@ -1430,3 +1406,673 @@ class SlackHomeVisualTests(TestCase):
         dms = [j["channel"] for m, j in calls if m == "chat.postMessage"]
         self.assertEqual(dms, ["U7"])
         self.assertIn("reminder sent to 1", reply.call_args.kwargs["json"]["text"])
+
+
+class SlackOnboardingTests(TestCase):
+    """Joining the AIDL channel onboards the user; accepting the Highway Code
+    and the Traffic Light Check issues the Learner licence automatically."""
+
+    SECRET = "shh"
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), seats_purchased=5)
+        self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def _fake(self, method, token, *, json=None, params=None):
+        self.calls.append((method, json or params))
+        if method == "users.info":
+            uid = (params or {}).get("user")
+            if uid == "UB0T2":
+                return {"ok": True, "user": {"id": uid, "is_bot": True, "profile": {}}}
+            return {"ok": True, "user": {"id": uid, "profile": {"email": f"{uid.lower()}@acme.example", "real_name": "Jordan Ellis"}}}
+        return {"ok": True, "ts": "1.1"}
+
+    def _signed(self, path, body, content_type, extra=None):
+        import hashlib
+        import hmac
+        import time
+
+        ts = str(int(time.time()))
+        sig = "v0=" + hmac.new(self.SECRET.encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
+        with self.settings(SLACK_SIGNING_SECRET=self.SECRET, SLACK_REPLY_SYNC=True), \
+                patch("api.slack_client.slack_api", side_effect=self._fake), patch("requests.post") as http:
+            http.return_value.status_code = 200
+            http.return_value.text = "ok"
+            return self.client.post(path, body, content_type=content_type,
+                                    HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig, **(extra or {}))
+
+    def _event(self, user, channel="C42", extra=None):
+        body = json.dumps({"type": "event_callback", "team_id": "T9",
+                           "event": {"type": "member_joined_channel", "user": user, "channel": channel}})
+        return self._signed("/api/slack/events/", body, "application/json", extra)
+
+    def _click(self, user, item):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": user, "team_id": "T9"},
+                   "container": {"channel_id": "D7", "message_ts": "9.9"},
+                   "actions": [{"action_id": f"aidl_ack_{item}", "value": item}]}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def test_url_verification(self):
+        resp = self._signed("/api/slack/events/", json.dumps({"type": "url_verification", "challenge": "abc"}),
+                            "application/json")
+        self.assertEqual(resp.json(), {"challenge": "abc"})
+
+    def test_bad_signature_rejected(self):
+        resp = self.client.post("/api/slack/events/", "{}", content_type="application/json",
+                                HTTP_X_SLACK_REQUEST_TIMESTAMP="1", HTTP_X_SLACK_SIGNATURE="v0=bad")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_joining_the_channel_onboards_the_user(self):
+        _answer_policy(self.org)
+        self._event("U7")
+        user = AIDLUser.objects.get(microsoft_id="slack:T9:U7")
+        self.assertEqual((user.role, user.organization_id), (AIDLUser.Role.LEARNER, str(self.org.pk)))
+        self.assertFalse(user.licence_issued)                 # earned later, not on join
+        self.assertIsNotNone(user.slack_onboarded_at)
+        dms = [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
+        self.assertEqual([d["text"] for d in dms], ["Welcome to AIDL, Jordan!", "Start here: your AI Acceptable Use Policy"])
+        self.assertIn("aidl_ack_aup", json.dumps(dms[1]["blocks"]))       # starts on the AUP tab
+
+    def test_rejoin_bots_other_channels_and_retries_are_ignored(self):
+        self._event("U7")
+        self.calls.clear()
+        self._event("U7")                                     # rejoin
+        self._event("UB0T2")                                  # a bot
+        self._event("U8", channel="C99")                      # another channel
+        self._event("U9", extra={"HTTP_X_SLACK_RETRY_NUM": "1"})  # Slack retry
+        self.assertFalse([b for m, b in self.calls if m == "chat.postMessage"])
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U8", "slack:T9:U9"]).exists())
+
+    def test_acknowledging_both_issues_the_learner_licence(self):
+        self._event("U7")
+        self._click("U7", "highway_code")
+        user = AIDLUser.objects.get(microsoft_id="slack:T9:U7")
+        self.assertFalse(user.licence_issued)                 # one of two done
+        self._click("U7", "highway_code")                     # double click — no effect
+        self._click("U7", "traffic_light")
+        user.refresh_from_db()
+        self.assertTrue(user.licence_issued)
+        self.assertTrue(user.licence_number.startswith("AIDL-L-"))
+        update = [b for m, b in self.calls if m == "chat.update"][-1]
+        self.assertIn("Your Learner", json.dumps(update["blocks"], ensure_ascii=False))
+        self.assertTrue(any(m == "chat.postMessage" and "Learner's Permit is ready" in b["text"] for m, b in self.calls))
+
+    def test_no_free_seat_keeps_the_licence_waiting_and_tells_the_admin(self):
+        # e.g. the plan was reduced after people joined
+        self.org.plan = "basic"
+        self.org.save()
+        self._event("U7")
+        self.org.seats_purchased = 0
+        self.org.save()
+        self._click("U7", "highway_code")
+        self._click("U7", "traffic_light")
+        self.assertFalse(AIDLUser.objects.get(microsoft_id="slack:T9:U7").licence_issued)
+        self.assertTrue(any(m == "chat.postMessage" and b["channel"] == "U1" and "no free license seats" in b["text"]
+                            for m, b in self.calls))
+
+    def test_admin_center_has_no_add_user(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        tabs = admin_card_blocks(build_admin_cards_context(self.admin), "home")[0]["elements"]
+        self.assertEqual([t["value"] for t in tabs], ["home", "add-admin", "cards", "ai-apps", "it-apps"])
+
+
+class AdminProgressViewTests(TestCase):
+    """Admin progress view: Home summary, Team progress popup, coverage columns."""
+
+    def setUp(self):
+        from .models import Acknowledgement
+
+        self.org = make_org(name="Secureitlab", seats_purchased=10)
+        self.admin = make_user(self.org, full_name="Priya Raman")
+        self.done = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Anshul", licence_issued=True,
+                              licence_number="AIDL-L-0001-0001")
+        self.legacy = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Yash", licence_issued=True,
+                                licence_number="AIDL-L-0002-0002")
+        self.half = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Jordan")
+        for item in ("highway_code", "traffic_light"):
+            Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(self.done.pk), item=item, version="v1")
+        Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(self.half.pk), item="highway_code", version="v1")
+
+    def test_statuses_and_counts(self):
+        from .licensing import team_progress
+
+        t = team_progress(self.org)
+        status = {r["name"]: r["status"] for r in t["rows"]}
+        self.assertEqual(status, {"Anshul": "licensed", "Yash": "legacy", "Jordan": "in_progress"})  # no admins
+        self.assertEqual((t["members"], t["highway_code"], t["traffic_light"], t["licensed"], t["legacy"]),
+                         (3, 2, 1, 2, 1))
+
+    def test_home_card_shows_team_progress(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        blocks = admin_card_blocks(build_admin_cards_context(self.admin), "home")
+        header = next(b for b in blocks if "TEAM PROGRESS" in json.dumps(b))
+        self.assertEqual(header["accessory"]["action_id"], "aidl_team_progress")
+        fields = [f["text"] for f in blocks[blocks.index(header) + 1]["fields"]]
+        self.assertTrue(fields[1].endswith("*2* of 3"))   # Highway Code accepted (admin not counted)
+        self.assertTrue(fields[2].endswith("*1* of 3"))   # Traffic Light accepted
+        self.assertTrue(fields[3].endswith("*2* of 3"))   # Licensed
+
+    def test_team_progress_popup_lists_every_member(self):
+        from .slack_modals import team_progress_view
+
+        text = json.dumps(team_progress_view(self.org), ensure_ascii=False)
+        for label in ("Anshul", "Yash", "Jordan", "LICENSED (BEFORE ACKNOWLEDGEMENT RULE)*  (1)",
+                      "IN PROGRESS*  (1)", "AIDL-L-0001-0001", "old *Add User* flow", "*2/3* · 67%"):
+            self.assertIn(label, text)
+
+    def test_coverage_csv_has_journey_columns(self):
+        from .slack_cards import coverage_csv, coverage_data
+
+        csv_text = coverage_csv(coverage_data(self.org)["rows"])
+        header = csv_text.splitlines()[0]
+        self.assertIn("status,highway_code_accepted,traffic_light_accepted", header)
+        self.assertIn("Licensed (before acknowledgement rule)", csv_text)
+
+
+class GeneratedAupTests(TestCase):
+    """AUP generated from the organization's policy answers + app registry."""
+
+    ANSWERS = {
+        "ai_policy": "Yes, published and enforced",
+        "approved_tools": "Only company-approved tools",
+        "confidential_data": "Never",
+        "human_review": "Always",
+        "disclosure": "Yes, always",
+        "regulation": "DPDP Act (India)",
+        "incident_reporting": "Through HR",
+        "training_frequency": "Every year",
+    }
+
+    def setUp(self):
+        from .org_policy import save_answers
+
+        self.org = make_org(name="Secureitlab", slack_team_id="T9", slack_channel_id="C42")
+        save_answers(self.org, self.ANSWERS)
+        org_id = str(self.org.pk)
+        RegisteredApp.objects.create(organization_id=org_id, name="Claude Enterprise", app_type="ai", status="approved",
+                                     category="Assistant / Chatbot", data_allowed="internal_confidential")
+        RegisteredApp.objects.create(organization_id=org_id, name="Otter.ai", app_type="ai", status="rejected")
+        RegisteredApp.objects.create(organization_id=org_id, name="Jira", app_type="it", status="approved", data_allowed="internal")
+        RegisteredApp.objects.create(organization_id=org_id, name="Personal drives", app_type="it", status="rejected")
+        RegisteredApp.objects.create(organization_id=org_id, name="Pending tool", app_type="ai", status="pending")
+        self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.learner = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U7", full_name="Jordan Ellis")
+
+    def test_generated_from_answers_and_apps(self):
+        from .aup import generate_aup
+
+        aup = generate_aup(self.org)
+        self.assertEqual([a["name"] for a in aup["allowed_ai"]], ["Claude Enterprise"])
+        self.assertEqual([a["name"] for a in aup["allowed_it"]], ["Jira"])
+        prohibited = [a["name"] for a in aup["prohibited"]]
+        self.assertIn("Otter.ai", prohibited)
+        self.assertIn("Personal drives", prohibited)
+        self.assertNotIn("Pending tool", prohibited + [a["name"] for a in aup["allowed_ai"]])
+        self.assertEqual(aup["red_list"][0], "Any confidential or customer data")   # confidential_data = Never
+        rules = " ".join(aup["rules"])
+        for phrase in ("Use only the apps listed", "Never put confidential", "must review every AI output",
+                       "Always say when content was created with AI", "the DPDP Act", "report it to HR"):
+            self.assertIn(phrase, rules)
+
+    def test_version_changes_when_the_app_list_changes(self):
+        from .aup import generate_aup
+
+        before = generate_aup(self.org)["version"]
+        self.assertEqual(before, generate_aup(self.org)["version"])           # stable
+        RegisteredApp.objects.create(organization_id=str(self.org.pk), name="Notion AI", app_type="ai", status="approved")
+        self.assertNotEqual(before, generate_aup(self.org)["version"])
+
+    def test_card_layout_and_accept(self):
+        from .aup import generate_aup
+        from .licensing import acknowledge
+        from .slack_blocks import aup_blocks
+
+        aup = generate_aup(self.org)
+        text = json.dumps(aup_blocks(aup, self.learner), ensure_ascii=False)
+        for label in ("Your AI Acceptable Use Policy", "Prepared for *Jordan Ellis*", aup["version"],
+                      "AI APPS YOU CAN USE", "IT APPS YOU CAN USE", "DON'T USE", "NEVER PUT INTO ANY AI TOOL",
+                      "YOUR RULES", "Claude Enterprise", "Internal + Confidential data", "aidl_ack_aup"):
+            self.assertIn(label, text)
+        acknowledge(self.learner, "aup", aup["version"])
+        self.learner.refresh_from_db()
+        self.assertTrue(self.learner.aup_signed)
+        text = json.dumps(aup_blocks(aup, self.learner), ensure_ascii=False)
+        self.assertNotIn("aidl_ack_aup", text)
+        self.assertIn("You accepted this policy", text)
+
+    def test_admin_preview_and_progress(self):
+        from .aup import generate_aup
+        from .licensing import acknowledge, team_progress
+        from .slack_modals import aup_view
+
+        preview = json.dumps(aup_view(self.org), ensure_ascii=False)
+        self.assertIn("Team version", preview)
+        self.assertNotIn("aidl_ack_aup", preview)                            # admins only view it
+        acknowledge(self.learner, "aup", generate_aup(self.org)["version"])
+        t = team_progress(self.org)
+        self.assertEqual((t["members"], t["aup"]), (1, 1))
+
+    def test_send_aup_to_team_dms_learners_only(self):
+        from .slack_client import encrypt_token
+        from .slack_interactions import _send_aup_to_team
+
+        self.org.slack_bot_token = encrypt_token("xoxb-t")
+        self.org.save()
+        calls = []
+        with self.settings(SLACK_REPLY_SYNC=True), \
+                patch("api.slack_client.slack_api", side_effect=lambda m, t, **k: calls.append((m, k.get("json"))) or {"ok": True}), \
+                patch("api.slack_interactions.requests.post") as reply:
+            reply.return_value.status_code = 200
+            reply.return_value.text = "ok"
+            _send_aup_to_team(self.org, "https://hooks.slack.test/r")
+        dms = [j for m, j in calls if m == "chat.postMessage"]
+        self.assertEqual([d["channel"] for d in dms], ["U7"])
+        self.assertIn("aidl_ack_aup", json.dumps(dms[0]["blocks"]))
+        self.assertIn("AUP sent to 1 of 1", reply.call_args.kwargs["json"]["text"])
+
+
+class PlanLimitTests(TestCase):
+    """Trial / Basic plans: the user limit is enforced when people join the
+    AIDL channel, licences earned keep counting after removal, and the
+    plan's awareness package is delivered after the licence."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), plan="trial", seats_purchased=50)
+        self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def _fake(self, method, token, *, json=None, params=None):
+        self.calls.append((method, json or params))
+        if method == "users.info":
+            uid = (params or {}).get("user")
+            return {"ok": True, "user": {"id": uid, "tz_offset": 19800,
+                                         "profile": {"email": f"{uid.lower()}@acme.example", "real_name": f"Person {uid}"}}}
+        if method == "conversations.open":
+            return {"ok": True, "channel": {"id": "D7"}}
+        if method == "chat.scheduleMessage":
+            return {"ok": True, "scheduled_message_id": f"Q{len(self.calls)}"}
+        return {"ok": True, "ts": "1.1"}
+
+    def _event(self, user, kind="member_joined_channel"):
+        body = json.dumps({"type": "event_callback", "team_id": "T9",
+                           "event": {"type": kind, "user": user, "channel": "C42"}})
+        return self._signed("/api/slack/events/", body, "application/json")
+
+    def _click(self, user, item):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": user, "team_id": "T9"},
+                   "container": {"channel_id": "D7", "message_ts": "9.9"},
+                   "actions": [{"action_id": f"aidl_ack_{item}", "value": item}]}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def _member(self, uid):
+        return AIDLUser.objects.filter(microsoft_id=f"slack:T9:{uid}").first()
+
+    def _fill_trial(self):
+        for uid in ("U2", "U3", "U4", "U5", "U6"):
+            self._event(uid)
+
+    def _licence(self, uid):
+        self._click(uid, "highway_code")
+        self._click(uid, "traffic_light")
+        return self._member(uid)
+
+    def test_trial_refuses_sixth_user(self):
+        self._fill_trial()
+        self.calls.clear()
+        self._event("U7")
+        self.assertIsNone(self._member("U7"))
+        self.assertIn(("conversations.kick", {"channel": "C42", "user": "U7"}), self.calls)
+        admin_dm = [j for m, j in self.calls if m == "chat.postMessage" and j["channel"] == "U1"]
+        self.assertIn("plan is full", admin_dm[0]["text"] + json.dumps(admin_dm[0]["blocks"]))
+
+    def test_admins_do_not_use_seats(self):
+        make_user(self.org, microsoft_id="slack:T9:U8", full_name="Second Admin")
+        self._fill_trial()
+        from .plans import usage
+        self.assertEqual(usage(self.org)["used"], 5)
+
+    def test_removing_unlicensed_member_frees_the_seat(self):
+        self._fill_trial()
+        self._event("U2", "member_left_channel")
+        self.assertIsNotNone(self._member("U2").slack_left_at)
+        self._event("U7")
+        self.assertIsNotNone(self._member("U7"))
+
+    def test_licensed_member_keeps_seat_after_removal(self):
+        self._fill_trial()
+        self._licence("U2")
+        self._event("U2", "member_left_channel")
+        self._event("U7")
+        self.assertIsNone(self._member("U7"))  # no seat recycling
+        # Added back: same licence, no new seat needed.
+        number = self._member("U2").licence_number
+        self.calls.clear()
+        self._event("U2")
+        u2 = self._member("U2")
+        self.assertIsNone(u2.slack_left_at)
+        self.assertEqual(u2.licence_number, number)
+        self.assertNotIn("conversations.kick", [m for m, _ in self.calls])
+
+    def test_removed_member_cannot_earn_licence(self):
+        from .licensing import issue_learner_if_ready
+
+        self._event("U2")
+        self._event("U2", "member_left_channel")
+        self._click("U2", "highway_code")
+        self._click("U2", "traffic_light")
+        self.assertFalse(self._member("U2").licence_issued)
+        self.assertEqual(issue_learner_if_ready(self._member("U2"), self.org), "left")
+
+    def test_licence_starts_default_package(self):
+        from .models import PackageDelivery
+
+        self._event("U2")
+        self.calls.clear()
+        u2 = self._licence("U2")
+        rows = PackageDelivery.objects.filter(user_id=str(u2.pk))
+        self.assertEqual(rows.count(), 12)
+        self.assertEqual(rows.filter(status="sent").get().card_no, "006")  # card 1 right away
+        scheduled = [j for m, j in self.calls if m == "chat.scheduleMessage"]
+        self.assertEqual(len(scheduled), 11)
+        self.assertEqual(scheduled[0]["text"], "AIDL card: Traffic Light Check")  # sheet's posting order
+
+    def test_leaving_cancels_scheduled_cards_and_rejoin_resumes(self):
+        from .models import PackageDelivery
+
+        self._event("U2")
+        u2 = self._licence("U2")
+        self.calls.clear()
+        self._event("U2", "member_left_channel")
+        self.assertEqual(len([m for m, _ in self.calls if m == "chat.deleteScheduledMessage"]), 11)
+        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="cancelled").count(), 11)
+        self.calls.clear()
+        self._event("U2")
+        self.assertEqual(len([m for m, _ in self.calls if m == "chat.scheduleMessage"]), 11)
+        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="sent").count(), 1)
+
+    def test_upgrade_to_basic_schedules_remaining_cards(self):
+        from .models import PackageDelivery
+        from .package_delivery import sync_organization
+
+        self._event("U2")
+        u2 = self._licence("U2")
+        self.org.plan = "basic"
+        self.org.save()
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            sync_organization(self.org)
+        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk)).count(), 24)
+        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="scheduled").count(), 23)
+
+    def test_post_times_two_a_week_at_ten_local(self):
+        import datetime as dt
+
+        from .package_delivery import post_times
+
+        start = dt.datetime(2026, 10, 6, 12, 0, tzinfo=dt.timezone.utc)  # Tuesday
+        times = post_times(start, 4, 2, tz_offset=19800)  # IST
+        local = [t + dt.timedelta(seconds=19800) for t in times]
+        self.assertEqual([t.strftime("%a %H:%M") for t in local], ["Thu 10:00", "Mon 10:00", "Thu 10:00", "Mon 10:00"])
+
+    def test_admin_home_shows_plan(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        self._fill_trial()
+        text = json.dumps(admin_card_blocks(build_admin_cards_context(self.admin), "home"), ensure_ascii=False)
+        self.assertIn("Trial plan", text)
+        self.assertIn("5* of 5 users", text)
+        self.assertIn("plan is full", text)
+
+
+class RemovePeopleTests(TestCase):
+    """The first admin removes admins; any admin removes team members."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+    _event = PlanLimitTests._event
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), plan="trial")
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.co = make_user(self.org, microsoft_id="slack:T9:U2", full_name="Arsh Co")
+        self.calls = []
+
+    def _press(self, user, action_id, value):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": user, "team_id": "T9"},
+                   "view": {"id": "V1", "private_metadata": "{}"},
+                   "actions": [{"action_id": action_id, "value": value}]}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def _popup_text(self):
+        return json.dumps([j for m, j in self.calls if m == "views.update"][-1]["view"], ensure_ascii=False)
+
+    def test_add_admin_popup_lists_admins_with_remove_for_owner_only(self):
+        from .slack_cards import build_admin_cards_context
+        from .slack_modals import add_admin_view
+
+        owner_view = json.dumps(add_admin_view(build_admin_cards_context(self.owner), {}))
+        self.assertEqual(owner_view.count("aidl_admin_remove"), 1)  # co-admin only, not the owner
+        self.assertIn(str(self.co.pk), owner_view)
+
+    def test_owner_removes_co_admin_who_becomes_member(self):
+        self._press("U1", "aidl_admin_remove", str(self.co.pk))
+        self.co.refresh_from_db()
+        self.assertEqual(self.co.role, AIDLUser.Role.LEARNER)
+        self.assertIn("no longer an admin", self._popup_text())
+        self.assertIsNotNone(self.co.slack_onboarded_at)  # got the learner Welcome + dashboard
+
+    def test_removed_admin_kicked_when_plan_full(self):
+        for uid in ("U3", "U4", "U5", "U6", "U7"):
+            self._event(uid)
+        self._press("U1", "aidl_admin_remove", str(self.co.pk))
+        self.co.refresh_from_db()
+        self.assertEqual(self.co.role, AIDLUser.Role.LEARNER)
+        self.assertIsNotNone(self.co.slack_left_at)
+        self.assertIn(("conversations.kick", {"channel": "C42", "user": "U2"}), self.calls)
+
+    def test_co_admin_cannot_remove_admins(self):
+        self._press("U2", "aidl_admin_remove", str(self.owner.pk))
+        self.owner.refresh_from_db()
+        self.assertEqual(self.owner.role, AIDLUser.Role.ADMIN)
+        self.assertIn("Only the admin who set up AIDL", self._popup_text())
+
+    def test_admin_removes_member(self):
+        self._event("U3")
+        member = AIDLUser.objects.get(microsoft_id="slack:T9:U3")
+        self.calls.clear()
+        self._press("U2", "aidl_member_remove", str(member.pk))  # co-admin may remove members
+        member.refresh_from_db()
+        self.assertIsNotNone(member.slack_left_at)
+        self.assertIn(("conversations.kick", {"channel": "C42", "user": "U3"}), self.calls)
+        self.assertIn("seat is free again", self._popup_text())
+
+    def test_progress_popup_has_remove_buttons(self):
+        from .slack_modals import team_progress_view
+
+        self._event("U3")
+        self.assertIn("aidl_member_remove", json.dumps(team_progress_view(self.org)))
+
+
+class SlackPolicyQuestionsTests(TestCase):
+    """The 8 policy questions are asked in Slack (from the AUP buttons), not
+    on the website."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"))
+        self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def _home(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        return json.dumps(admin_card_blocks(build_admin_cards_context(self.admin), "home"))
+
+    def _press(self, action_id):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "trigger_id": "TR", "channel": {"id": "C42"}, "actions": [{"action_id": action_id, "value": "x"}]}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def test_home_asks_for_policy_until_answered(self):
+        self.assertIn("aidl_policy_open", self._home())
+        self.assertNotIn("aidl_aup_send", self._home())
+        _answer_policy(self.org)
+        self.assertIn("aidl_aup_send", self._home())
+        self.assertIn("Edit policy answers", self._home())
+
+    def test_aup_button_opens_questions_when_unanswered(self):
+        self._press("aidl_aup_view")
+        opened = [j for m, j in self.calls if m == "views.open"]
+        self.assertEqual(opened[0]["view"]["callback_id"], "aidl_policy")
+        self.assertEqual(len([b for b in opened[0]["view"]["blocks"] if b["type"] == "input"]), 8)
+
+    def test_submitting_answers_saves_policy(self):
+        from urllib.parse import urlencode
+
+        from .org_policy import POLICY_QUESTIONS, policy_completed
+
+        values = {qid: {"v": {"type": "radio_buttons", "selected_option": {"value": opts[1]}}}
+                  for qid, opts in POLICY_QUESTIONS.items()}
+        payload = {"type": "view_submission", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "view": {"callback_id": "aidl_policy", "private_metadata": "{}", "state": {"values": values}}}
+        resp = self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+        body = resp.json()
+        self.assertEqual(body["response_action"], "update")          # AI-C-011: answers report
+        report = json.dumps(body["view"], ensure_ascii=False)
+        self.assertIn("YOUR POLICY ANSWERS", report)
+        self.assertIn(list(POLICY_QUESTIONS.values())[0][1], report)
+        self.org.refresh_from_db()
+        self.assertTrue(policy_completed(self.org))
+
+    def test_missing_answer_shows_error(self):
+        from urllib.parse import urlencode
+
+        payload = {"type": "view_submission", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "view": {"callback_id": "aidl_policy", "private_metadata": "{}", "state": {"values": {}}}}
+        resp = self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+        self.assertEqual(resp.json()["response_action"], "errors")
+        self.assertIn("ai_policy", resp.json()["errors"])
+
+
+@override_settings(AUTH_EMAIL_OTP=False, AUTH_CAPTCHA=False)  # direct path; OTP/captcha tested below
+class SignupWithoutMobileTests(TestCase):
+    def test_signup_without_mobile_and_underscore_password(self):
+        resp = self.client.post("/api/auth/signup/", {
+            "enroll_as": "individual", "first_name": "Shivraj", "last_name": "Choudhary",
+            "email": "shivraj.test@example.com", "password": "Bc99HntU5wKAWgf_", "confirm_password": "Bc99HntU5wKAWgf_",
+            "country": "Bahrain", "state": "Southern", "city": "Isa Town"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["user"]["license_class"], "class_l")
+
+
+@override_settings(AUTH_EMAIL_OTP=True, AUTH_CAPTCHA=True,
+                   EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class OtpCaptchaTests(TestCase):
+    """AI-C-004: sign-up needs the emailed code before anything is shown.
+    AI-C-008: sign-in needs the picture code and then the emailed code."""
+
+    PASSWORD = "Bc99HntU5wKAWgf_"
+
+    def _signup(self, email="otp.user@example.com"):
+        return self.client.post("/api/auth/signup/", {
+            "enroll_as": "individual", "first_name": "Otp", "last_name": "User", "email": email,
+            "password": self.PASSWORD, "confirm_password": self.PASSWORD,
+            "country": "India", "state": "Delhi", "city": "Delhi"}, content_type="application/json")
+
+    def _code(self):
+        import re
+        from django.core import mail
+
+        return re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
+
+    def test_signup_needs_code(self):
+        resp = self._signup()
+        self.assertEqual(resp.status_code, 202)
+        self.assertTrue(resp.json()["otp_required"])
+        self.assertNotIn("access_token", resp.json())
+        user = AIDLUser.objects.get(email="otp.user@example.com")
+        self.assertFalse(user.is_active)
+        bad = self.client.post("/api/auth/signup/verify/", {"otp_token": resp.json()["otp_token"], "code": "000000"},
+                               content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        ok = self.client.post("/api/auth/signup/verify/", {"otp_token": resp.json()["otp_token"], "code": self._code()},
+                              content_type="application/json")
+        self.assertEqual(ok.status_code, 201, ok.content)
+        self.assertIn("access_token", ok.json())
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+
+    def test_unconfirmed_signup_does_not_block_email(self):
+        self._signup()
+        self.assertEqual(self._signup().status_code, 202)
+        self.assertEqual(AIDLUser.objects.filter(email="otp.user@example.com").count(), 1)
+
+    def test_signin_needs_captcha_then_code(self):
+        resp = self._signup()
+        self.client.post("/api/auth/signup/verify/", {"otp_token": resp.json()["otp_token"], "code": self._code()},
+                         content_type="application/json")
+        body = {"enroll_as": "individual", "email": "otp.user@example.com", "password": self.PASSWORD}
+        no_captcha = self.client.post("/api/auth/signin/", body, content_type="application/json")
+        self.assertIn("captcha", no_captcha.json())
+        with patch("api.auth_verification.secrets.choice", return_value="A"):
+            token = self.client.get("/api/auth/captcha/").json()["captcha_token"]
+        wrong = self.client.post("/api/auth/signin/", {**body, "captcha_token": token, "captcha_answer": "BBBBB"},
+                                 content_type="application/json")
+        self.assertIn("captcha", wrong.json())
+        with patch("api.auth_verification.secrets.choice", return_value="A"):
+            token = self.client.get("/api/auth/captcha/").json()["captcha_token"]
+        step1 = self.client.post("/api/auth/signin/", {**body, "captcha_token": token, "captcha_answer": "aaaaa"},
+                                 content_type="application/json")
+        self.assertEqual(step1.status_code, 200, step1.content)
+        self.assertNotIn("access_token", step1.json())
+        step2 = self.client.post("/api/auth/signin/verify/", {"otp_token": step1.json()["otp_token"], "code": self._code()},
+                                 content_type="application/json")
+        self.assertEqual(step2.status_code, 200, step2.content)
+        self.assertIn("access_token", step2.json())
+
+    def test_code_locks_after_five_wrong_tries(self):
+        token = self._signup().json()["otp_token"]
+        for _ in range(5):
+            self.client.post("/api/auth/signup/verify/", {"otp_token": token, "code": "111111"}, content_type="application/json")
+        last = self.client.post("/api/auth/signup/verify/", {"otp_token": token, "code": self._code()},
+                                content_type="application/json")
+        self.assertIn("Too many", last.json()["code"][0])

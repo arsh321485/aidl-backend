@@ -3,13 +3,16 @@ import uuid
 
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.conf import settings
 from rest_framework import serializers
 
 from .models import AIDLUser, Item
 
 _NAME_RE = re.compile(r"^[^\W\d_](?:[^\W\d_]|[ \-'.])*$", re.UNICODE)
 _MOBILE_RE = re.compile(r"^\+?[0-9][0-9\s\-()]{6,19}$")
-_PASSWORD_SPECIAL_RE = re.compile(r"[!@#$%^&*()_+\-=\[\]{}|;:',.<>?/`~\\]")
+# Any symbol counts (same rule as the website's live hint): anything that is
+# not a letter, digit or space.
+_PASSWORD_SPECIAL_RE = re.compile(r"[^A-Za-z0-9\s]")
 
 
 def password_complexity_errors(password: str) -> list[str]:
@@ -115,7 +118,8 @@ class SignupSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8, max_length=128)
     confirm_password = serializers.CharField(write_only=True, min_length=8, max_length=128)
-    mobile_number = serializers.CharField(max_length=32)
+    # Optional: the website no longer asks for it.
+    mobile_number = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
     country = serializers.CharField(max_length=100)
     state = serializers.CharField(max_length=100)
     city = serializers.CharField(max_length=100)
@@ -145,13 +149,14 @@ class SignupSerializer(serializers.Serializer):
 
     def validate_email(self, value: str) -> str:
         email = (value or "").strip().lower()
-        if AIDLUser.objects.filter(email__iexact=email).exists():
+        # Sign-ups that never entered their email code don't block the address.
+        if AIDLUser.objects.filter(email__iexact=email).exclude(pk__in=_pending_signups(email)).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return email
 
     def validate_mobile_number(self, value: str) -> str:
         mobile = re.sub(r"\s+", " ", (value or "").strip())
-        if not _MOBILE_RE.fullmatch(mobile):
+        if mobile and not _MOBILE_RE.fullmatch(mobile):
             raise serializers.ValidationError(
                 "Enter a valid mobile number with country code, e.g. +15550000000."
             )
@@ -228,17 +233,25 @@ class SignupSerializer(serializers.Serializer):
             if enroll_as == AIDLUser.EnrollAs.ORGANIZATION
             else AIDLUser.Role.LEARNER
         )
+        AIDLUser.objects.filter(pk__in=_pending_signups(validated_data["email"])).delete()
         user = AIDLUser(
             microsoft_id=f"local:{uuid.uuid4()}",
             provider="website",
             full_name=f"{first_name} {last_name}".strip(),
             role=role,
-            is_active=True,
+            # Inactive until the emailed code is entered (auth_verification.py).
+            is_active=not settings.AUTH_EMAIL_OTP,
             **validated_data,
         )
         user.set_password(password)
         user.save()
         return user
+
+
+def _pending_signups(email: str) -> list:
+    """Website accounts created but never verified with the emailed code."""
+    return list(AIDLUser.objects.filter(email__iexact=email, provider="website", is_active=False,
+                                        last_login_at__isnull=True).values_list("pk", flat=True))
 
 
 class LoginSerializer(serializers.Serializer):
@@ -253,6 +266,10 @@ class LoginSerializer(serializers.Serializer):
         password = attrs.get("password") or ""
         enroll_as = attrs.get("enroll_as") or AIDLUser.EnrollAs.INDIVIDUAL
         user = AIDLUser.objects.filter(email__iexact=email, is_active=True).first()
+        if user is None and _pending_signups(email):
+            raise serializers.ValidationError(
+                {"email": "This email was never confirmed — register again to get a new code."}
+            )
         if user is None:
             raise serializers.ValidationError(
                 {"email": "No account found with this email."}

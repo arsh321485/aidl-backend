@@ -15,6 +15,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from .cards_catalog_data import MONTHLY_CARD_QUOTA
+from .plans import usage
 from .models import AIDLUser, CardRequest, RegisteredApp
 from .org_policy import get_answers, policy_effects
 from .org_service import compute_org_metrics, get_organization_for_user
@@ -28,7 +29,6 @@ DEFAULT_POLICY_VERSION = "v3.1"
 ADMIN_TABS = (
     ("home", "Home", "🏠"),
     ("add-admin", "Add Admin", "🧑‍💼"),
-    ("add-user", "Add User", "👤"),
     ("cards", "Cards", "📬"),
     ("ai-apps", "AI Apps", "🤖"),
     ("it-apps", "IT Apps", "💻"),
@@ -255,7 +255,7 @@ def _registry_rows(apps) -> list[dict]:
 
 
 def _visible_admin_tabs(user: AIDLUser | None, is_primary: bool) -> list[str]:
-    """Guide 8.2 — Home always; Add Admin/Add User only for the admin who
+    """Guide 8.2 — Home always; Add Admin only for the admin who
     signed the organization up; the rest by permission chip."""
     if user is None or is_primary:
         return [tab_id for tab_id, _l, _i in ADMIN_TABS]
@@ -386,6 +386,8 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "admin_email": "priya@northwind.co",
             "seats_purchased": 50, "seats_renew": "01 Mar",
             "licences_issued": 18, "enrolled": 32, "aup_unsigned": 6,
+            "plan": {"label": "Basic", "package_label": "Basic package", "cards": 24, "cards_per_week": 2,
+                     "limit": 50, "used": 32, "free": 18, "full": False},
             "admin_count": 2, "admin_seat_limit": 3,
             "approved_apps": approved, "total_apps": len(ai_apps) + len(it_apps),
             "rollout_done": 3, "rollout_total": 4,
@@ -409,9 +411,11 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "admin_email": user.email,
             "seats_purchased": org.seats_purchased,
             "seats_renew": metrics["seats_renews_on"],
-            "licences_issued": metrics["licences_issued"],
-            "enrolled": metrics["enrolled"],
-            "aup_unsigned": metrics["aup_unsigned"],
+            "plan": usage(org),
+            # Team numbers exclude admins (IT / HR run AIDL, they don't take part).
+            "licences_issued": sum(1 for m in metrics["members"] if m.licence_issued and m.role != AIDLUser.Role.ADMIN and not m.slack_left_at),
+            "enrolled": sum(1 for m in metrics["members"] if m.role != AIDLUser.Role.ADMIN and not m.slack_left_at),
+            "aup_unsigned": sum(1 for m in metrics["members"] if not m.aup_signed and m.role != AIDLUser.Role.ADMIN and not m.slack_left_at),
             "admin_count": metrics["admin_count"],
             "admin_seat_limit": metrics["admin_seat_limit"],
             "approved_apps": metrics["approved_apps"],
@@ -427,9 +431,21 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "tabs": _visible_admin_tabs(user, is_primary),
             "can_manage_cards": is_primary or user.perm_access_cards,
             "can_create_card": is_primary or user.perm_create_card,
+            "is_primary": is_primary,
+            "admins": [{
+                "id": str(a.pk), "name": a.full_name or a.email, "email": a.email, "primary": a.pk == admins[0].pk,
+                "perms": [label for flag, label in ((a.perm_approve_apps, "Approve Apps"),
+                                                    (a.perm_access_cards, "Access Cards"),
+                                                    (a.perm_create_card, "Create Card")) if flag],
+            } for a in admins],
         }
 
     data["policy"] = fx
+    if org is not None:
+        from .licensing import team_progress
+
+        team = team_progress(org)
+        data["team"] = {k: v for k, v in team.items() if k != "rows"}
     data["cards"] = _apply_card_effects(data["cards"], fx)
     data["ai_apps"] = _apply_app_effects(data["ai_apps"], fx)
     shown = data["ai_apps"] + data["it_apps"]
@@ -529,24 +545,34 @@ def _traffic_lights(fx: dict, chosen: list[str]) -> list[dict]:
 
 # ---------- guide 8.1: Export Coverage ----------
 
-COVERAGE_COLUMNS = ("name", "email", "role", "license_class", "license_number", "aup_signed", "cards_received")
+COVERAGE_COLUMNS = ("name", "email", "role", "status", "highway_code_accepted", "traffic_light_accepted",
+                    "license_class", "license_number", "license_issued", "aup_signed", "aup_accepted",
+                    "cards_received")
 
 
 def coverage_data(org) -> dict:
     """Every member with license class, AUP status and cards received — used
     by the Slack popup, the CSV file sent in Slack and the web page."""
+    from .licensing import STATUS_LABELS, team_progress
+
     cards_sent = CardRequest.objects.filter(organization_id=str(org.pk), status=CardRequest.Status.SENT).count()
+    day = lambda d: d.strftime("%Y-%m-%d") if d else ""  # noqa: E731
     rows = [
         {
-            "name": m.full_name,
-            "email": m.email,
-            "role": m.role,
-            "license_class": "L" if m.licence_issued else "",
-            "license_number": m.licence_number,
-            "aup_signed": "yes" if m.aup_signed else "no",
+            "name": p["name"],
+            "email": p["email"],
+            "role": p["role"],
+            "status": STATUS_LABELS[p["status"]].split(" ", 1)[1],
+            "highway_code_accepted": day(p["highway_code_at"]),
+            "traffic_light_accepted": day(p["traffic_light_at"]),
+            "license_class": "L" if p["member"].licence_issued else "",
+            "license_number": p["member"].licence_number,
+            "license_issued": day(p["member"].licence_issued_at),
+            "aup_signed": "yes" if p["member"].aup_signed else "no",
+            "aup_accepted": day(p["aup_at"]),
             "cards_received": cards_sent,
         }
-        for m in compute_org_metrics(org)["members"]
+        for p in team_progress(org)["rows"]
     ]
     return {
         "org_name": org.name,

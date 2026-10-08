@@ -1,7 +1,7 @@
 """Block Kit versions of the Slack Admin cards (AIDL Slack guide, section 8).
 
 Each tab is one message: the AIDL app line, the card content and a row of
-tab buttons (Home, Add Admin, Add User, Cards, AI Apps, IT Apps — no Policy
+tab buttons (Home, Add Admin, Cards, AI Apps, IT Apps — no Policy
 tab). Tab clicks are handled in slack_interactions.py; the full forms
 (invite, issue license, request/send cards, add apps) open the responsive
 card page with a short-lived link only the clicking admin can see.
@@ -15,15 +15,13 @@ _DOT = {"g": "🟢", "a": "🟡", "r": "🔴"}
 _OPEN_LABEL = {
     "home": "⬇ Export Coverage CSV",
     "add-admin": "Send Admin Invite",
-    "add-user": "Issue License",
     "cards": "View & send cards",
     "ai-apps": "＋ Add AI Application",
     "it-apps": "＋ Add IT Application",
 }
 _NEXT = {
     "home": "→ Next: bring in another admin to help run this",
-    "add-admin": "→ Next: add your team members",
-    "add-user": "→ Next: send your team the reference cards they'll need",
+    "add-admin": "→ Next: add your team to the AIDL channel — AIDL onboards them automatically",
     "cards": "→ Next: set which AI tools your team is allowed to use",
     "ai-apps": "→ Next: do the same for your IT systems",
     "it-apps": "✓ That's the full admin setup flow",
@@ -87,11 +85,19 @@ def _home(d: dict) -> list:
         {"type": "divider"},
         _section("📊  *LICENSES & SEATS*"),
         {"type": "section", "fields": [
-            _md(f"*Seats purchased*\n*{d['seats_purchased']}* seats  ·  _renews {d['seats_renew']}_"),
+            _plan_field(d),
             _md(f"*Licenses issued*\n*{d['licences_issued']}* of {enrolled} enrolled  ·  {pct}%\n"
                 + "▰" * filled + "▱" * (10 - filled)),
         ]},
+        *_plan_notice(d),
         _aup_block(d),
+        *([{"type": "actions", "block_id": "aidl_aup_actions", "elements": [
+            _button("📄 View team AUP", "aidl_aup_view", value="view"),
+            _button("📤 Send AUP to team", "aidl_aup_send", value="send"),
+            _button("✏️ Edit policy answers", "aidl_policy_open", value="policy"),
+        ]}] if d["policy"].get("has_answers") else []),
+        {"type": "divider"},
+        *_team_progress_blocks(d),
         {"type": "divider"},
         _section("🛡️  *GOVERNANCE SNAPSHOT*"),
         {"type": "section", "fields": [
@@ -109,8 +115,51 @@ def _home(d: dict) -> list:
     return blocks
 
 
+def _plan_field(d: dict) -> dict:
+    p = d.get("plan")
+    if not p:
+        return _md(f"*Seats purchased*\n*{d['seats_purchased']}* seats  ·  _renews {d['seats_renew']}_")
+    return _md(f"*{p['label']} plan*\n*{p['used']}* of {p['limit']} users  ·  "
+               f"_{p['package_label']}: {p['cards']} cards, {p['cards_per_week']}/week_")
+
+
+def _plan_notice(d: dict) -> list:
+    p = d.get("plan")
+    if not p or not p["full"]:
+        return []
+    return [_context(f"⛔ *Your {p['label']} plan is full* ({p['used']} of {p['limit']} users). People added to the "
+                     "channel now are removed again automatically. Remove someone who hasn't earned a license, "
+                     + ("or upgrade to *Basic*." if p["label"] == "Trial" else "or buy more seats."))]
+
+
+def _team_progress_blocks(d: dict) -> list:
+    """Admin progress view (summary): joined → accepted → licensed."""
+    t = d.get("team")
+    if not t:
+        return []
+    n = t["members"]
+    licensed = f"*{t['licensed']}* of {n}"
+    if t["waiting_seat"]:
+        licensed += f"  ·  ⏳ {t['waiting_seat']} waiting for a seat"
+    return [
+        {"type": "section", "text": _md("👥  *TEAM PROGRESS*"),
+         "accessory": _button("View team progress", "aidl_team_progress", value="team")},
+        {"type": "section", "fields": [
+            _md(f"*Joined*\n*{n}* member{'s' if n != 1 else ''}"),
+            _md(f"*📖 Highway Code accepted*\n*{t['highway_code']}* of {n}"),
+            _md(f"*🚦 Traffic Light accepted*\n*{t['traffic_light']}* of {n}"),
+            _md(f"*🪪 Licensed*\n{licensed}"),
+        ]},
+    ]
+
+
 def _aup_block(d: dict) -> dict:
     """AUP status — a red alert with Send reminders when people haven't signed."""
+    if not d["policy"].get("has_answers"):
+        return {"type": "section",
+                "text": _md("📝 *Set up your AI policy*\nAnswer 8 quick questions and AIDL generates your team's "
+                            "AI Acceptable Use Policy."),
+                "accessory": _button("Answer policy questions", "aidl_policy_open", value="policy", style="primary")}
     if d["policy"].get("aup_status") == "not_available":
         return _context("📄 No written AI policy yet — AUP signatures start once it's published.")
     if not d["aup_warn"]:
@@ -126,7 +175,7 @@ def _aup_block(d: dict) -> dict:
 
 def _next_setup_tab(d: dict) -> str:
     """The tab 'Finish setup →' opens — the first setup step still open."""
-    order = ["add-admin", "add-user", "cards", "ai-apps"]
+    order = ["add-admin", "cards", "ai-apps"]
     if d["admin_count"] >= d["admin_seat_limit"]:
         order.remove("add-admin")
     return next((t for t in order if t in d["tabs"]), "")
@@ -185,14 +234,6 @@ def _add_admin(d: dict) -> list:
     ]
 
 
-def _add_user(d: dict) -> list:
-    return [
-        {"type": "header", "text": {"type": "plain_text", "text": "👤 Add a team member", "emoji": True}},
-        _section("Issue a license to a team member — they get the reference cards and can request more for their channel. No Admin Center access."),
-        _context(f"{d['licences_issued']} of {d['seats_purchased']} licenses issued"),
-    ]
-
-
 def _cards(d: dict) -> list:
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "📬 Send Cards to your team", "emoji": True}},
@@ -236,7 +277,6 @@ def _apps(d: dict, kind: str) -> list:
 _BUILDERS = {
     "home": _home,
     "add-admin": _add_admin,
-    "add-user": _add_user,
     "cards": _cards,
     "ai-apps": lambda d: _apps(d, "ai"),
     "it-apps": lambda d: _apps(d, "it"),
@@ -295,11 +335,34 @@ def user_welcome_blocks(member, org) -> list:
         _context(f"*AIDL* · APP  for {org.name}"),
         {"type": "header", "text": {"type": "plain_text", "text": f"Welcome to AIDL, {first}! 👋", "emoji": True}},
         _section(f"You've been added to *{org.name}'s* AI Driving License programme."),
+        _context("Next: read your *AI Acceptable Use Policy*, then accept the *Highway Code* and the "
+                 "*Traffic Light Check* to earn your Learner's Permit."),
     ]
+
+
+def licence_progress_blocks(member, org) -> list:
+    """License tab before the licence exists: what's left to earn it."""
+    from .licensing import ACK_LABELS, LEARNER_REQUIREMENTS, acknowledged_items, seats_left
+
+    done = acknowledged_items(member)
+    lines = [f"{'✅' if item in done else '⬜'}  {ACK_LABELS[item]}" for item in LEARNER_REQUIREMENTS]
+    blocks = [
+        _context(f"*AIDL* · APP  for {org.name}"),
+        {"type": "header", "text": {"type": "plain_text", "text": "🪪 Earn your Learner's Permit", "emoji": True}},
+        _section("Accept both of these and your AI Driving License is issued automatically:\n" + "\n".join(lines)),
+    ]
+    if len(done) == len(LEARNER_REQUIREMENTS) and seats_left(org) <= 0:
+        blocks.append(_context("⏳ All done — your license is waiting for a free seat. Your admin has been told."))
+    else:
+        blocks.append(_context("Use the tabs below to open each one."))
+    return blocks
 
 
 def user_license_blocks(member, org) -> list:
     from django.conf import settings
+
+    if not member.licence_issued:
+        return licence_progress_blocks(member, org)
 
     from .org_policy import get_answers, policy_effects
     from .slack_cards import CURRICULUM_VERSION, DEFAULT_POLICY_VERSION
@@ -356,7 +419,18 @@ def user_license_blocks(member, org) -> list:
 _SIGN = {"stop": "🛑 STOP", "check": "🔶 CHECK", "yield": "⚠️ YOU", "ask": "🔵 ASK", "oneway": "⬛ ONE WAY"}
 
 
-def highway_code_blocks(org) -> list:
+def _ack_block(member, item: str) -> dict:
+    """'I acknowledge' button, or when it was accepted."""
+    from .licensing import acknowledged_at
+
+    when = acknowledged_at(member, item)
+    if when:
+        return _context(f"✅ You accepted this on {when.strftime('%d %b %Y')}")
+    return {"type": "actions", "block_id": f"aidl_ack_{item}", "elements": [
+        _button("✅ I've read and accept", f"aidl_ack_{item}", value=item, style="primary")]}
+
+
+def highway_code_blocks(org, member=None) -> list:
     """Section A · Learner Rules — sent right after the License card."""
     from .org_policy import get_answers, policy_effects
     from .slack_cards import _highway_code
@@ -371,7 +445,9 @@ def highway_code_blocks(org) -> list:
     for rule in rules:
         blocks.append(_section(f"*{_SIGN[rule['shape']]}* — *{rule['title']}*\n{rule['text']}"))
     blocks.append({"type": "actions", "elements": [
-        _button("Open full Highway Code", "aidl_hc_full", value="full", style="primary")]})
+        _button("Open full Highway Code", "aidl_hc_full", value="full")]})
+    if member is not None:
+        blocks.append(_ack_block(member, "highway_code"))
     return blocks
 
 
@@ -415,45 +491,35 @@ def _backend_base() -> str:
 
 USER_TABS = (
     ("home", "🏠 Home"),
+    ("aup", "📄 AUP"),
     ("license", "🪪 License"),
     ("highway-code", "📖 Highway Code"),
     ("traffic-light", "🚦 Traffic Light Check"),
 )
 
 
-def _sent_traffic_light(org):
-    """The last Traffic Light Check the admin sent (guide 10.4), or None."""
-    from .models import CardRequest
-
-    return (CardRequest.objects.filter(organization_id=str(org.pk), card_id="c1", status=CardRequest.Status.SENT)
-            .order_by("-sent_at").first())
-
-
-def user_traffic_light_blocks(org) -> list:
+def user_traffic_light_blocks(org, member=None) -> list:
+    """Traffic Light Check for the learner dashboard. The lights come from
+    the organization's policy answers (not from an admin's selection)."""
     from .models import TrafficLightRating
     from .org_policy import get_answers, policy_effects
     from .slack_cards import TRAFFIC_LIGHTS
 
+    fx = policy_effects(get_answers(org))
+    emoji = {"green": "🟢", "amber": "🟡", "red": "🔴"}
     blocks = [
         _context(f"*AIDL* · APP  for {org.name}"),
         {"type": "header", "text": {"type": "plain_text", "text": "🚦 Traffic Light Check", "emoji": True}},
+        _section("Before you paste anything into an AI, check the lights."),
     ]
-    sent = _sent_traffic_light(org)
-    if sent is None:
-        blocks.append(_section("Your admin hasn't sent the Traffic Light Check yet — it will show here once they do."))
-        return blocks
-    chosen = [l for l in (sent.lights or "green,amber,red").split(",") if l]
-    fx = policy_effects(get_answers(org))
-    emoji = {"green": "🟢", "amber": "🟡", "red": "🔴"}
-    blocks.append(_section("Before you paste anything into an AI, check the lights."))
     for light in TRAFFIC_LIGHTS:
-        if light["id"] not in chosen:
-            continue
         items = list(light["items"])
         if light["id"] == "red" and fx["red_includes_confidential"]:
             items.append("All confidential and customer data")
         blocks.append(_section(f"{emoji[light['id']]} *{light['label']}* — _{light['tagline']}_\n"
                                + "\n".join(f"• {i}" for i in items) + f"\n*→ {light['action']}*"))
+    if member is not None:
+        blocks.append(_ack_block(member, "traffic_light"))
     rating = TrafficLightRating.objects.first()
     return blocks + rating_blocks(rating.likes if rating else 128, rating.dislikes if rating else 6)
 
@@ -469,13 +535,84 @@ def user_tab_buttons(active: str) -> dict:
     }
 
 
+def _aup_for(member, org) -> list:
+    from .aup import generate_aup
+
+    return aup_blocks(generate_aup(org), member)
+
+
 def user_dashboard_blocks(member, org, tab: str = "license") -> list:
     """One message with the prototype's tab bar; clicking a tab swaps the
     card shown in the message (slack_interactions.py)."""
     content = {
         "home": lambda: user_welcome_blocks(member, org),
+        "aup": lambda: _aup_for(member, org),
         "license": lambda: user_license_blocks(member, org),
-        "highway-code": lambda: highway_code_blocks(org),
-        "traffic-light": lambda: user_traffic_light_blocks(org),
+        "highway-code": lambda: highway_code_blocks(org, member),
+        "traffic-light": lambda: user_traffic_light_blocks(org, member),
     }.get(tab) or (lambda: user_license_blocks(member, org))
     return content() + [{"type": "divider"}, user_tab_buttons(tab)]
+
+
+# ---------- Generated AUP card (aup.py) ----------
+
+def _app_lines(apps: list[dict]) -> str:
+    return "\n".join(
+        f"{a['dot']}  *{a['name']}*" + (f"  ·  _{a['category']}_" if a.get("category") and a["category"] != "Other" else "")
+        + f"  —  {a['data']} data"
+        for a in apps
+    )
+
+
+def aup_blocks(aup: dict, member=None) -> list:
+    """The user's AI Acceptable Use Policy. With `member`, it's their personal
+    copy with an accept button; without, it's the admin preview."""
+    if member is not None and not aup.get("has_answers"):
+        return [
+            {"type": "header", "text": {"type": "plain_text", "text": "📄 Your AI Acceptable Use Policy", "emoji": True}},
+            _section(f"⏳ *{aup['org_name']}* is still setting up its AI policy. Your AIDL admin will send it to you "
+                     "here when it's ready."),
+            _context("Meanwhile, start with the *Highway Code* and the *Traffic Light Check* to earn your Learner's Permit."),
+        ]
+    blocks = [
+        _context(f"*📄 AIDL · Acceptable Use Policy*   |   {aup['org_name']}"),
+        {"type": "header", "text": {"type": "plain_text", "text": "📄 Your AI Acceptable Use Policy", "emoji": True}},
+        _context((f"Prepared for *{member.full_name or member.email}*  ·  " if member is not None else "Team version  ·  ")
+                 + f"`{aup['version']}`  ·  {aup['generated']}"),
+    ]
+    if aup["status"] == "draft":
+        blocks.append(_context("📝 *Draft* — your organization is still finalising its AI policy."))
+    elif aup["status"] == "not_available":
+        blocks.append(_context("ℹ️ Generated by AIDL from your organization's settings while its own written policy is prepared."))
+    blocks.append(_section(f"These are the AI and IT apps you can use at *{aup['org_name']}*, the data each one "
+                           "may handle, and the rules that go with them."))
+
+    blocks.append({"type": "divider"})
+    blocks.append(_section("*✅  AI APPS YOU CAN USE*\n" + (_app_lines(aup["allowed_ai"]) or "_None approved yet — ask your admin._")))
+    blocks.append(_section("*✅  IT APPS YOU CAN USE*\n" + (_app_lines(aup["allowed_it"]) or "_None approved yet — ask your admin._")))
+    blocks.append(_context("🟢 Public only   🟡 Internal   🔴 Internal + Confidential   ⚫ No data"))
+
+    blocks.append({"type": "divider"})
+    if aup["prohibited"]:
+        blocks.append(_section("*⛔  DON'T USE*\n" + "\n".join(
+            f"•  *{a['name']}*  ·  _{'AI' if a['kind'] == 'ai' else 'IT'} app_" for a in aup["prohibited"])))
+    blocks.append(_section("*🚫  NEVER PUT INTO ANY AI TOOL*\n" + "\n".join(f"•  {item}" for item in aup["red_list"])))
+
+    if aup["rules"]:
+        blocks.append({"type": "divider"})
+        blocks.append(_section("*📋  YOUR RULES*\n" + "\n".join(f"{i}.  {r}" for i, r in enumerate(aup["rules"], 1))))
+
+    if member is not None:
+        from .licensing import acknowledged_at
+
+        when = acknowledged_at(member, "aup", aup["version"])
+        blocks.append({"type": "divider"})
+        if when:
+            blocks.append(_context(f"✅ You accepted this policy on {when.strftime('%d %b %Y')}"))
+        else:
+            blocks.append({"type": "actions", "block_id": "aidl_ack_aup", "elements": [
+                _button("✅ I've read and accept this policy", "aidl_ack_aup", value="aup", style="primary")]})
+    else:
+        blocks.append(_context("Each team member gets a personal copy and accepts it individually."))
+    blocks.append(_context("Questions about this policy? Ask your AIDL admin."))
+    return blocks

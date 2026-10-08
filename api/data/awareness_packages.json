@@ -1,0 +1,405 @@
+{
+ "source": "AI_Usage_Awareness_Packages.xlsx",
+ "packages": {
+  "default": [
+   {
+    "order": 1,
+    "no": "006",
+    "title": "What AI Actually Does",
+    "category": "AI Fundamentals & Judgment",
+    "type": "Micro-Lesson",
+    "hook": "A language model predicts likely text. It does not look anything up.",
+    "message": "That single fact explains most of the surprises: why it invents citations, why it sounds certain when wrong, and why it can be brilliant on common topics and useless on rare ones. It is pattern completion, not retrieval.",
+    "action": "Do this: next time output surprises you, ask whether prediction explains it. It usually does.",
+    "local_link": false
+   },
+   {
+    "order": 2,
+    "no": "001",
+    "title": "Traffic Light Check",
+    "category": "AI Fundamentals & Judgment",
+    "type": "Decision Aid",
+    "hook": "Before you hand anything to AI, run the three-second check.",
+    "message": "Green: no sensitive data, low stakes, you can verify the answer. Amber: proceed, but a second person reviews. Red: don't — customer data, a decision about a person, or something you can't check.",
+    "action": "Do this: say your colour out loud on your next AI task. If you hesitate, it's amber.",
+    "local_link": false
+   },
+   {
+    "order": 3,
+    "no": "003",
+    "title": "Approved Apps Registry",
+    "category": "Acceptable Use, Approved Tools & Shadow AI",
+    "type": "Registry",
+    "hook": "Not sure if a tool is allowed? The registry is the only answer that counts.",
+    "message": "It lists every approved and prohibited AI and IT tool, and the data class each one may handle. A tool being popular, free, or used by another team is not approval.",
+    "action": "Do this: check the registry before you sign up for anything new. If it's not listed, request a review.",
+    "local_link": true
+   },
+   {
+    "order": 4,
+    "no": "014",
+    "title": "Data Classification Cheat Sheet",
+    "category": "Data Protection & Confidentiality",
+    "type": "Reference Card",
+    "hook": "Four data classes, four different answers about what you may submit.",
+    "message": "Public: anything goes. Internal: approved tools only. Confidential: approved enterprise tools, no training, logged. Restricted: not in a prompt at all, in any tool, for any reason.",
+    "action": "Do this: classify the data before you classify the task. Keep the card visible.",
+    "local_link": false
+   },
+   {
+    "order": 5,
+    "no": "021",
+    "title": "The Paste Test",
+    "category": "Data Protection & Confidentiality",
+    "type": "Decision Aid",
+    "hook": "Here's the test that catches nearly everything: would you email this to a stranger?",
+    "message": "Not a hostile stranger — just someone outside the company with no obligation to you. If the answer is no, it doesn't belong in a prompt either. The mechanism is different, the exposure is comparable.",
+    "action": "Do this: apply the test before every upload. It takes two seconds.",
+    "local_link": false
+   },
+   {
+    "order": 6,
+    "no": "029",
+    "title": "The Verification Pass",
+    "category": "Output Verification & Model Limits",
+    "type": "Checklist",
+    "hook": "Three checks before AI output leaves your desk. Every time.",
+    "message": "One: is every factual claim and number verified against a source you opened? Two: is anything here confidential that shouldn't be? Three: would you defend this if challenged in detail?",
+    "action": "Do this: run all three. If you can't do the first, you can't send it.",
+    "local_link": false
+   },
+   {
+    "order": 7,
+    "no": "078",
+    "title": "AI-Written Phishing",
+    "category": "AI-Enabled Security Threats",
+    "type": "Drill",
+    "hook": "The old advice about spotting phishing by bad grammar is dead.",
+    "message": "Attackers now produce fluent, contextually accurate messages in any language, referencing real colleagues and real projects. Fluency has stopped being a signal of legitimacy.",
+    "action": "Do this: verify the request, not the writing. Check the sender domain and confirm out of band.",
+    "local_link": false
+   },
+   {
+    "order": 8,
+    "no": "012",
+    "title": "Your Accountability Doesn't Transfer",
+    "category": "Accountability, Disclosure & Ethics",
+    "type": "Gate Briefing",
+    "hook": "You signed it, so you own it. The tool has no accountability at all.",
+    "message": "\"The AI produced it\" is not a defence in a client conversation, an audit, a tribunal or a court. Responsibility sits with the person who sent, published or acted on the output.",
+    "action": "Do this: treat every AI draft as if you'd written it yourself, because legally you have.",
+    "local_link": false
+   },
+   {
+    "order": 9,
+    "no": "086",
+    "title": "Personal Data Definitions",
+    "category": "Privacy & Personal Data",
+    "type": "Reference Card",
+    "hook": "Personal data is broader than most people assume.",
+    "message": "Names and emails obviously. Also device identifiers, IP addresses, staff numbers, photographs, voice recordings, location traces, and combinations of otherwise harmless fields that identify one person.",
+    "action": "Do this: when in doubt, assume it's personal data and apply the stricter rule.",
+    "local_link": false
+   },
+   {
+    "order": 10,
+    "no": "052",
+    "title": "Deepfake and Voice Verification",
+    "category": "AI-Enabled Security Threats",
+    "type": "Drill",
+    "hook": "A familiar voice on the phone is no longer proof of anything.",
+    "message": "Voice and video cloning now works from seconds of public audio. The request will sound urgent, plausible, and exactly like someone you know, because in every observable way it is.",
+    "action": "Do this: verify unusual requests through a second channel you initiate. Always, no exceptions for seniority.",
+    "local_link": true
+   },
+   {
+    "order": 11,
+    "no": "037",
+    "title": "Third-Party IP in Prompts",
+    "category": "Legal, IP & Regulatory",
+    "type": "Gate Briefing",
+    "hook": "Pasting someone else's material into a tool is a licensing decision.",
+    "message": "A licensed report, a client's document, a paywalled article — feeding it to a third-party service may exceed what your licence permits, regardless of how the output is used.",
+    "action": "Do this: check whether you have the right to share the input, not just use it.",
+    "local_link": true
+   },
+   {
+    "order": 12,
+    "no": "050",
+    "title": "Reporting an AI Mistake",
+    "category": "Incidents, Reporting & Culture",
+    "type": "Template",
+    "hook": "When something goes wrong, the first hour matters more than the blame.",
+    "message": "Tell us what you asked, what came back, what you did with it, and who might be affected. We're looking for the pattern, not the culprit. Fast reporting has never cost anyone here.",
+    "action": "Do this: use the report template. Send it before you've worked out the whole story.",
+    "local_link": true
+   }
+  ],
+  "basic": [
+   {
+    "order": 1,
+    "no": "006",
+    "title": "What AI Actually Does",
+    "category": "AI Fundamentals & Judgment",
+    "type": "Micro-Lesson",
+    "hook": "A language model predicts likely text. It does not look anything up.",
+    "message": "That single fact explains most of the surprises: why it invents citations, why it sounds certain when wrong, and why it can be brilliant on common topics and useless on rare ones. It is pattern completion, not retrieval.",
+    "action": "Do this: next time output surprises you, ask whether prediction explains it. It usually does.",
+    "local_link": false
+   },
+   {
+    "order": 2,
+    "no": "001",
+    "title": "Traffic Light Check",
+    "category": "AI Fundamentals & Judgment",
+    "type": "Decision Aid",
+    "hook": "Before you hand anything to AI, run the three-second check.",
+    "message": "Green: no sensitive data, low stakes, you can verify the answer. Amber: proceed, but a second person reviews. Red: don't — customer data, a decision about a person, or something you can't check.",
+    "action": "Do this: say your colour out loud on your next AI task. If you hesitate, it's amber.",
+    "local_link": false
+   },
+   {
+    "order": 3,
+    "no": "002",
+    "title": "Acceptable Use v3.1",
+    "category": "Acceptable Use, Approved Tools & Shadow AI",
+    "type": "Policy",
+    "hook": "The Acceptable Use Policy is short for a reason. Read the summary, then sign it.",
+    "message": "It covers what data you may submit, which tools are approved, and what needs review before it leaves the building. Signing isn't a formality — it's what your licence to use these tools rests on.",
+    "action": "Do this: open the AUP, read the one-page summary, sign it today.",
+    "local_link": true
+   },
+   {
+    "order": 4,
+    "no": "003",
+    "title": "Approved Apps Registry",
+    "category": "Acceptable Use, Approved Tools & Shadow AI",
+    "type": "Registry",
+    "hook": "Not sure if a tool is allowed? The registry is the only answer that counts.",
+    "message": "It lists every approved and prohibited AI and IT tool, and the data class each one may handle. A tool being popular, free, or used by another team is not approval.",
+    "action": "Do this: check the registry before you sign up for anything new. If it's not listed, request a review.",
+    "local_link": true
+   },
+   {
+    "order": 5,
+    "no": "014",
+    "title": "Data Classification Cheat Sheet",
+    "category": "Data Protection & Confidentiality",
+    "type": "Reference Card",
+    "hook": "Four data classes, four different answers about what you may submit.",
+    "message": "Public: anything goes. Internal: approved tools only. Confidential: approved enterprise tools, no training, logged. Restricted: not in a prompt at all, in any tool, for any reason.",
+    "action": "Do this: classify the data before you classify the task. Keep the card visible.",
+    "local_link": false
+   },
+   {
+    "order": 6,
+    "no": "016",
+    "title": "Customer Data in Prompts",
+    "category": "Data Protection & Confidentiality",
+    "type": "Gate Briefing",
+    "hook": "Customer data in a prompt is where the conversation stops.",
+    "message": "It doesn't matter that the tool is approved, the task is small, or you'll delete the chat afterwards. Identifiable customer information does not go into a general-purpose AI tool without a documented, approved pathway.",
+    "action": "Do this: if you need to work with customer data, request the approved route. Don't improvise one.",
+    "local_link": true
+   },
+   {
+    "order": 7,
+    "no": "021",
+    "title": "The Paste Test",
+    "category": "Data Protection & Confidentiality",
+    "type": "Decision Aid",
+    "hook": "Here's the test that catches nearly everything: would you email this to a stranger?",
+    "message": "Not a hostile stranger — just someone outside the company with no obligation to you. If the answer is no, it doesn't belong in a prompt either. The mechanism is different, the exposure is comparable.",
+    "action": "Do this: apply the test before every upload. It takes two seconds.",
+    "local_link": false
+   },
+   {
+    "order": 8,
+    "no": "029",
+    "title": "The Verification Pass",
+    "category": "Output Verification & Model Limits",
+    "type": "Checklist",
+    "hook": "Three checks before AI output leaves your desk. Every time.",
+    "message": "One: is every factual claim and number verified against a source you opened? Two: is anything here confidential that shouldn't be? Three: would you defend this if challenged in detail?",
+    "action": "Do this: run all three. If you can't do the first, you can't send it.",
+    "local_link": false
+   },
+   {
+    "order": 9,
+    "no": "030",
+    "title": "Hallucinated Citations",
+    "category": "Output Verification & Model Limits",
+    "type": "Worked Examples",
+    "hook": "The reference looked perfect. The author, the journal, the year. It didn't exist.",
+    "message": "Fabricated citations are convincing precisely because they're plausible — real-sounding authors in real journals with credible titles. They pass a skim and fail the moment anyone clicks.",
+    "action": "Do this: open every reference before you cite it. Every single one.",
+    "local_link": false
+   },
+   {
+    "order": 10,
+    "no": "078",
+    "title": "AI-Written Phishing",
+    "category": "AI-Enabled Security Threats",
+    "type": "Drill",
+    "hook": "The old advice about spotting phishing by bad grammar is dead.",
+    "message": "Attackers now produce fluent, contextually accurate messages in any language, referencing real colleagues and real projects. Fluency has stopped being a signal of legitimacy.",
+    "action": "Do this: verify the request, not the writing. Check the sender domain and confirm out of band.",
+    "local_link": false
+   },
+   {
+    "order": 11,
+    "no": "012",
+    "title": "Your Accountability Doesn't Transfer",
+    "category": "Accountability, Disclosure & Ethics",
+    "type": "Gate Briefing",
+    "hook": "You signed it, so you own it. The tool has no accountability at all.",
+    "message": "\"The AI produced it\" is not a defence in a client conversation, an audit, a tribunal or a court. Responsibility sits with the person who sent, published or acted on the output.",
+    "action": "Do this: treat every AI draft as if you'd written it yourself, because legally you have.",
+    "local_link": false
+   },
+   {
+    "order": 12,
+    "no": "086",
+    "title": "Personal Data Definitions",
+    "category": "Privacy & Personal Data",
+    "type": "Reference Card",
+    "hook": "Personal data is broader than most people assume.",
+    "message": "Names and emails obviously. Also device identifiers, IP addresses, staff numbers, photographs, voice recordings, location traces, and combinations of otherwise harmless fields that identify one person.",
+    "action": "Do this: when in doubt, assume it's personal data and apply the stricter rule.",
+    "local_link": false
+   },
+   {
+    "order": 13,
+    "no": "023",
+    "title": "Free Tier vs. Enterprise Tier",
+    "category": "Acceptable Use, Approved Tools & Shadow AI",
+    "type": "Reference Card",
+    "hook": "Same model, same interface, completely different contract behind it.",
+    "message": "The enterprise tier typically means no training on your data, defined retention, regional processing and a support path. The free tier usually means none of that. The screen looks identical, which is the trap.",
+    "action": "Do this: confirm you're signed in on the enterprise account, not a personal one.",
+    "local_link": false
+   },
+   {
+    "order": 14,
+    "no": "052",
+    "title": "Deepfake and Voice Verification",
+    "category": "AI-Enabled Security Threats",
+    "type": "Drill",
+    "hook": "A familiar voice on the phone is no longer proof of anything.",
+    "message": "Voice and video cloning now works from seconds of public audio. The request will sound urgent, plausible, and exactly like someone you know, because in every observable way it is.",
+    "action": "Do this: verify unusual requests through a second channel you initiate. Always, no exceptions for seniority.",
+    "local_link": true
+   },
+   {
+    "order": 15,
+    "no": "031",
+    "title": "Numbers Need a Source",
+    "category": "Output Verification & Model Limits",
+    "type": "Decision Aid",
+    "hook": "A generated number is a guess in a confident costume.",
+    "message": "Models produce figures that look researched because they resemble the shape of real data. Percentages, market sizes and growth rates arrive rounded and quotable, and are frequently invented.",
+    "action": "Do this: trace every number to a primary source, or remove it from the document.",
+    "local_link": false
+   },
+   {
+    "order": 16,
+    "no": "026",
+    "title": "Personal Accounts, Work Tasks",
+    "category": "Acceptable Use, Approved Tools & Shadow AI",
+    "type": "Policy",
+    "hook": "Your personal subscription is not a shortcut around review.",
+    "message": "Using your own account for work moves company data onto a contract we don't hold, with retention we don't control, and no record we could produce if asked. The cost isn't the licence; it's the exposure.",
+    "action": "Do this: use company accounts for company work. Always.",
+    "local_link": true
+   },
+   {
+    "order": 17,
+    "no": "037",
+    "title": "Third-Party IP in Prompts",
+    "category": "Legal, IP & Regulatory",
+    "type": "Gate Briefing",
+    "hook": "Pasting someone else's material into a tool is a licensing decision.",
+    "message": "A licensed report, a client's document, a paywalled article — feeding it to a third-party service may exceed what your licence permits, regardless of how the output is used.",
+    "action": "Do this: check whether you have the right to share the input, not just use it.",
+    "local_link": true
+   },
+   {
+    "order": 18,
+    "no": "008",
+    "title": "The Human-in-the-Loop Line",
+    "category": "AI Fundamentals & Judgment",
+    "type": "Decision Aid",
+    "hook": "Some decisions cannot be delegated, no matter how good the draft looks.",
+    "message": "Anything affecting a person's employment, money, safety, legal standing, or a client relationship stays with a human who can explain the reasoning. The draft can help you get there. It cannot be the decision.",
+    "action": "Do this: before acting on output, ask whether you could defend this decision as your own.",
+    "local_link": false
+   },
+   {
+    "order": 19,
+    "no": "076",
+    "title": "Credential Leakage in Prompts",
+    "category": "AI-Enabled Security Threats",
+    "type": "Gate Briefing",
+    "hook": "People paste API keys into chat windows because it's faster. It always surfaces.",
+    "message": "A key in a prompt is a key in a third-party log, potentially in a training set, and definitely outside your control. Rotation is the only remedy, and it's needed immediately.",
+    "action": "Do this: if you've ever pasted a credential, rotate it today and tell security.",
+    "local_link": true
+   },
+   {
+    "order": 20,
+    "no": "050",
+    "title": "Reporting an AI Mistake",
+    "category": "Incidents, Reporting & Culture",
+    "type": "Template",
+    "hook": "When something goes wrong, the first hour matters more than the blame.",
+    "message": "Tell us what you asked, what came back, what you did with it, and who might be affected. We're looking for the pattern, not the culprit. Fast reporting has never cost anyone here.",
+    "action": "Do this: use the report template. Send it before you've worked out the whole story.",
+    "local_link": true
+   },
+   {
+    "order": 21,
+    "no": "053",
+    "title": "AI in Meetings",
+    "category": "Privacy & Personal Data",
+    "type": "Policy",
+    "hook": "Notetakers are useful, and they're also recording devices in the room.",
+    "message": "Default settings often join meetings, transcribe everything, and store it somewhere searchable. Participants frequently don't know, and external attendees almost never consented.",
+    "action": "Do this: announce the bot before recording starts, and turn it off for sensitive conversations.",
+    "local_link": false
+   },
+   {
+    "order": 22,
+    "no": "042",
+    "title": "Records and Discovery",
+    "category": "Legal, IP & Regulatory",
+    "type": "Micro-Lesson",
+    "hook": "Your prompt history is discoverable. Write as if it will be read aloud.",
+    "message": "In litigation, regulatory inquiry or internal investigation, AI conversations are evidence like any other record. Speculation, frustration and shortcuts typed into a chat window can all surface later.",
+    "action": "Do this: don't type anything into a prompt you wouldn't put in an email.",
+    "local_link": false
+   },
+   {
+    "order": 23,
+    "no": "040",
+    "title": "Disclosure Obligations",
+    "category": "Accountability, Disclosure & Ethics",
+    "type": "Decision Aid",
+    "hook": "Sometimes you have to tell the client. Know when.",
+    "message": "Disclosure is required when a contract says so, when a regulator requires it, when the client asked, or when a reasonable person would want to know. Increasingly, silence is the thing that damages trust.",
+    "action": "Do this: raise it early and matter-of-factly. Late disclosure always looks worse.",
+    "local_link": false
+   },
+   {
+    "order": 24,
+    "no": "056",
+    "title": "Context Is the Whole Job",
+    "category": "Effective & Productive Use",
+    "type": "Micro-Lesson",
+    "hook": "The difference between a useless answer and a good one is usually three sentences of context.",
+    "message": "Who it's for, what it's for, and what constraints apply. Without those the model answers a generic version of your question, which is why the output feels generic.",
+    "action": "Do this: add audience, purpose and constraint to your next prompt. Compare the difference.",
+    "local_link": false
+   }
+  ]
+ }
+}
