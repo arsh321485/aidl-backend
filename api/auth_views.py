@@ -748,8 +748,15 @@ def signup(request):
     if settings.AUTH_EMAIL_OTP:
         # AI-C-004: nothing is shown (avatar / licence) until the emailed code
         # is entered — POST /api/auth/signup/verify/.
-        return Response(auth_verification.start_otp(user, "signup"), status=status.HTTP_202_ACCEPTED)
+        return _send_code(user, "signup", status.HTTP_202_ACCEPTED)
     return _finish_signup(user)
+
+
+def _send_code(user: AIDLUser, purpose: str, ok_status: int) -> Response:
+    try:
+        return Response(auth_verification.start_otp(user, purpose), status=ok_status)
+    except auth_verification.EmailNotSent as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
 def _finish_signup(user: AIDLUser) -> Response:
@@ -795,7 +802,7 @@ def login(request):
     serializer.is_valid(raise_exception=True)
     user = serializer.validated_data["user"]
     if settings.AUTH_EMAIL_OTP:
-        return Response(auth_verification.start_otp(user, "signin"))
+        return _send_code(user, "signin", status.HTTP_200_OK)
     return _finish_signin(user)
 
 

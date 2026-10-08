@@ -92,10 +92,8 @@ SLACK_CHANNEL_NAME=aidl-driving-license
 # The code goes by email: set EMAIL_HOST_USER / EMAIL_HOST_PASSWORD (Gmail App
 # Password) BEFORE turning AUTH_EMAIL_OTP on, or nobody can finish sign-up.
 AUTH_CAPTCHA=True
-AUTH_EMAIL_OTP=False
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=True
-# EMAIL_HOST_USER=        (secret — set in Render only)
-# EMAIL_HOST_PASSWORD=    (secret — set in Render only)
-# DEFAULT_FROM_EMAIL=AIDL <no-reply@your-domain>
+AUTH_EMAIL_OTP=True
+# Codes are sent through SendGrid's HTTPS API (works even where mail ports are
+# blocked). info@grcmentor.ai must be a verified sender in SendGrid.
+# SENDGRID_API_KEY=       (secret — set in Render only)
+DEFAULT_FROM_EMAIL=AIDL <info@grcmentor.ai>

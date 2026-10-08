@@ -189,6 +189,13 @@ EMAIL_BACKEND = os.getenv(
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes")
+# Port 465 servers (e.g. Namecheap mail for grcmentor.ai) use SSL instead of
+# STARTTLS — set EMAIL_USE_SSL=True and EMAIL_USE_TLS=False.
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() in ("1", "true", "yes")
+if EMAIL_USE_SSL:
+    EMAIL_USE_TLS = False
+# Don't let a slow mail server hang a sign-up request.
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "15"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-reply@aidl.app")
@@ -196,6 +203,12 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-repl
 # instead of a hard crash on every invite.
 if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# SendGrid (HTTPS API) — preferred for the sign-up / sign-in codes; wins over
+# SMTP when the key is set. The From address must be a verified sender.
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+if SENDGRID_API_KEY:
+    EMAIL_BACKEND = "api.sendgrid_backend.SendGridBackend"
+    DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "AIDL <info@grcmentor.ai>")
 
 AIDL_INVITE_EXPIRY_DAYS = int(os.getenv("AIDL_INVITE_EXPIRY_DAYS", "14"))
 # Website sign-up / sign-in checks (auth_verification.py): picture captcha on

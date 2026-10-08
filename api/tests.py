@@ -2069,6 +2069,12 @@ class OtpCaptchaTests(TestCase):
         self.assertEqual(step2.status_code, 200, step2.content)
         self.assertIn("access_token", step2.json())
 
+    def test_email_failure_is_a_clear_error(self):
+        with patch("api.auth_verification.send_mail", side_effect=OSError("smtp down")):
+            resp = self._signup()
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("couldn't send the code", resp.json()["detail"])
+
     def test_code_locks_after_five_wrong_tries(self):
         token = self._signup().json()["otp_token"]
         for _ in range(5):
@@ -2076,3 +2082,29 @@ class OtpCaptchaTests(TestCase):
         last = self.client.post("/api/auth/signup/verify/", {"otp_token": token, "code": self._code()},
                                 content_type="application/json")
         self.assertIn("Too many", last.json()["code"][0])
+
+
+@override_settings(EMAIL_BACKEND="api.sendgrid_backend.SendGridBackend", SENDGRID_API_KEY="SG.test",
+                   DEFAULT_FROM_EMAIL="AIDL <info@grcmentor.ai>")
+class SendGridBackendTests(TestCase):
+    def test_code_email_goes_through_sendgrid_api(self):
+        from django.core.mail import send_mail
+
+        with patch("api.sendgrid_backend.requests.post") as post:
+            post.return_value.status_code = 202
+            send_mail("Your AIDL code: 123456", "code 123456", None, ["someone@example.com"],
+                      html_message="<b>123456</b>")
+        url, kwargs = post.call_args[0][0], post.call_args[1]
+        self.assertEqual(url, "https://api.sendgrid.com/v3/mail/send")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer SG.test")
+        self.assertEqual(kwargs["json"]["from"], {"email": "info@grcmentor.ai", "name": "AIDL"})
+        self.assertEqual([c["type"] for c in kwargs["json"]["content"]], ["text/plain", "text/html"])
+
+    def test_sendgrid_error_raises(self):
+        from django.core.mail import send_mail
+
+        with patch("api.sendgrid_backend.requests.post") as post:
+            post.return_value.status_code = 403
+            post.return_value.text = "forbidden"
+            with self.assertRaises(RuntimeError):
+                send_mail("s", "b", None, ["someone@example.com"])
