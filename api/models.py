@@ -47,6 +47,9 @@ class Organization(models.Model):
     # AIDL plan (plans.py): "trial" = Default package, 5 users; "basic" =
     # Basic package, seats_purchased users.
     plan = models.CharField(max_length=16, default="trial")
+    # The admin who connected AIDL (first Slack sign-in) — the "first admin":
+    # only they see Add Admin and can remove admins. Empty → oldest admin.
+    owner_user_id = models.CharField(max_length=64, blank=True, default="")
     seats_renews_on = models.DateField(null=True, blank=True)
     admin_seat_limit = models.IntegerField(default=3)
     rollout_steps_done = models.IntegerField(default=3)

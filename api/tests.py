@@ -2108,3 +2108,33 @@ class SendGridBackendTests(TestCase):
             post.return_value.text = "forbidden"
             with self.assertRaises(RuntimeError):
                 send_mail("s", "b", None, ["someone@example.com"])
+
+
+class OrganizationOwnerTests(TestCase):
+    """The first admin is the recorded owner, not just the oldest account."""
+
+    def test_owner_wins_over_older_admin(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+        from .slack_onboarding import primary_admin
+
+        org = make_org(slack_team_id="T9")
+        older = make_user(org, microsoft_id="slack:T9:U2", full_name="Older Admin")
+        owner = make_user(org, microsoft_id="slack:T9:U1", full_name="Owner")
+        self.assertEqual(primary_admin(org).pk, older.pk)          # no owner yet → oldest
+        org.owner_user_id = str(owner.pk)
+        org.save()
+        self.assertEqual(primary_admin(org).pk, owner.pk)
+        tabs = json.dumps(admin_card_blocks(build_admin_cards_context(owner), "home")[0])
+        self.assertIn("aidl_tab_add-admin", tabs)
+        self.assertNotIn("aidl_tab_add-admin", json.dumps(admin_card_blocks(build_admin_cards_context(older), "home")[0]))
+
+    def test_set_owner_command(self):
+        from django.core.management import call_command
+
+        org = make_org(slack_team_id="T9")
+        make_user(org, microsoft_id="slack:T9:U2", email="older@x.example")
+        owner = make_user(org, microsoft_id="slack:T9:U1", email="boss@x.example")
+        call_command("set_plan", "--team", "T9", "--owner", "boss@x.example", stdout=__import__("io").StringIO())
+        org.refresh_from_db()
+        self.assertEqual(org.owner_user_id, str(owner.pk))

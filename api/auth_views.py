@@ -567,7 +567,11 @@ def _ensure_slack_organization(user: AIDLUser, profile: dict) -> Organization:
     user.save(update_fields=["organization_id", "organization_name", "updated_at"])
     # Links the user, seeds the default app registry, and makes them admin
     # (organization enrollment, or the first member of the organization).
-    return ensure_organization_for_login(user, org_name=org.name)
+    result = ensure_organization_for_login(user, org_name=org.name)
+    if not org.owner_user_id:  # whoever connects Slack first owns the organization
+        org.owner_user_id = str(user.pk)
+        org.save(update_fields=["owner_user_id", "updated_at"])
+    return result
 
 
 def _setup_slack_workspace(org: Organization, user: AIDLUser, install: dict, profile: dict) -> str:

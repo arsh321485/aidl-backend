@@ -399,8 +399,11 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
         }
     else:
         metrics = compute_org_metrics(org)
-        admins = sorted(metrics["admins"], key=lambda m: m.created_at or timezone.now())
-        is_primary = bool(admins) and admins[0].pk == user.pk
+        from .slack_onboarding import primary_admin
+
+        first = primary_admin(org)
+        admins = sorted(metrics["admins"], key=lambda m: (first is None or m.pk != first.pk, m.created_at or timezone.now()))
+        is_primary = first is not None and first.pk == user.pk
         ai_apps = _registry_rows(metrics["ai_app_list"])
         it_apps = _registry_rows(metrics["it_app_list"])
         month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
