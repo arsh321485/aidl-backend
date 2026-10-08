@@ -29,7 +29,7 @@ from .microsoft_auth import (
     resolve_teams_url,
 )
 from .slack_auth import build_slack_auth_url, exchange_slack_code, fetch_slack_profile, slack_configured
-from . import slack_client
+from . import auth_verification, slack_client
 from .org_policy import PolicyAnswersError, clean_answers, policy_completed, save_answers
 from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
@@ -745,7 +745,14 @@ def signup(request):
     serializer = SignupSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     user = serializer.save()
+    if settings.AUTH_EMAIL_OTP:
+        # AI-C-004: nothing is shown (avatar / licence) until the emailed code
+        # is entered — POST /api/auth/signup/verify/.
+        return Response(auth_verification.start_otp(user, "signup"), status=status.HTTP_202_ACCEPTED)
+    return _finish_signup(user)
 
+
+def _finish_signup(user: AIDLUser) -> Response:
     if user.enroll_as == AIDLUser.EnrollAs.ORGANIZATION:
         try:
             ensure_organization_for_login(user, org_name=user.organization_name)
@@ -779,9 +786,20 @@ def login(request):
     Website sign-in (Individual / Organization).
     Body: enroll_as, email, password. Returns JWT tokens + user.
     """
+    if settings.AUTH_CAPTCHA:
+        try:
+            auth_verification.check_captcha(request.data.get("captcha_token", ""), request.data.get("captcha_answer", ""))
+        except auth_verification.ChallengeError as exc:
+            return Response({"captcha": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     user = serializer.validated_data["user"]
+    if settings.AUTH_EMAIL_OTP:
+        return Response(auth_verification.start_otp(user, "signin"))
+    return _finish_signin(user)
+
+
+def _finish_signin(user: AIDLUser) -> Response:
     user.last_login_at = timezone.now()
     user.save(update_fields=["last_login_at", "updated_at"])
     payload = _issue_tokens(user)
@@ -790,6 +808,61 @@ def login(request):
 
 
 signin = login
+
+
+@extend_schema(summary="New picture code (captcha) for website sign-in",
+               responses={200: OpenApiResponse(OpenApiTypes.OBJECT, description="{captcha_token, image (data URI)}")})
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def captcha(request):
+    return Response(auth_verification.new_captcha())
+
+
+def _verify(request, purpose: str):
+    try:
+        user = auth_verification.verify_otp(request.data.get("otp_token", ""), request.data.get("code", ""), purpose)
+    except auth_verification.ChallengeError as exc:
+        return None, Response({"code": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+    return user, None
+
+
+@extend_schema(summary="Finish website sign-up with the emailed code",
+               request=OpenApiTypes.OBJECT, responses={201: AuthResponseDoc, 400: ErrorDoc})
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def signup_verify(request):
+    """Body: {otp_token, code}. Activates the account, returns tokens."""
+    user, error = _verify(request, "signup")
+    if error:
+        return error
+    user.is_active = True
+    user.save(update_fields=["is_active", "updated_at"])
+    return _finish_signup(user)
+
+
+@extend_schema(summary="Finish website sign-in with the emailed code",
+               request=OpenApiTypes.OBJECT, responses={200: AuthResponseDoc, 400: ErrorDoc})
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def signin_verify(request):
+    """Body: {otp_token, code}. Returns tokens."""
+    user, error = _verify(request, "signin")
+    if error:
+        return error
+    if not user.is_active:
+        return Response({"code": ["This account is disabled."]}, status=status.HTTP_400_BAD_REQUEST)
+    return _finish_signin(user)
+
+
+@extend_schema(summary="Email a new code (sign-up or sign-in)",
+               request=OpenApiTypes.OBJECT, responses={200: OpenApiResponse(OpenApiTypes.OBJECT), 400: ErrorDoc})
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def otp_resend(request):
+    try:
+        return Response(auth_verification.resend_otp(request.data.get("otp_token", "")))
+    except auth_verification.ChallengeError as exc:
+        return Response({"code": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(

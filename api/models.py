@@ -44,6 +44,9 @@ class Organization(models.Model):
     bot_service_url = models.CharField(max_length=255, blank=True, default="")
     bot_tenant_id = models.CharField(max_length=128, blank=True, default="")
     seats_purchased = models.IntegerField(default=50)
+    # AIDL plan (plans.py): "trial" = Default package, 5 users; "basic" =
+    # Basic package, seats_purchased users.
+    plan = models.CharField(max_length=16, default="trial")
     seats_renews_on = models.DateField(null=True, blank=True)
     admin_seat_limit = models.IntegerField(default=3)
     rollout_steps_done = models.IntegerField(default=3)
@@ -138,6 +141,11 @@ class AIDLUser(models.Model):
     # it (admin cards are private — never posted in the shared channel).
     slack_dm_channel_id = models.CharField(max_length=32, blank=True, default="")
     slack_admin_card_ts = models.CharField(max_length=32, blank=True, default="")
+    # When AIDL auto-onboarded this person after they joined the AIDL channel.
+    slack_onboarded_at = models.DateTimeField(null=True, blank=True)
+    # Removed from / left the AIDL channel: not part of the team, licence
+    # suspended, card package paused. Cleared when they're added back.
+    slack_left_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -326,6 +334,76 @@ class CardCustomRequest(models.Model):
 
     def __str__(self):
         return f"{self.organization_id} · {self.title}"
+
+
+class Acknowledgement(models.Model):
+    """A user accepted a piece of learning content (Highway Code, Traffic
+    Light Check, ...) at a given content version — the audit trail behind
+    licence issuing (see licensing.py)."""
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    user_id = models.CharField(max_length=64, db_index=True)
+    item = models.CharField(max_length=32)
+    version = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user_id", "item", "version")
+
+    def __str__(self):
+        return f"{self.user_id} acknowledged {self.item} {self.version}"
+
+
+class AuthChallenge(models.Model):
+    """A sign-in captcha or an emailed one-time code (auth_verification.py).
+    Only a hash of the answer is stored; each row is single-use."""
+
+    class Kind(models.TextChoices):
+        CAPTCHA = "captcha", "Captcha"
+        OTP = "otp", "Email code"
+
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    purpose = models.CharField(max_length=16, blank=True, default="")  # signup / signin
+    token = models.CharField(max_length=64, unique=True)
+    user_id = models.CharField(max_length=64, blank=True, default="")
+    answer_hash = models.CharField(max_length=64)
+    attempts = models.IntegerField(default=0)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.kind} {self.purpose} ({'used' if self.used_at else 'open'})"
+
+
+class PackageDelivery(models.Model):
+    """One awareness-package card for one user (plans.py), scheduled in
+    Slack with chat.scheduleMessage so no cron job is needed."""
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "Scheduled"
+        SENT = "sent", "Sent"
+        CANCELLED = "cancelled", "Cancelled"
+        FAILED = "failed", "Failed"
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    user_id = models.CharField(max_length=64, db_index=True)
+    package = models.CharField(max_length=16)
+    card_no = models.CharField(max_length=8)
+    post_order = models.IntegerField()
+    post_at = models.DateTimeField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SCHEDULED)
+    slack_channel_id = models.CharField(max_length=32, blank=True, default="")
+    scheduled_message_id = models.CharField(max_length=64, blank=True, default="")
+    error = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["post_at"]
+        unique_together = ("user_id", "card_no")
+
+    def __str__(self):
+        return f"{self.user_id} · card {self.card_no} ({self.status})"
 
 
 class TrafficLightVote(models.Model):

@@ -34,17 +34,18 @@
       </div>
       <div class="cov-table-wrap">
         <table class="cov-table">
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>License</th><th>AUP signed</th><th>Cards received</th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Highway Code</th><th>Traffic Light</th><th>License</th><th>AUP signed</th><th>Cards received</th></tr></thead>
           <tbody>
           {% for r in rows %}
             <tr>
               <td>{{ r.name }}</td><td class="cov-email">{{ r.email }}</td><td>{{ r.role|title }}</td>
+              <td>{{ r.status }}</td><td>{{ r.highway_code_accepted|default:"—" }}</td><td>{{ r.traffic_light_accepted|default:"—" }}</td>
               <td>{% if r.license_class %}{{ r.license_class }} · {{ r.license_number }}{% else %}—{% endif %}</td>
               <td class="{% if r.aup_signed == 'yes' %}cov-yes{% else %}cov-no{% endif %}">{{ r.aup_signed|title }}</td>
               <td>{{ r.cards_received }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="6">No team members yet.</td></tr>
+            <tr><td colspan="9">No team members yet.</td></tr>
           {% endfor %}
           </tbody>
         </table>

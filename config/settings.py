@@ -198,6 +198,11 @@ if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 AIDL_INVITE_EXPIRY_DAYS = int(os.getenv("AIDL_INVITE_EXPIRY_DAYS", "14"))
+# Website sign-up / sign-in checks (auth_verification.py): picture captcha on
+# sign-in, emailed 6-digit code on sign-up and sign-in. The code email needs
+# the EMAIL_* settings above on Render.
+AUTH_CAPTCHA = os.getenv("AUTH_CAPTCHA", "True").lower() in ("1", "true", "yes")
+AUTH_EMAIL_OTP = os.getenv("AUTH_EMAIL_OTP", "True").lower() in ("1", "true", "yes")
 
 INSTALLED_APPS = [
     "django_mongodb_backend",
