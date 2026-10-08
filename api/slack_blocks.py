@@ -314,14 +314,10 @@ def publish_admin_center(org, user) -> bool:
     from . import slack_client
     from .slack_cards import build_admin_cards_context
 
-    from .models import AIDLUser
+    from .slack_onboarding import primary_admin
 
     # The shared channel card greets the admin who signed the organization up.
-    primary = (
-        AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True)
-        .order_by("created_at")
-        .first()
-    ) or user
+    primary = primary_admin(org) or user
     data = build_admin_cards_context(primary)
     return slack_client.post_admin_center(org, admin_card_blocks(data, "home"), admin_card_text(data))
 

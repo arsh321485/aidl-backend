@@ -25,8 +25,14 @@ logger = logging.getLogger(__name__)
 
 
 def primary_admin(org: Organization) -> AIDLUser | None:
-    return (AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True)
-            .order_by("created_at").first())
+    """The organization's first admin: its recorded owner, else the oldest
+    active admin."""
+    admins = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True)
+    if org.owner_user_id:
+        owner = admins.filter(pk=org.owner_user_id).first()
+        if owner is not None:
+            return owner
+    return admins.order_by("created_at").first()
 
 
 def _existing_member(org: Organization, slack_user_id: str, email: str) -> AIDLUser | None:
