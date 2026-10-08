@@ -401,6 +401,27 @@ def slack_interactions(request):
                 slack_modals.in_background(_rate_traffic_light, org, payload, response_url)
         return HttpResponse(status=200)
 
+    # Admin buttons: answer Slack at once (it allows 3 seconds, and building
+    # the Admin Center from the database can take longer), then do the work.
+    slack_modals.in_background(_admin_action, _BaseUrl(request.build_absolute_uri("/")), payload, action,
+                               action_id, tab, response_url, is_ephemeral)
+    return HttpResponse(status=200)
+
+
+class _BaseUrl:
+    """Stands in for the request in the background: _private_link only needs
+    the site's base URL."""
+
+    def __init__(self, base: str):
+        self.base = base
+
+    def build_absolute_uri(self, path: str = "/") -> str:
+        return self.base.rstrip("/") + path
+
+
+def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str,
+                  response_url: str, is_ephemeral: bool) -> None:
+    """Admin Center button clicks (run after Slack has had its 200)."""
     user = _admin_for(payload)
     if user is None:
         _reply(
