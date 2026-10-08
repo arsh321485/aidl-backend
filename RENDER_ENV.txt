@@ -93,9 +93,12 @@ SLACK_CHANNEL_NAME=aidl-driving-license
 # Password) BEFORE turning AUTH_EMAIL_OTP on, or nobody can finish sign-up.
 AUTH_CAPTCHA=True
 AUTH_EMAIL_OTP=False
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=True
-# EMAIL_HOST_USER=        (secret — set in Render only)
+# Codes are sent from info@grcmentor.ai (Namecheap mail). mail.grcmentor.ai's
+# certificate is issued to *.web-hosting.com, so use the server's own name:
+EMAIL_HOST=server344-2.web-hosting.com
+EMAIL_PORT=465
+EMAIL_USE_SSL=True
+EMAIL_USE_TLS=False
+EMAIL_HOST_USER=info@grcmentor.ai
 # EMAIL_HOST_PASSWORD=    (secret — set in Render only)
-# DEFAULT_FROM_EMAIL=AIDL <no-reply@your-domain>
+DEFAULT_FROM_EMAIL=AIDL <info@grcmentor.ai>

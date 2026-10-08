@@ -14,6 +14,7 @@ configured (console email backend) and DEBUG on, responses also carry
 from __future__ import annotations
 
 import hashlib
+import logging
 import random
 import secrets
 from datetime import timedelta
@@ -31,8 +32,15 @@ RESEND_AFTER = timedelta(seconds=30)
 _CAPTCHA_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I
 
 
+logger = logging.getLogger(__name__)
+
+
 class ChallengeError(ValueError):
     pass
+
+
+class EmailNotSent(ChallengeError):
+    """The code email couldn't be sent (views answer 503)."""
 
 
 def _hash(token: str, answer: str) -> str:
@@ -102,6 +110,17 @@ def _send_code(user: AIDLUser, code: str, purpose: str) -> None:
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[user.email],
         fail_silently=False,
+        html_message=(
+            '<div style="font-family:Arial,sans-serif;max-width:460px;margin:auto;border:3px solid #14140f;'
+            'background:#f5ecd2;padding:24px">'
+            '<div style="font-weight:bold;font-size:18px;letter-spacing:1px">🚦 AIDL · AI Driving License</div>'
+            f'<p style="font-size:15px">Hi {escape(user.first_name or user.full_name or "there")},</p>'
+            f'<p style="font-size:15px">Use this code to {action}:</p>'
+            f'<div style="font-size:34px;font-weight:bold;letter-spacing:10px;background:#ffcc00;'
+            f'border:3px solid #14140f;text-align:center;padding:12px 0">{code}</div>'
+            '<p style="font-size:13px;color:#555">It expires in 10 minutes. If you didn\'t ask for it, '
+            'you can ignore this email.</p></div>'
+        ),
     )
 
 
@@ -111,7 +130,11 @@ def start_otp(user: AIDLUser, purpose: str) -> dict:
     token = secrets.token_urlsafe(24)
     AuthChallenge.objects.create(kind=AuthChallenge.Kind.OTP, purpose=purpose, token=token, user_id=str(user.pk),
                                  answer_hash=_hash(token, code), expires_at=timezone.now() + LIFETIME)
-    _send_code(user, code, purpose)
+    try:
+        _send_code(user, code, purpose)
+    except Exception as exc:  # noqa: BLE001 — SMTP down / wrong password / port blocked
+        logger.error("could not email the %s code to %s: %s", purpose, user.email, exc)
+        raise EmailNotSent("We couldn't send the code email right now. Please try again in a minute.") from exc
     name, _, domain = user.email.partition("@")
     body = {"otp_required": True, "otp_token": token, "email": f"{name[:2]}{'•' * max(len(name) - 2, 1)}@{domain}",
             "message": "We've emailed you a 6-digit code."}

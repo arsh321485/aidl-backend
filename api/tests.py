@@ -2069,6 +2069,12 @@ class OtpCaptchaTests(TestCase):
         self.assertEqual(step2.status_code, 200, step2.content)
         self.assertIn("access_token", step2.json())
 
+    def test_email_failure_is_a_clear_error(self):
+        with patch("api.auth_verification.send_mail", side_effect=OSError("smtp down")):
+            resp = self._signup()
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("couldn't send the code", resp.json()["detail"])
+
     def test_code_locks_after_five_wrong_tries(self):
         token = self._signup().json()["otp_token"]
         for _ in range(5):
