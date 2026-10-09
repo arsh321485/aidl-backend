@@ -103,16 +103,24 @@ def onboard_member(org: Organization, slack_user_id: str, *, force: bool = False
             return "rejoined"
     if member.slack_onboarded_at and not force:
         return "already"
+    # Claim the welcome atomically: "Add people" and the channel-join event can
+    # both arrive for the same person.
+    claimed = AIDLUser.objects.filter(pk=member.pk, slack_onboarded_at__isnull=True).update(
+        slack_onboarded_at=timezone.now())
+    if not claimed and not force:
+        return "already"
+    member.refresh_from_db()
+
+    from .admin_setup import first_tab
 
     first = (member.full_name or "there").split()[0]
+    tab = first_tab(member, org)  # the first learning card the admin has sent
     results = [
         slack_client.send_dm(token, org, slack_user_id, text=f"Welcome to AIDL, {first}!",
                              blocks=user_welcome_blocks(member, org)),
-        slack_client.send_dm(token, org, slack_user_id, text="Start here: your AI Acceptable Use Policy",
-                             blocks=user_dashboard_blocks(member, org, "aup")),
+        slack_client.send_dm(token, org, slack_user_id, text="Your AIDL dashboard",
+                             blocks=user_dashboard_blocks(member, org, tab)),
     ]
-    member.slack_onboarded_at = timezone.now()
-    member.save(update_fields=["slack_onboarded_at", "updated_at"])
     admin = primary_admin(org)
     if admin is not None:
         _warn_if_dm_failed(token, org, admin, member, results)

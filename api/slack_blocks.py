@@ -70,49 +70,144 @@ def _open_button(tab: str, open_url: str) -> dict:
     return _button(_OPEN_LABEL[tab], f"aidl_open_{tab}", value=tab, style="" if tab == "home" else "primary")
 
 
+# ---------- Admin Center: step-by-step setup (admin_setup.py) ----------
+
+_DEMO_SETUP = {"aup_done": False, "delegate_name": "", "admins_done": False, "team_done": False,
+               "cards_done": False, "members": 0, "done_count": 0,
+               "sends": {i: {"sent": False, "accepted": 0} for i in ("aup", "traffic_light", "highway_code")}}
+_SEND_LABEL = {"aup": "📄 AI Acceptable Use Policy", "traffic_light": "🚦 Traffic Light Check",
+               "highway_code": "📖 Highway Code"}
+
+
+def _actions(block_id: str, *buttons) -> dict:
+    return {"type": "actions", "block_id": block_id, "elements": [b for b in buttons if b]}
+
+
+def _locked(n: int, title: str, after: str) -> dict:
+    return _context(f"⬜  *{n} · {title}*  —  _after {after}_")
+
+
+def _step_aup(d: dict, st: dict) -> list:
+    if not st["aup_done"]:
+        blocks = [_section("*1 · Create your AI policy (AUP)*\nAnswer 8 quick questions about how your organization "
+                           "uses AI — AIDL writes your team's AI Acceptable Use Policy from them.")]
+        if st.get("delegate_name"):
+            blocks.append(_context(f"⏳ Assigned to *{st['delegate_name']}* — waiting for them to create it."))
+        if d["can_policy"]:
+            blocks.append(_actions("aidl_step_aup",
+                                   _button("📝 Create AUP", "aidl_policy_open", value="policy", style="primary"),
+                                   _button("🙋 Ask someone else", "aidl_aup_delegate", value="delegate")
+                                   if d["can_admins"] else None))
+        return blocks
+    apps = f"{d['approved_apps']} of {d['total_apps']} apps approved"
+    return [
+        _section(f"✅  *1 · AI policy (AUP)*  ·  `{d['team'].get('aup_version', '')}`  ·  {apps}"),
+        _actions("aidl_step_aup",
+                 _button("📄 View AUP", "aidl_aup_view", value="view"),
+                 _button("✏️ Edit answers", "aidl_policy_open", value="policy") if d["can_policy"] else None,
+                 _button("🤖 AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
+                 _button("💻 IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
+    ]
+
+
+def _step_admins(d: dict, st: dict) -> list:
+    seats = f"{d['admin_count']} of {d['admin_seat_limit']} admin seats used"
+    if not st["aup_done"]:
+        return [_locked(2, "Add admins (optional)", "step 1")]
+    if not st["admins_done"]:
+        blocks = [_section("*2 · Add admins (optional)*\nInvite HR, IT or Compliance colleagues to help run AIDL — "
+                           f"you choose what each one can do.  ·  _{seats}_")]
+        if d["can_admins"]:
+            blocks.append(_actions("aidl_step_admins",
+                                   _button("🧑‍💼 Add admin", "aidl_open_add-admin", value="add-admin", style="primary"),
+                                   _button("Skip →", "aidl_setup_skip", value="admins")))
+        return blocks
+    return [
+        _section(f"✅  *2 · Admins*  ·  {seats}"),
+        *([_actions("aidl_step_admins", _button("🧑‍💼 Add or remove admins", "aidl_open_add-admin", value="add-admin"))]
+          if d["can_admins"] else []),
+    ]
+
+
+def _step_team(d: dict, st: dict) -> list:
+    if not (st["aup_done"] and st["admins_done"]):
+        return [_locked(3, "Add your team", "step 2")]
+    p = d.get("plan") or {}
+    seats = f"{p.get('used', st['members'])} of {p.get('limit', '—')} users on your {p.get('label', '')} plan".strip()
+    head = ("*3 · Add your team*\nAdd the people who should earn an AI licence. They join the AIDL channel and "
+            "get their cards automatically." if not st["team_done"]
+            else f"✅  *3 · Team*  ·  {st['members']} member{'s' if st['members'] != 1 else ''}")
+    blocks = [_section(f"{head}  ·  _{seats}_")]
+    blocks += _plan_notice(d)
+    if d["can_team"]:
+        blocks.append(_actions("aidl_step_team",
+                               _button("👥 Add people", "aidl_add_people", value="team",
+                                       style="" if st["team_done"] else "primary"),
+                               _button("View team progress", "aidl_team_progress", value="team") if st["team_done"] else None))
+    return blocks
+
+
+def _step_send(d: dict, st: dict) -> list:
+    if not (st["aup_done"] and st["team_done"]):
+        return [_locked(4, "Send the learning cards", "step 3")]
+    head = ("*4 · Send the learning cards*\nSend each card to your team once — people who join later get it "
+            "automatically. Accepting the Highway Code and Traffic Light Check earns the licence."
+            if not st["cards_done"] else "✅  *4 · Learning cards sent*")
+    blocks = [_section(head)]
+    members = st["members"]
+    for item in ("aup", "traffic_light", "highway_code"):
+        s = st["sends"][item]
+        line = f"{_SEND_LABEL[item]}\n" + (f"✓ Sent  ·  *{s['accepted']}* of {members} accepted" if s["sent"]
+                                             else "_Not sent yet_")
+        block = _section(line)
+        if d["can_send"]:
+            if not s["sent"]:
+                block["accessory"] = _button("📤 Send", "aidl_send_item", value=item, style="primary")
+            elif s["accepted"] < members:
+                block["accessory"] = _button("🔔 Remind", "aidl_remind_item", value=item)
+        blocks.append(block)
+    return blocks
+
+
+def _step_licences(d: dict, st: dict) -> list:
+    if not st["cards_done"]:
+        return [_locked(5, "Licences & awareness cards", "step 4")]
+    t = d.get("team") or {}
+    p = d.get("plan") or {}
+    waiting = f"  ·  ⏳ {t['waiting_seat']} waiting for a seat" if t.get("waiting_seat") else ""
+    package = (f"📘 {p['package_label']}: {p['cards']} awareness cards, {p['cards_per_week']} a week — sent "
+               "automatically after each licence") if p else ""
+    return [
+        _section(f"*5 · Licences & awareness cards*\n🪪 *{t.get('licensed', 0)}* of {t.get('members', 0)} licensed"
+                 f"{waiting}\n{package}"),
+        _actions("aidl_step_licences",
+                 _button("View team progress", "aidl_team_progress", value="team", style="primary"),
+                 _button("📬 Send reference cards", "aidl_open_cards", value="cards") if "cards" in d["tabs"] else None,
+                 _button("⬇ Export coverage", "aidl_open_home", value="home")),
+    ]
+
+
 def _home(d: dict) -> list:
-    """Home — Depot Overview (guide 8.1), in the layout the team signed off
-    (aidl_admin_home.json). All values come from build_admin_cards_context."""
+    """Admin Center: welcome + the 5 setup steps, one after the other. Every
+    feature lives inside its step (no tab bar), so the admin never has to go
+    back to a home page."""
+    st = d.get("setup") or _DEMO_SETUP
     name = d["admin_name"]
-    enrolled = d["enrolled"]
-    pct = d["licence_pct"]
-    filled = round(pct / 10)
+    done = st["done_count"]
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "🚦 AIDL Admin Center", "emoji": True}},
         _context(f"*{d['org_name']}*  ·  AI Driving License  ·  Signed in as *{name}*"),
-        _section(f"👋 *Welcome back, {name}.*\nYou provision the seats, set the house rules, and keep "
-                 "everything running smoothly. _Your team does the driving._"),
+        _section(f"👋 *Welcome, {name}.* Let's set up AI Driving License for *{d['org_name']}* — "
+                 "a few short steps, top to bottom.\n" + "🟩" * done + "⬜" * (4 - done)
+                 + f"  *{done} of 4 setup steps done*"),
         {"type": "divider"},
-        _section("📊  *LICENSES & SEATS*"),
-        {"type": "section", "fields": [
-            _plan_field(d),
-            _md(f"*Licenses issued*\n*{d['licences_issued']}* of {enrolled} enrolled  ·  {pct}%\n"
-                + "▰" * filled + "▱" * (10 - filled)),
-        ]},
-        *_plan_notice(d),
-        _aup_block(d),
-        *([{"type": "actions", "block_id": "aidl_aup_actions", "elements": [
-            _button("📄 View team AUP", "aidl_aup_view", value="view"),
-            _button("📤 Send AUP to team", "aidl_aup_send", value="send"),
-            _button("✏️ Edit policy answers", "aidl_policy_open", value="policy"),
-        ]}] if d["policy"].get("has_answers") else []),
-        {"type": "divider"},
-        *_team_progress_blocks(d),
-        {"type": "divider"},
-        _section("🛡️  *GOVERNANCE SNAPSHOT*"),
-        {"type": "section", "fields": [
-            _md(f"*👥 Admins*\n*{d['admin_count']}* of {d['admin_seat_limit']} seats"
-                + ("  ·  _at capacity_" if d["admin_count"] >= d["admin_seat_limit"] else "")),
-            _md(f"*✅ Apps approved*\n*{d['approved_apps']}* of {d['total_apps']}"
-                + (f"  ·  {d['total_apps'] - d['approved_apps']} prohibited"
-                   if d["total_apps"] > d["approved_apps"] else "")),
-            _md(f"*🤖 AI applications*\n*{len(d['ai_apps'])}* in registry"),
-            _md(f"*💻 IT applications*\n*{len(d['it_apps'])}* in registry"),
-        ]},
-        {"type": "divider"},
-        _rollout_block(d),
     ]
-    return blocks
+    if d.get("policy_only"):  # asked to create the AUP only
+        return blocks + _step_aup(d, st)
+    for step in (_step_aup, _step_admins, _step_team, _step_send, _step_licences):
+        blocks += step(d, st)
+        blocks.append({"type": "divider"})
+    return blocks[:-1]
 
 
 def _plan_field(d: dict) -> dict:
@@ -288,13 +383,11 @@ def admin_card_blocks(d: dict, tab: str = "home", *, open_url: str = "") -> list
     passed for ephemeral messages that just the clicking admin can see."""
     if tab not in d["tabs"]:
         tab = "home"
-    # Navigation first, so the tabs are the first thing an admin sees.
+    # No tab bar: Home is the step-by-step setup, and every other card is
+    # opened from its step.
     if tab == "home":
-        return [tab_buttons(d, tab)] + _home(d) + [
-            {"type": "actions", "block_id": "aidl_open", "elements": [_open_button("home", open_url)]},
-            _context("AIDL · AI Driving License"),
-        ]
-    blocks = [tab_buttons(d, tab), _app_line(d["org_name"])]
+        return _home(d) + [_context("AIDL · AI Driving License")]
+    blocks = [_app_line(d["org_name"])]
     blocks += _BUILDERS[tab](d)
     if tab != "home" or d["tabs"] == [t for t, _l, _i in ADMIN_TABS]:
         blocks.append({"type": "actions", "block_id": "aidl_open", "elements": [_open_button(tab, open_url)]})
@@ -547,6 +640,16 @@ def user_dashboard_blocks(member, org, tab: str = "license") -> list:
         "highway-code": lambda: highway_code_blocks(org, member),
         "traffic-light": lambda: user_traffic_light_blocks(org, member),
     }.get(tab) or (lambda: user_license_blocks(member, org))
+    item = {"aup": "aup", "highway-code": "highway_code", "traffic-light": "traffic_light"}.get(tab)
+    if item and member is not None:
+        from .admin_setup import ITEM_LABEL, visible_to
+
+        if not visible_to(member, org, item):  # the admin hasn't sent this card yet
+            content = lambda: [  # noqa: E731
+                {"type": "header", "text": {"type": "plain_text", "text": ITEM_LABEL[item], "emoji": True}},
+                _section(f"⏳ Your AIDL admin at *{org.name}* hasn't sent this yet — it will appear here "
+                         "as soon as they do."),
+            ]
     return content() + [{"type": "divider"}, user_tab_buttons(tab)]
 
 

@@ -445,10 +445,21 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
 
     data["policy"] = fx
     if org is not None:
+        from .admin_setup import summary
         from .licensing import team_progress
 
         team = team_progress(org)
         data["team"] = {k: v for k, v in team.items() if k != "rows"}
+        data["setup"] = summary(org)
+    # What this admin may do in each setup step (the owner may do everything).
+    owner = data.get("is_primary", True) or user is None
+    data["can_policy"] = owner or bool(user and (user.perm_policy or user.perm_approve_apps))
+    data["can_apps"] = owner or bool(user and user.perm_approve_apps)
+    data["can_admins"] = owner
+    data["can_team"] = owner
+    data["can_send"] = owner or bool(user and user.perm_access_cards)
+    data["policy_only"] = bool(user and user.perm_policy and not owner and not user.perm_approve_apps
+                               and not user.perm_access_cards and not user.perm_create_card)
     data["cards"] = _apply_card_effects(data["cards"], fx)
     data["ai_apps"] = _apply_app_effects(data["ai_apps"], fx)
     shown = data["ai_apps"] + data["it_apps"]

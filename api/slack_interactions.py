@@ -23,7 +23,7 @@ from django.views.decorators.http import require_POST
 
 from .auth_jwt import create_access_token
 from .models import AIDLUser
-from . import slack_client, slack_modals
+from . import admin_setup, slack_client, slack_modals
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
 from .slack_cards import build_admin_cards_context
@@ -117,6 +117,8 @@ _SUBMIT_TAB = {
     "aidl_card_new": "cards",
     "aidl_add_app": "ai-apps",
     "aidl_policy": "home",
+    "aidl_delegate_aup": "home",
+    "aidl_add_people": "home",
 }
 
 
@@ -147,6 +149,8 @@ def _handle_submission(payload: dict):
         "aidl_card_new": lambda: slack_modals.submit_new_card(admin, org, view),
         "aidl_add_app": lambda: slack_modals.submit_add_app(admin, org, view),
         "aidl_policy": lambda: slack_modals.submit_policy(admin, org, view),
+        "aidl_delegate_aup": lambda: slack_modals.submit_delegate(admin, org, team_id, view),
+        "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
     }
     result = handlers[callback]() or {}
     if "response_action" in result:
@@ -215,20 +219,27 @@ def _send_aup_reminders(org, admin, response_url: str) -> None:
 
 
 def _send_aup_to_team(org, response_url: str) -> None:
-    """Admin 'Send AUP to team': DM every team member their personal AUP
-    (dashboard opened on the AUP tab, with the accept button)."""
-    from .licensing import learners
-    from .slack_blocks import user_dashboard_blocks
+    """Admin 'Send AUP to team' (older buttons): same as setup step 4."""
+    sent, total = admin_setup.send_item(org, "aup")
+    _reply(response_url, text=f"✓ AUP sent to {sent} of {total} team member(s).")
 
-    token = slack_client.bot_token(org)
-    members = learners(org).filter(microsoft_id__startswith=f"slack:{org.slack_team_id}:")
-    sent = 0
-    for member in members:
-        result = slack_client.send_dm(token, org, member.microsoft_id.split(":")[-1],
-                                      text="📄 Your AI Acceptable Use Policy",
-                                      blocks=user_dashboard_blocks(member, org, "aup"))
-        sent += 1 if result.get("ok") or result.get("fallback_ok") else 0
-    _reply(response_url, text=f"✓ AUP sent to {sent} of {members.count()} team member(s).")
+
+def _send_or_remind(org, admin, item: str, *, remind: bool, response_url: str, view_id: str) -> None:
+    """Setup step 4: send a learning card to the team (once — later joiners
+    get it automatically) or remind the people who haven't accepted it."""
+    if remind:
+        sent, total = admin_setup.remind_item(org, item)
+        text = f"🔔 Reminder sent to {sent} of {total} who haven't accepted {admin_setup.ITEM_LABEL[item]}."
+    else:
+        sent, total = admin_setup.send_item(org, item)
+        text = (f"✓ {admin_setup.ITEM_LABEL[item]} sent to {sent} of {total} team member(s). "
+                "People who join later get it automatically.")
+    if view_id:  # clicked inside the AUP-ready popup
+        slack_client.slack_api("views.update", slack_client.bot_token(org), json={
+            "view_id": view_id, "view": slack_modals.policy_summary_view(org, notice=text)})
+    elif response_url:
+        _reply(response_url, text=text)
+    publish_admin_center(org, admin)  # the step moves on
 
 
 def _ctx_line(org_name: str) -> dict:
@@ -459,20 +470,43 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
     # The 8 policy questions (asked in Slack, not on the website). Until they're
     # answered, the AUP buttons open them too.
     policy_set = d["policy"].get("has_answers")
-    if org is not None and (action_id == "aidl_policy_open"
+    if org is not None and d["can_policy"] and (action_id == "aidl_policy_open"
                             or (action_id in ("aidl_aup_view", "aidl_aup_send") and not policy_set)):
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
         slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), slack_modals.policy_view(org, meta))
         return HttpResponse(status=200)
 
+    in_modal = bool((payload.get("view") or {}).get("id"))
     if action_id == "aidl_aup_view":
-        if org is not None:
-            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), slack_modals.aup_view(org))
+        if org is not None:  # from the AUP-ready popup it opens on top of it
+            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), slack_modals.aup_view(org),
+                                       push=in_modal)
         return HttpResponse(status=200)
 
-    if action_id == "aidl_aup_send":
-        if org is not None:
-            slack_modals.in_background(_send_aup_to_team, org, response_url)
+    # Setup steps (admin_setup.py).
+    if org is not None and action_id in ("aidl_aup_send", "aidl_send_item", "aidl_remind_item"):
+        item = "aup" if action_id == "aidl_aup_send" else action.get("value", "")
+        if item in admin_setup.ITEMS and d["can_send"]:
+            _send_or_remind(org, user, item, remind=action_id == "aidl_remind_item",
+                            response_url=response_url, view_id=(payload.get("view") or {}).get("id", ""))
+        return HttpResponse(status=200)
+
+    if org is not None and action_id == "aidl_aup_delegate" and d["can_admins"]:
+        meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
+        _open_modal(org, payload.get("trigger_id", ""), slack_modals.delegate_view(meta))
+        return HttpResponse(status=200)
+
+    if org is not None and action_id == "aidl_add_people" and d["can_team"]:
+        meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
+        _open_modal(org, payload.get("trigger_id", ""), slack_modals.add_people_view(meta, d))
+        return HttpResponse(status=200)
+
+    if org is not None and action_id == "aidl_setup_skip" and d["can_admins"]:
+        admin_setup.update(org, **{f"{action.get('value', 'admins')}_step": "skipped"})
+        publish_admin_center(org, user)
+        if is_ephemeral:
+            _reply(response_url, text=admin_card_text(d),
+                   blocks=admin_card_blocks(build_admin_cards_context(user), "home"), replace=True)
         return HttpResponse(status=200)
 
     if action_id == "aidl_team_progress":

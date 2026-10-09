@@ -50,6 +50,9 @@ class Organization(models.Model):
     # The admin who connected AIDL (first Slack sign-in) — the "first admin":
     # only they see Add Admin and can remove admins. Empty → oldest admin.
     owner_user_id = models.CharField(max_length=64, blank=True, default="")
+    # Step-by-step setup progress (admin_setup.py), JSON: which learning cards
+    # were sent, skipped steps, who was asked to create the AUP.
+    setup_state = models.TextField(blank=True, default="")
     seats_renews_on = models.DateField(null=True, blank=True)
     admin_seat_limit = models.IntegerField(default=3)
     rollout_steps_done = models.IntegerField(default=3)
@@ -132,6 +135,8 @@ class AIDLUser(models.Model):
     perm_approve_apps = models.BooleanField(default=True)
     perm_access_cards = models.BooleanField(default=True)
     perm_create_card = models.BooleanField(default=True)
+    # Delegated to create the AI policy (AUP) only — setup step 1.
+    perm_policy = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
     # Microsoft OAuth refresh token (requires the "offline_access" scope), so
