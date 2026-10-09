@@ -135,10 +135,18 @@ def policy_answers_blocks(org: Organization) -> list:
     return blocks
 
 
-def policy_summary_view(org: Organization) -> dict:
+def policy_summary_view(org: Organization, notice: str = "") -> dict:
+    """Shown right after the AUP is created: the card, and the two next
+    actions — send it to the team, or look at the AUP card itself."""
     return _modal("aidl_policy_done", "Your AI policy", [
-        {"type": "section", "text": _md("✅ *Saved.* Your team's AI Acceptable Use Policy has been generated from these "
-                                        "answers. Next: *📄 View team AUP*, then *📤 Send AUP to team*.")},
+        {"type": "section", "text": _md("✅ *Your AUP is ready.* AIDL generated your team's AI Acceptable Use Policy "
+                                        "from these answers.")},
+        {"type": "actions", "block_id": "aidl_aup_next", "elements": [
+            {"type": "button", "text": _text("📤 Send AUP to team"), "action_id": "aidl_send_item", "value": "aup",
+             "style": "primary"},
+            {"type": "button", "text": _text("📄 View AUP card"), "action_id": "aidl_aup_view", "value": "view"},
+        ]},
+        *([{"type": "context", "elements": [_md(notice)]}] if notice else []),
         {"type": "divider"},
         *policy_answers_blocks(org),
     ], close="Done")
@@ -153,9 +161,105 @@ def submit_policy(admin: AIDLUser, org: Organization, view: dict) -> dict:
         save_answers(org, answers)
     except PolicyAnswersError as exc:
         return errors(**{qid: "Pick one answer." for qid in exc.errors})
+    from .slack_onboarding import primary_admin
+
+    owner = primary_admin(org)
+    if owner is not None and owner.pk != admin.pk and owner.microsoft_id.startswith("slack:"):
+        in_background(lambda: slack_client.send_dm(
+            slack_client.bot_token(org), org, owner.microsoft_id.split(":")[-1],
+            text="The AI policy is ready", blocks=[{"type": "section", "text": _md(
+                f"✅ *{admin.full_name or admin.email}* created *{org.name}'s* AI policy (AUP). "
+                "Open the AIDL Admin Center to send it to your team.")}]))
     # AI-C-011: the popup turns into the full report of the answers.
     return {"notice": "✓ Policy saved — your team's AUP has been generated. Use *📄 View team AUP* to check it, "
                       "then *📤 Send AUP to team*.", "view": policy_summary_view(org)}
+
+
+def delegate_view(meta: dict) -> dict:
+    """Setup step 1 — 'Ask someone else': e.g. the boss asks a manager to
+    create the AUP. That person becomes an admin who can only do the AUP."""
+    return _modal("aidl_delegate_aup", "Ask someone else", [
+        {"type": "section", "text": _md("Pick the person who should create your AI policy (AUP). They get a message "
+                                        "with the *Create AUP* step and become an admin for the AUP only.")},
+        _input("person", "Who should create the AUP?",
+               {"type": "users_select", "action_id": "v", "placeholder": _text("Choose a person")}),
+        _input("note", "Message (optional)", {"type": "plain_text_input", "action_id": "v", "multiline": True,
+               "placeholder": _text("Please set up our AI policy in AIDL — thanks!")}, optional=True),
+    ], submit="Send request", meta=meta)
+
+
+def submit_delegate(caller: AIDLUser, org: Organization, team_id: str, view: dict) -> dict:
+    from .admin_setup import update
+    from .slack_blocks import admin_card_blocks
+
+    values = _values(view)
+    d = build_admin_cards_context(caller)
+    if not d["can_admins"]:
+        return errors(person="Only the admin who set up AIDL can do this.")
+    token = slack_client.bot_token(org)
+    slack_user_id, profile = _resolve_slack_user(token, values)
+    if not slack_user_id:
+        return errors(person="Pick a person from your Slack workspace.")
+    person = _upsert_member(org, team_id, slack_user_id, profile)
+    if person is None:
+        return errors(person="This person already belongs to another AIDL organization.")
+    if person.role != AIDLUser.Role.ADMIN:
+        if d["admin_count"] >= d["admin_seat_limit"]:
+            return errors(person=f"{d['admin_seat_limit']} of {d['admin_seat_limit']} admin seats used · no seats left")
+        person.role = AIDLUser.Role.ADMIN
+        person.perm_approve_apps = person.perm_access_cards = person.perm_create_card = False
+    person.perm_policy = True
+    person.save(update_fields=["role", "perm_approve_apps", "perm_access_cards", "perm_create_card", "perm_policy",
+                               "updated_at"])
+    update(org, aup_delegate=str(person.pk))
+    note = _value(values, "note")
+    asked = (f"*{caller.full_name or caller.email}* asked you to create *{org.name}'s* AI policy (AUP) in AIDL."
+             + (f"\n> {note}" if note else ""))
+    in_background(lambda: slack_client.send_dm(
+        token, org, slack_user_id, text=f"{caller.full_name} asked you to create the AI policy",
+        blocks=[{"type": "section", "text": _md(asked)}] + admin_card_blocks(build_admin_cards_context(person), "home")))
+    return {"notice": f"✓ Asked {person.full_name or person.email} to create the AUP."}
+
+
+def add_people_view(meta: dict, d: dict) -> dict:
+    """Setup step 3 — pick people; AIDL adds them to the AIDL channel and
+    onboarding does the rest (no Add User form)."""
+    p = d.get("plan") or {}
+    free = p.get("free")
+    return _modal("aidl_add_people", "Add your team", [
+        {"type": "section", "text": _md("Pick the people who should earn an AI licence. AIDL adds them to the AIDL "
+                                        "channel and sends each one their welcome and learning cards.")},
+        _input("people", "People", {"type": "multi_users_select", "action_id": "v",
+                                    "placeholder": _text("Choose people")}),
+        *([{"type": "context", "elements": [_md(f"*{free}* seat{'s' if free != 1 else ''} left on your "
+                                                 f"{p.get('label', '')} plan ({p.get('used')} of {p.get('limit')} used)")]}]
+          if free is not None else []),
+    ], submit="Add people", meta=meta)
+
+
+def submit_add_people(caller: AIDLUser, org: Organization, view: dict) -> dict:
+    from .plans import usage
+    from .slack_onboarding import onboard_member
+
+    if not build_admin_cards_context(caller)["can_team"]:
+        return errors(people="Only the admin who set up AIDL can add people.")
+    picked = (_values(view).get("people", {}).get("v", {}) or {}).get("selected_users") or []
+    if not picked:
+        return errors(people="Pick at least one person.")
+    u = usage(org)
+    if len(picked) > u["free"]:
+        return errors(people=f"Only {u['free']} seat{'s' if u['free'] != 1 else ''} left on your {u['label']} plan "
+                             f"({u['used']} of {u['limit']} used).")
+    token = slack_client.bot_token(org)
+
+    def add_all():
+        for uid in picked:
+            slack_client.slack_api("conversations.invite", token, json={"channel": org.slack_channel_id, "users": uid})
+            onboard_member(org, uid)  # also runs on the join event; the welcome is only sent once
+
+    in_background(add_all)
+    return {"notice": f"✓ Adding {len(picked)} {'person' if len(picked) == 1 else 'people'} to the AIDL channel — "
+                      "they'll get their welcome and cards in a moment."}
 
 
 def add_admin_view(d: dict, meta: dict) -> dict:
