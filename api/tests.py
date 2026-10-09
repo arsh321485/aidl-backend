@@ -37,6 +37,13 @@ def make_org(**kwargs) -> Organization:
     return Organization.objects.create(**defaults)
 
 
+def _shown_views(calls) -> list:
+    """Popups as the admin sees them: popup buttons first open a "Loading…"
+    popup (views.open) and then fill it in (views.update)."""
+    return [b["view"] for m, b in calls if m in ("views.open", "views.push", "views.update")
+            and b["view"].get("callback_id") != "aidl_loading"]
+
+
 def _answer_policy(org: Organization) -> None:
     from .org_policy import POLICY_QUESTIONS, save_answers
 
@@ -1153,8 +1160,8 @@ class SlackModalTests(TestCase):
         self._post({"type": "block_actions", "channel": {"id": "C42"},
                     "actions": [{"action_id": "aidl_open_add-admin", "value": "add-admin"}]})
         opened = [body for m, body in self.calls if m == "views.open"]
-        self.assertEqual(opened[0]["view"]["callback_id"], "aidl_add_admin")
-        self.assertEqual(opened[0]["trigger_id"], "trig")
+        self.assertEqual(opened[0]["trigger_id"], "trig")              # Loading… popup at once
+        self.assertEqual(_shown_views(self.calls)[0]["callback_id"], "aidl_add_admin")
 
     def test_add_admin_saves_permissions_and_onboards(self):
         resp = self._submit("aidl_add_admin", {
@@ -1230,7 +1237,8 @@ class SlackModalTests(TestCase):
         learner = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Jordan Ellis")
         self._post({"type": "block_actions", "channel": {"id": "C42"}, "response_url": "https://hooks.slack.test/r",
                     "actions": [{"action_id": "aidl_open_home", "value": "home"}]})
-        opened = next(b for m, b in self.calls if m == "views.open")
+        self.assertEqual(next(b for m, b in self.calls if m == "views.open")["view"]["callback_id"], "aidl_loading")
+        opened = {"view": _shown_views(self.calls)[0]}
         self.assertEqual(opened["view"]["callback_id"], "aidl_coverage")
         self.assertIn(learner.email, json.dumps(opened["view"]["blocks"]))
         self.assertNotIn(self.admin.email, json.dumps(opened["view"]["blocks"]))
@@ -1240,7 +1248,8 @@ class SlackModalTests(TestCase):
         self.assertEqual(done["channel_id"], "D1")
         self.assertEqual(done["files"][0]["id"], "F1")
         self.assertIn("/api/slack/cards/admin/coverage.csv?token=", json.dumps(opened["view"]["blocks"]))
-        self.assertFalse([b for m, b in self.calls if m == "views.update"])  # DM copy worked, nothing to change
+        # only the Loading… popup being filled in — the DM copy worked, no note added
+        self.assertEqual(len([b for m, b in self.calls if m == "views.update"]), 1)
 
     def test_export_without_files_scope_explains_the_fix(self):
         def fake(method, token, *, json=None, params=None):
@@ -1268,7 +1277,7 @@ class SlackModalTests(TestCase):
                 patch("api.slack_interactions.requests.post") as reply:
             self.client.post("/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
                              HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
-        updated = next(b for m, b in self.calls if m == "views.update")
+        updated = [b for m, b in self.calls if m == "views.update"][-1]
         self.assertIn("files:write", json.dumps(updated["view"]["blocks"]))
 
     def test_traffic_light_card_has_rating_row(self):
@@ -1973,9 +1982,9 @@ class SlackPolicyQuestionsTests(TestCase):
 
     def test_aup_button_opens_questions_when_unanswered(self):
         self._press("aidl_aup_view")
-        opened = [j for m, j in self.calls if m == "views.open"]
-        self.assertEqual(opened[0]["view"]["callback_id"], "aidl_policy")
-        self.assertEqual(len([b for b in opened[0]["view"]["blocks"] if b["type"] == "input"]), 8)
+        view = _shown_views(self.calls)[0]
+        self.assertEqual(view["callback_id"], "aidl_policy")
+        self.assertEqual(len([b for b in view["blocks"] if b["type"] == "input"]), 8)
 
     def test_submitting_answers_saves_policy(self):
         from urllib.parse import urlencode
@@ -2312,3 +2321,51 @@ class SetupStepsTests(TestCase):
         self.assertFalse(learner.aup_signed)
         self.assertEqual(list(Acknowledgement.objects.filter(user_id=str(learner.pk)).values_list("item", flat=True)),
                          ["highway_code"])
+
+
+class PopupTimingTests(TestCase):
+    """Popup buttons open a Loading… popup before any slow work, then fill it."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"))
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def test_create_aup_opens_before_building_admin_center(self):
+        from urllib.parse import urlencode
+
+        order = []
+        real = __import__("api.slack_cards", fromlist=["x"]).build_admin_cards_context
+
+        def slow_context(user):
+            order.append("context")
+            return real(user)
+
+        def fake(method, token, *, json=None, params=None):
+            if method in ("views.open", "views.update"):
+                order.append(f"{method}:{json['view'].get('callback_id')}")
+                return {"ok": True, "view": {"id": "V1"}}
+            return self._fake(method, token, json=json, params=params)
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "trigger_id": "TR", "channel": {"id": "C42"},
+                   "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]}
+        with patch("api.slack_interactions.build_admin_cards_context", side_effect=slow_context):
+            self._fake_saved = self._fake
+            with self.settings(SLACK_SIGNING_SECRET=self.SECRET, SLACK_REPLY_SYNC=True), \
+                    patch("api.slack_client.slack_api", side_effect=fake), patch("requests.post"):
+                import hashlib, hmac, time
+                body = urlencode({"payload": json.dumps(payload)})
+                ts = str(int(time.time()))
+                sig = "v0=" + hmac.new(self.SECRET.encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
+                self.client.post("/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
+                                 HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
+        self.assertEqual(order[0], "views.open:aidl_loading")     # before the slow Admin Center data
+        self.assertIn("views.update:aidl_policy", order)

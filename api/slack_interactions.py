@@ -91,8 +91,53 @@ def _admin_for(payload: dict) -> AIDLUser | None:
     return AIDLUser.objects.filter(microsoft_id=f"slack:{team_id}:{slack_user}", is_active=True).first()
 
 
+# Slack drops a popup opened more than 3 seconds after the click, and building
+# the Admin Center data can take longer. Popup buttons therefore open a
+# "Loading…" popup at once (_preopen); _open_modal then fills that popup in.
+_PREOPENED: dict[str, str] = {}
+_PREOPEN_LOCK = threading.Lock()
+_POPUP_TITLES = {
+    "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP", "aidl_aup_delegate": "Ask someone else",
+    "aidl_add_people": "Add your team", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
+    "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
+    "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
+}
+
+
+def _preopen(org, trigger_id: str, title: str, push: bool) -> None:
+    method = "views.push" if push else "views.open"
+    view = {"type": "modal", "callback_id": "aidl_loading", "title": {"type": "plain_text", "text": title[:24]},
+            "close": {"type": "plain_text", "text": "Close"},
+            "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "⏳ Loading…"}}]}
+    result = slack_client.slack_api(method, slack_client.bot_token(org), json={"trigger_id": trigger_id, "view": view})
+    view_id = (result.get("view") or {}).get("id", "")
+    if view_id:
+        with _PREOPEN_LOCK:
+            _PREOPENED[trigger_id] = view_id
+
+
+def _finish_preopen(org, trigger_id: str) -> None:
+    """The click didn't open a popup after all (e.g. no permission)."""
+    with _PREOPEN_LOCK:
+        view_id = _PREOPENED.pop(trigger_id, "")
+    if view_id:
+        slack_client.slack_api("views.update", slack_client.bot_token(org), json={"view_id": view_id, "view": {
+            "type": "modal", "title": {"type": "plain_text", "text": "AIDL"}, "close": {"type": "plain_text", "text": "Close"},
+            "blocks": [{"type": "section", "text": {"type": "mrkdwn",
+                                                    "text": "Your admin permissions don't include this."}}]}})
+
+
 def _open_modal(org, trigger_id: str, view: dict, push: bool = False) -> str:
-    """Opens (or pushes) a modal; returns its view id."""
+    """Opens (or pushes) a modal; returns its view id. If a "Loading…" popup
+    was already opened for this click, it is filled in instead."""
+    with _PREOPEN_LOCK:
+        preopened = _PREOPENED.pop(trigger_id, "") if trigger_id else ""
+    if preopened:
+        result = slack_client.slack_api("views.update", slack_client.bot_token(org),
+                                        json={"view_id": preopened, "view": view})
+        if not result.get("ok"):
+            logger.warning("slack views.update failed: %s %s", result.get("error"), result.get("response_metadata"))
+        return (result.get("view") or {}).get("id", "") or preopened
     method = "views.push" if push else "views.open"
     result = slack_client.slack_api(method, slack_client.bot_token(org), json={"trigger_id": trigger_id, "view": view})
     if not result.get("ok"):
@@ -444,8 +489,20 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
         _reply(response_url, text="The AIDL Admin Center is only available to AIDL admins.")
         return HttpResponse(status=200)
 
-    d = build_admin_cards_context(user)
+    trigger_id = payload.get("trigger_id", "")
     org = get_organization_for_user(user)
+    if org is not None and trigger_id and action_id in _POPUP_TITLES:
+        _preopen(org, trigger_id, _POPUP_TITLES[action_id], push=bool((payload.get("view") or {}).get("id")))
+    try:
+        _admin_action_body(request, payload, action, action_id, tab, response_url, is_ephemeral, user, org)
+    finally:
+        if org is not None and trigger_id:
+            _finish_preopen(org, trigger_id)
+
+
+def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab: str,
+                       response_url: str, is_ephemeral: bool, user, org) -> None:
+    d = build_admin_cards_context(user)
 
     # Buttons inside an open modal: view one card / request a new card.
     if action_id in ("aidl_card_view", "aidl_card_new") and org is not None:
@@ -453,10 +510,10 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
         if action_id == "aidl_card_view":
             card = next((c for c in d["cards"] if c["id"] == action.get("value")), None)
             if card is not None:
-                slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
+                _open_modal(org, payload.get("trigger_id", ""),
                                            slack_modals.card_view(d, card, meta), push=True)
         elif d["can_create_card"]:
-            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
+            _open_modal(org, payload.get("trigger_id", ""),
                                        slack_modals.new_card_view(meta), push=True)
         return HttpResponse(status=200)
 
@@ -473,13 +530,13 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
     if org is not None and d["can_policy"] and (action_id == "aidl_policy_open"
                             or (action_id in ("aidl_aup_view", "aidl_aup_send") and not policy_set)):
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
-        slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), slack_modals.policy_view(org, meta))
+        _open_modal(org, payload.get("trigger_id", ""), slack_modals.policy_view(org, meta))
         return HttpResponse(status=200)
 
     in_modal = bool((payload.get("view") or {}).get("id"))
     if action_id == "aidl_aup_view":
         if org is not None:  # from the AUP-ready popup it opens on top of it
-            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), slack_modals.aup_view(org),
+            _open_modal(org, payload.get("trigger_id", ""), slack_modals.aup_view(org),
                                        push=in_modal)
         return HttpResponse(status=200)
 
@@ -511,7 +568,7 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
 
     if action_id == "aidl_team_progress":
         if org is not None:
-            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""),
+            _open_modal(org, payload.get("trigger_id", ""),
                                        slack_modals.team_progress_view(org))
         return HttpResponse(status=200)
 
@@ -527,7 +584,7 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
     # Export Coverage CSV: report in a modal + the CSV file by DM (guide 8.1).
     if action_id == "aidl_open_home" and org is not None:
         download_url = _private_link(request, user, "csv")
-        slack_modals.in_background(_open_coverage, org, payload.get("trigger_id", ""),
+        _open_coverage(org, payload.get("trigger_id", ""),
                                    (payload.get("user") or {}).get("id", ""), download_url)
         return HttpResponse(status=200)
 
@@ -536,7 +593,7 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
         view = slack_modals.view_for_tab(tab, d, meta)
         if view is not None:
-            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), view)
+            _open_modal(org, payload.get("trigger_id", ""), view)
         return HttpResponse(status=200)
 
     blocks = admin_card_blocks(d, tab, open_url=_private_link(request, user, tab))
