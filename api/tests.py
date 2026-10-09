@@ -604,7 +604,7 @@ class WebsiteSignupTests(TestCase):
         resp = self.client.post("/api/auth/signup/", {"email": "only@x.com"}, format="json")
         self.assertEqual(resp.status_code, 400)
         self.assertIn("first_name", resp.data)
-        self.assertIn("password", resp.data)
+        self.assertIn("country", resp.data)   # password is optional (emailed code instead)
 
     def test_organization_requires_name(self):
         self.payload["enroll_as"] = "organization"
@@ -2074,6 +2074,38 @@ class OtpCaptchaTests(TestCase):
             resp = self._signup()
         self.assertEqual(resp.status_code, 503)
         self.assertIn("couldn't send the code", resp.json()["detail"])
+
+    def test_register_without_password_issues_learner_licence(self):
+        resp = self.client.post("/api/auth/signup/", {
+            "enroll_as": "individual", "first_name": "No", "last_name": "Password", "email": "nopw@example.com",
+            "country": "India", "state": "Delhi", "city": "Delhi"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 202, resp.content)
+        ok = self.client.post("/api/auth/signup/verify/", {"otp_token": resp.json()["otp_token"], "code": self._code()},
+                              content_type="application/json")
+        user = ok.json()["user"]
+        self.assertTrue(user["licence_issued"])
+        self.assertTrue(user["licence_number"].startswith("AIDL-L-"))
+        from datetime import datetime
+        issued = datetime.fromisoformat(user["licence_issued_at"].replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(user["licence_expires_at"].replace("Z", "+00:00"))
+        self.assertEqual((expires - issued).days, 365)
+        self.assertEqual(AIDLUser.objects.get(email="nopw@example.com").password_hash, "")
+
+    def test_signin_without_password_uses_code(self):
+        resp = self.client.post("/api/auth/signup/", {
+            "enroll_as": "individual", "first_name": "No", "last_name": "Password", "email": "nopw@example.com",
+            "country": "India", "state": "Delhi", "city": "Delhi"}, content_type="application/json")
+        self.client.post("/api/auth/signup/verify/", {"otp_token": resp.json()["otp_token"], "code": self._code()},
+                         content_type="application/json")
+        with patch("api.auth_verification.secrets.choice", return_value="A"):
+            token = self.client.get("/api/auth/captcha/").json()["captcha_token"]
+        step1 = self.client.post("/api/auth/signin/", {"enroll_as": "individual", "email": "nopw@example.com",
+                                                       "captcha_token": token, "captcha_answer": "AAAAA"},
+                                 content_type="application/json")
+        self.assertTrue(step1.json().get("otp_required"), step1.content)
+        step2 = self.client.post("/api/auth/signin/verify/", {"otp_token": step1.json()["otp_token"], "code": self._code()},
+                                 content_type="application/json")
+        self.assertIn("access_token", step2.json())
 
     def test_code_locks_after_five_wrong_tries(self):
         token = self._signup().json()["otp_token"]

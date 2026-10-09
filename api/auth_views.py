@@ -764,6 +764,11 @@ def _send_code(user: AIDLUser, purpose: str, ok_status: int) -> Response:
 
 
 def _finish_signup(user: AIDLUser) -> Response:
+    if user.enroll_as == AIDLUser.EnrollAs.INDIVIDUAL:
+        # Individuals get their Learner (L) licence straight away, valid 1 year.
+        from .licensing import issue_individual_licence
+
+        issue_individual_licence(user)
     if user.enroll_as == AIDLUser.EnrollAs.ORGANIZATION:
         try:
             ensure_organization_for_login(user, org_name=user.organization_name)

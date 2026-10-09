@@ -83,6 +83,9 @@ class AIDLUserSerializer(serializers.ModelSerializer):
             "microsoft_id",
             "avatar_url",
             "licence_issued",
+            "licence_number",
+            "licence_issued_at",
+            "licence_expires_at",
             "aup_signed",
             "aup_signed_at",
             "teams_team_id",
@@ -116,8 +119,10 @@ class SignupSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=100)
     last_name = serializers.CharField(max_length=100)
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=8, max_length=128)
-    confirm_password = serializers.CharField(write_only=True, min_length=8, max_length=128)
+    # Optional: the website signs people in with an emailed code instead of a
+    # password. When one is sent, the strength rules below still apply.
+    password = serializers.CharField(write_only=True, max_length=128, required=False, allow_blank=True, default="")
+    confirm_password = serializers.CharField(write_only=True, max_length=128, required=False, allow_blank=True, default="")
     # Optional: the website no longer asks for it.
     mobile_number = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
     country = serializers.CharField(max_length=100)
@@ -193,7 +198,9 @@ class SignupSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         password = attrs.get("password") or ""
-        if password != (attrs.get("confirm_password") or ""):
+        if not password and not settings.AUTH_EMAIL_OTP:
+            raise serializers.ValidationError({"password": "Choose a password."})
+        if password and password != (attrs.get("confirm_password") or ""):
             raise serializers.ValidationError(
                 {"confirm_password": "Passwords do not match."}
             )
@@ -204,11 +211,14 @@ class SignupSerializer(serializers.Serializer):
             last_name=attrs.get("last_name", ""),
             full_name=f"{attrs.get('first_name', '')} {attrs.get('last_name', '')}".strip(),
         )
-        password_errors = password_complexity_errors(password)
-        try:
-            validate_password(password, user=dummy)
-        except DjangoValidationError as exc:
-            password_errors.extend(exc.messages)
+        password_errors = password_complexity_errors(password) if password else []
+        if password:
+            if len(password) < 8:
+                password_errors.insert(0, "Password must be at least 8 characters.")
+            try:
+                validate_password(password, user=dummy)
+            except DjangoValidationError as exc:
+                password_errors.extend(exc.messages)
         if password_errors:
             raise serializers.ValidationError({"password": password_errors})
 
@@ -243,7 +253,8 @@ class SignupSerializer(serializers.Serializer):
             is_active=not settings.AUTH_EMAIL_OTP,
             **validated_data,
         )
-        user.set_password(password)
+        if password:
+            user.set_password(password)
         user.save()
         return user
 
@@ -259,7 +270,8 @@ class LoginSerializer(serializers.Serializer):
 
     enroll_as = serializers.ChoiceField(choices=AIDLUser.EnrollAs.choices)
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, max_length=128)
+    # Optional: without it the sign-in is finished with the emailed code.
+    password = serializers.CharField(write_only=True, max_length=128, required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
         email = (attrs.get("email") or "").strip().lower()
@@ -283,14 +295,15 @@ class LoginSerializer(serializers.Serializer):
                     )
                 }
             )
+        if not password:
+            if not settings.AUTH_EMAIL_OTP:
+                raise serializers.ValidationError({"password": "Enter your password."})
+            attrs["email"] = email
+            attrs["user"] = user
+            return attrs  # passwordless: the emailed code proves it's them
         if not user.password_hash:
             raise serializers.ValidationError(
-                {
-                    "password": (
-                        "This account was created with Microsoft Teams. "
-                        "Use Teams login instead."
-                    )
-                }
+                {"password": "This account doesn't use a password — leave it empty and use the emailed code."}
             )
         if not user.check_password(password):
             raise serializers.ValidationError({"password": "Incorrect password."})
