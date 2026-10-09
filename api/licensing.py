@@ -111,6 +111,21 @@ def issue_learner_if_ready(member: AIDLUser, org: Organization) -> str:
     return "issued"
 
 
+def issue_individual_licence(member: AIDLUser) -> None:
+    """Website individuals: Learner (L) licence on sign-up, valid 365 days.
+    (Organization members earn theirs in Slack — issue_learner_if_ready.)"""
+    if member.licence_issued:
+        return
+    now = timezone.now()
+    member.licence_issued = True
+    member.license_class = AIDLUser.LicenseClass.CLASS_L
+    member.licence_number = member.licence_number or new_licence_number()
+    member.licence_issued_at = now
+    member.licence_expires_at = now + timedelta(days=365)
+    member.save(update_fields=["licence_issued", "license_class", "licence_number", "licence_issued_at",
+                               "licence_expires_at", "updated_at"])
+
+
 # ---------- admin progress view ----------
 
 STATUS_LABELS = {
