@@ -26,7 +26,7 @@ from .models import AIDLUser
 from . import admin_setup, slack_client, slack_modals
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
-from .slack_cards import build_admin_cards_context
+from .slack_cards import build_admin_cards_context, light_admin_context
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ def _handle_submission(payload: dict):
     org = get_organization_for_user(admin) if admin else None
     if admin is None or admin.role != AIDLUser.Role.ADMIN or org is None:
         return JsonResponse(slack_modals.errors(**{_first_block(view): "Only AIDL admins can do this."}))
-    d = build_admin_cards_context(admin)
+    d = light_admin_context(admin)  # quick: Slack needs the answer within 3 seconds
     allowed = tab in d["tabs"]
     if callback in ("aidl_card_request", "aidl_card_send"):
         allowed = d["can_manage_cards"]

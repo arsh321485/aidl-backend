@@ -17,7 +17,7 @@ from .cards_service import CardsError, request_card, request_new_card
 from .admin_ops import AdminOpsError, add_registered_app
 from .models import AIDLUser, CardRequest, Organization, RegisteredApp
 from .org_policy import get_answers, policy_effects
-from .slack_cards import AI_CATEGORIES, DATA_ALLOWED, IT_CATEGORIES, TRAFFIC_LIGHTS, build_admin_cards_context, coverage_csv, coverage_data
+from .slack_cards import AI_CATEGORIES, DATA_ALLOWED, IT_CATEGORIES, TRAFFIC_LIGHTS, build_admin_cards_context, coverage_csv, light_admin_context, coverage_data
 
 _LIGHT_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}
 _DATA_VALUE = {"Public only": "public_only", "Internal": "internal", "Internal + Confidential": "internal_confidential", "None": "none"}
@@ -171,8 +171,8 @@ def submit_policy(admin: AIDLUser, org: Organization, view: dict) -> dict:
                 f"✅ *{admin.full_name or admin.email}* created *{org.name}'s* AI policy (AUP). "
                 "Open the AIDL Admin Center to send it to your team.")}]))
     # AI-C-011: the popup turns into the full report of the answers.
-    return {"notice": "✓ Policy saved — your team's AUP has been generated. Use *📄 View team AUP* to check it, "
-                      "then *📤 Send AUP to team*.", "view": policy_summary_view(org)}
+    return {"notice": "✓ Policy saved — your team's AUP is ready. Next: *📄 View AUP* in step 1 of the Admin Center, "
+                      "then send it to your team in step 4.", "view": policy_summary_view(org)}
 
 
 def delegate_view(meta: dict) -> dict:
@@ -193,7 +193,7 @@ def submit_delegate(caller: AIDLUser, org: Organization, team_id: str, view: dic
     from .slack_blocks import admin_card_blocks
 
     values = _values(view)
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller)
     if not d["can_admins"]:
         return errors(person="Only the admin who set up AIDL can do this.")
     token = slack_client.bot_token(org)
@@ -241,7 +241,7 @@ def submit_add_people(caller: AIDLUser, org: Organization, view: dict) -> dict:
     from .plans import usage
     from .slack_onboarding import onboard_member
 
-    if not build_admin_cards_context(caller)["can_team"]:
+    if not light_admin_context(caller)["can_team"]:
         return errors(people="Only the admin who set up AIDL can add people.")
     picked = (_values(view).get("people", {}).get("v", {}) or {}).get("selected_users") or []
     if not picked:
@@ -597,7 +597,7 @@ def in_background(fn, *args, **kwargs) -> None:
 
 def submit_add_admin(caller: AIDLUser, org: Organization, team_id: str, view: dict) -> dict | None:
     values = _values(view)
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller)
     if d["admin_count"] >= d["admin_seat_limit"]:
         return errors(email=f"{d['admin_seat_limit']} of {d['admin_seat_limit']} admin seats used · no seats left")
     if not _value(values, "person") and not _value(values, "email"):
@@ -658,7 +658,7 @@ def submit_card_request(caller: AIDLUser, org: Organization, view: dict) -> dict
     except CardsError as exc:
         return {"response_action": "update", "view": _modal("aidl_card", "Send Cards", [
             {"type": "section", "text": _md(exc.message or "Monthly quota reached.")}], close="Close")}
-    card = _card(build_admin_cards_context(caller), meta["card_id"])
+    card = _card(light_admin_context(caller, cards=True), meta["card_id"])
     return {"response_action": "update", "view": card_send_view(card, meta)}
 
 
@@ -693,7 +693,7 @@ def _reference_card_blocks(card: dict, org: Organization, lights: list[str]) -> 
 def submit_card_send(caller: AIDLUser, org: Organization, view: dict) -> dict | None:
     meta = json.loads(view.get("private_metadata") or "{}")
     values = _values(view)
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller, cards=True)
     card = _card(d, meta.get("card_id", ""))
     if card is None:
         return errors(when="Unknown card.")
@@ -742,7 +742,7 @@ def submit_new_card(caller: AIDLUser, org: Organization, view: dict) -> dict | N
     name = _value(values, "name")
     if not name:
         return errors(name="Give the new card a name.")
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller, cards=True)
     if d["quota_used"] >= d["quota_max"]:
         return errors(name="Monthly quota reached — new requests open next month.")
     desc = _value(values, "desc")

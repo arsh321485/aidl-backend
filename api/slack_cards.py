@@ -607,3 +607,36 @@ def coverage_csv(rows: list[dict]) -> str:
     for row in rows:
         writer.writerow([row[c] for c in COVERAGE_COLUMNS])
     return out.getvalue()
+
+
+def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
+    """The few things popup submissions need (permissions, seats, cards,
+    quota) — without building the whole Admin Center, which can take longer
+    than Slack's 3 seconds."""
+    from .models import RegisteredApp
+    from .slack_onboarding import primary_admin
+
+    org = get_organization_for_user(user)
+    first = primary_admin(org) if org is not None else None
+    owner = first is not None and first.pk == user.pk
+    data = {
+        "tabs": _visible_admin_tabs(user, owner),
+        "is_primary": owner,
+        "can_manage_cards": owner or user.perm_access_cards,
+        "can_create_card": owner or user.perm_create_card,
+        "can_policy": owner or user.perm_policy or user.perm_approve_apps,
+        "can_admins": owner,
+        "can_team": owner,
+        "can_send": owner or user.perm_access_cards,
+        "admin_count": AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN,
+                                               is_active=True).count() if org is not None else 0,
+        "admin_seat_limit": org.admin_seat_limit if org is not None else 3,
+    }
+    if cards:  # only the Cards popups need the catalogue and the monthly quota
+        month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        apps = RegisteredApp.objects.filter(organization_id=str(org.pk)).count() if org is not None else 0
+        data["cards"] = _apply_card_effects(_card_rows(org, apps), policy_effects(get_answers(org)))
+        data["quota_used"] = (CardRequest.objects.filter(organization_id=str(org.pk), requested_at__gte=month_start)
+                              .count() if org is not None else 0)
+        data["quota_max"] = MONTHLY_CARD_QUOTA
+    return data
