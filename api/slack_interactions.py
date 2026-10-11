@@ -97,7 +97,7 @@ def _admin_for(payload: dict) -> AIDLUser | None:
 _PREOPENED: dict[str, str] = {}
 _PREOPEN_LOCK = threading.Lock()
 _POPUP_TITLES = {
-    "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP", "aidl_aup_delegate": "Ask someone else",
+    "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP", "aidl_aup_delegate": "Delegate the AUP",
     "aidl_add_people": "Add your team", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
@@ -596,6 +596,15 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
             _open_modal(org, payload.get("trigger_id", ""), view)
         return HttpResponse(status=200)
 
+    if tab == "home":
+        # Old messages still have a Home button. Private copies of the Admin
+        # Center never update, so point to the live message instead (and
+        # replace a stale copy if the click came from one).
+        publish_admin_center(org, user)
+        _reply(response_url, replace=is_ephemeral,
+               text="👆 Your Admin Center is the *🚦 AIDL Admin Center* message from AIDL in this channel — "
+                    "it's kept up to date as you complete each step.")
+        return HttpResponse(status=200)
     blocks = admin_card_blocks(d, tab, open_url=_private_link(request, user, tab))
     _reply(response_url, text=admin_card_text(d), blocks=blocks, replace=is_ephemeral)
     return HttpResponse(status=200)

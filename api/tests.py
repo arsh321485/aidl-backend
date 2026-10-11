@@ -1977,7 +1977,7 @@ class SlackPolicyQuestionsTests(TestCase):
         self.assertIn("aidl_aup_delegate", home)          # or ask someone else
         self.assertNotIn("aidl_send_item", home)          # sending comes in step 4
         _answer_policy(self.org)
-        self.assertIn("Edit answers", self._home())
+        self.assertIn("Change AUP", self._home())
         self.assertIn("aidl_aup_view", self._home())
 
     def test_aup_button_opens_questions_when_unanswered(self):
@@ -2288,7 +2288,7 @@ class SetupStepsTests(TestCase):
         dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U8")
         self.assertIn("aidl_policy_open", json.dumps(dm["blocks"]))
         self.assertNotIn("aidl_open_add-admin", json.dumps(dm["blocks"]))   # AUP step only
-        self.assertIn("Assigned to", self._home())
+        self.assertIn("Delegated to", self._home())
 
     def test_add_people_adds_to_channel_and_respects_plan(self):
         users = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U5", "U6"]}}}
@@ -2299,6 +2299,20 @@ class SetupStepsTests(TestCase):
         resp = self._submit("aidl_add_people", too_many).json()
         self.assertEqual(resp["response_action"], "errors")
         self.assertIn("seats left", resp["errors"]["people"])
+
+    def test_old_home_button_points_to_live_message(self):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "response_url": "https://hooks.example/r", "container": {"is_ephemeral": True},
+                   "actions": [{"action_id": "aidl_tab_home", "value": "home"}]}
+        with patch("api.slack_interactions._post_reply") as post:
+            self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                         "application/x-www-form-urlencoded")
+        body = post.call_args[0][1]
+        self.assertTrue(body["replace_original"])                # the stale private copy is replaced
+        self.assertNotIn("blocks", body)
+        self.assertIn("AIDL Admin Center", body["text"])
 
     def test_reset_command(self):
         from django.core.management import call_command
