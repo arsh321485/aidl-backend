@@ -2383,3 +2383,42 @@ class PopupTimingTests(TestCase):
                                  HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
         self.assertEqual(order[0], "views.open:aidl_loading")     # before the slow Admin Center data
         self.assertIn("views.update:aidl_policy", order)
+
+
+class AupChangedTests(TestCase):
+    """Changing the AUP after it was sent asks the admin to send the new version."""
+
+    def setUp(self):
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42")
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", full_name="Jordan")
+        _answer_policy(self.org)
+
+    def _home(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+
+    def test_changed_aup_shows_send_new_version(self):
+        from .admin_setup import aup_change, send_item, update
+        from .org_policy import POLICY_QUESTIONS, save_answers
+        from .slack_modals import policy_summary_view
+
+        update(self.org, admins_step="skipped")
+        with patch("api.slack_client.slack_api", return_value={"ok": True}):
+            send_item(self.org, "aup")
+        self.assertFalse(aup_change(self.org)["changed"])
+        self.assertNotIn("Send new version", self._home())
+
+        save_answers(self.org, {qid: opts[-1] for qid, opts in POLICY_QUESTIONS.items()})  # Change AUP
+        self.org.refresh_from_db()
+        self.assertTrue(aup_change(self.org)["changed"])
+        self.assertIn("The AUP has changed", self._home())
+        self.assertIn("Send new version", self._home())
+        self.assertIn("Your AUP has been updated", json.dumps(policy_summary_view(self.org)))
+
+        with patch("api.slack_client.slack_api", return_value={"ok": True}):
+            send_item(self.org, "aup")                       # send the new version
+        self.org.refresh_from_db()
+        self.assertFalse(aup_change(self.org)["changed"])

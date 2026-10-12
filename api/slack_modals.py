@@ -136,11 +136,18 @@ def policy_answers_blocks(org: Organization) -> list:
 
 
 def policy_summary_view(org: Organization, notice: str = "") -> dict:
-    """Shown right after the AUP is created: the card, and the two next
-    actions — send it to the team, or look at the AUP card itself."""
+    """Shown right after the AUP is created or changed: the card, and the two
+    next actions — send it to the team, or look at the AUP card itself."""
+    from .admin_setup import aup_change
+
+    aup = aup_change(org)
+    if aup.get("changed"):
+        intro = (f"✅ *Your AUP has been updated* (`{aup['version']}`). Your team still has the previous version "
+                 f"(`{aup['sent_version']}`) — send them this one so they can accept it.")
+    else:
+        intro = "✅ *Your AUP is ready.* AIDL generated your team's AI Acceptable Use Policy from these answers."
     return _modal("aidl_policy_done", "Your AI policy", [
-        {"type": "section", "text": _md("✅ *Your AUP is ready.* AIDL generated your team's AI Acceptable Use Policy "
-                                        "from these answers.")},
+        {"type": "section", "text": _md(intro)},
         {"type": "actions", "block_id": "aidl_aup_next", "elements": [
             {"type": "button", "text": _text("📤 Send AUP to team"), "action_id": "aidl_send_item", "value": "aup",
              "style": "primary"},

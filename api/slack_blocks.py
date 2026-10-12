@@ -159,11 +159,17 @@ def _step_send(d: dict, st: dict) -> list:
     members = st["members"]
     for item in ("aup", "traffic_light", "highway_code"):
         s = st["sends"][item]
-        line = f"{_SEND_LABEL[item]}\n" + (f"✓ Sent  ·  *{s['accepted']}* of {members} accepted" if s["sent"]
-                                             else "_Not sent yet_")
+        if s.get("changed"):  # the AUP was changed after it was sent
+            line = (f"{_SEND_LABEL[item]}\n⚠️ *The AUP has changed* (`{s['sent_version']}` → `{s['version']}`) — "
+                    f"your team still has the old version  ·  *{s['accepted']}* of {members} accepted the new one")
+        else:
+            line = f"{_SEND_LABEL[item]}\n" + (f"✓ Sent  ·  *{s['accepted']}* of {members} accepted" if s["sent"]
+                                                 else "_Not sent yet_")
         block = _section(line)
         if d["can_send"]:
-            if not s["sent"]:
+            if s.get("changed"):
+                block["accessory"] = _button("📤 Send new version", "aidl_send_item", value=item, style="primary")
+            elif not s["sent"]:
                 block["accessory"] = _button("📤 Send", "aidl_send_item", value=item, style="primary")
             elif s["accepted"] < members:
                 block["accessory"] = _button("🔔 Remind", "aidl_remind_item", value=item)
