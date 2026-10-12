@@ -73,7 +73,12 @@ def send_item(org: Organization, item: str) -> tuple[int, int]:
     it sent, so later joiners get it automatically. Returns (sent, total)."""
     from .slack_blocks import user_dashboard_blocks
 
-    update(org, **{f"{item}_sent": timezone.now().isoformat()})
+    sent_info = {f"{item}_sent": timezone.now().isoformat()}
+    if item == "aup":  # remember which version went out, to spot later changes
+        from .aup import generate_aup
+
+        sent_info["aup_sent_version"] = generate_aup(org)["version"]
+    update(org, **sent_info)
     token = slack_client.bot_token(org)
     members = list(_slack_learners(org))
     sent = 0
@@ -99,6 +104,20 @@ def remind_item(org: Organization, item: str) -> tuple[int, int]:
     return sent, len(pending)
 
 
+def aup_change(org: Organization, st: dict | None = None) -> dict:
+    """{'changed': True, 'sent_version', 'version'} when the AUP was changed
+    (answers or apps) after it was sent to the team."""
+    st = state(org) if st is None else st
+    if not (st.get("aup_sent") and st.get("aup_sent_version")):
+        return {"changed": False}
+    from .aup import generate_aup
+
+    current = generate_aup(org)["version"]
+    if current == st["aup_sent_version"]:
+        return {"changed": False}
+    return {"changed": True, "sent_version": st["aup_sent_version"], "version": current}
+
+
 def accepted_count(org: Organization, item: str) -> int:
     from .aup import generate_aup
     from .licensing import ACK_VERSION
@@ -116,7 +135,9 @@ def summary(org: Organization) -> dict:
     delegate = AIDLUser.objects.filter(pk=st["aup_delegate"]).first() if st.get("aup_delegate") else None
     members = _slack_learners(org).count()
     admins = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True).count()
-    sends = {item: {"sent": bool(st.get(f"{item}_sent")), "accepted": accepted_count(org, item)} for item in ITEMS}
+    sends = {item: {"sent": bool(st.get(f"{item}_sent")), "accepted": accepted_count(org, item), "changed": False}
+             for item in ITEMS}
+    sends["aup"].update(aup_change(org, st))
     aup_done = policy_completed(org)
     admins_done = bool(st.get("admins_step")) or admins > 1
     team_done = members > 0
