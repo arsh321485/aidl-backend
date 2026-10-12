@@ -92,11 +92,11 @@ def _step_aup(d: dict, st: dict) -> list:
         blocks = [_section("*1 · Create your AI policy (AUP)*\nAnswer 8 quick questions about how your organization "
                            "uses AI — AIDL writes your team's AI Acceptable Use Policy from them.")]
         if st.get("delegate_name"):
-            blocks.append(_context(f"⏳ Assigned to *{st['delegate_name']}* — waiting for them to create it."))
+            blocks.append(_context(f"⏳ Delegated to *{st['delegate_name']}* — waiting for them to create it."))
         if d["can_policy"]:
             blocks.append(_actions("aidl_step_aup",
                                    _button("📝 Create AUP", "aidl_policy_open", value="policy", style="primary"),
-                                   _button("🙋 Ask someone else", "aidl_aup_delegate", value="delegate")
+                                   _button("👥 Delegate AUP", "aidl_aup_delegate", value="delegate")
                                    if d["can_admins"] else None))
         return blocks
     apps = f"{d['approved_apps']} of {d['total_apps']} apps approved"
@@ -104,14 +104,16 @@ def _step_aup(d: dict, st: dict) -> list:
         _section(f"✅  *1 · AI policy (AUP)*  ·  `{d['team'].get('aup_version', '')}`  ·  {apps}"),
         _actions("aidl_step_aup",
                  _button("📄 View AUP", "aidl_aup_view", value="view"),
-                 _button("✏️ Edit answers", "aidl_policy_open", value="policy") if d["can_policy"] else None,
+                 _button("✏️ Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
                  _button("🤖 AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
                  _button("💻 IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
     ]
 
 
 def _step_admins(d: dict, st: dict) -> list:
-    seats = f"{d['admin_count']} of {d['admin_seat_limit']} admin seats used"
+    n, limit = d["admin_count"], d["admin_seat_limit"]
+    seats = (f"{n} of {limit} admin seats used" if n <= limit
+             else f"⚠️ {n} admins — your plan includes {limit} admin seats")
     if not st["aup_done"]:
         return [_locked(2, "Add admins (optional)", "step 1")]
     if not st["admins_done"]:

@@ -17,7 +17,7 @@ from .cards_service import CardsError, request_card, request_new_card
 from .admin_ops import AdminOpsError, add_registered_app
 from .models import AIDLUser, CardRequest, Organization, RegisteredApp
 from .org_policy import get_answers, policy_effects
-from .slack_cards import AI_CATEGORIES, DATA_ALLOWED, IT_CATEGORIES, TRAFFIC_LIGHTS, build_admin_cards_context, coverage_csv, coverage_data
+from .slack_cards import AI_CATEGORIES, DATA_ALLOWED, IT_CATEGORIES, TRAFFIC_LIGHTS, build_admin_cards_context, coverage_csv, light_admin_context, coverage_data
 
 _LIGHT_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}
 _DATA_VALUE = {"Public only": "public_only", "Internal": "internal", "Internal + Confidential": "internal_confidential", "None": "none"}
@@ -100,7 +100,7 @@ def policy_view(org: Organization, meta: dict) -> dict:
             element["initial_option"] = _option(current[qid])
         blocks.append(_input(qid, f"{n}. {QUESTION_TEXT[qid]}", element))
     return _modal("aidl_policy", "AI policy questions", blocks,
-                  submit="Save answers" if current else "Generate AUP", meta=meta)
+                  submit="Update AUP" if current else "Generate AUP", meta=meta)
 
 
 def policy_answers_blocks(org: Organization) -> list:
@@ -171,21 +171,22 @@ def submit_policy(admin: AIDLUser, org: Organization, view: dict) -> dict:
                 f"✅ *{admin.full_name or admin.email}* created *{org.name}'s* AI policy (AUP). "
                 "Open the AIDL Admin Center to send it to your team.")}]))
     # AI-C-011: the popup turns into the full report of the answers.
-    return {"notice": "✓ Policy saved — your team's AUP has been generated. Use *📄 View team AUP* to check it, "
-                      "then *📤 Send AUP to team*.", "view": policy_summary_view(org)}
+    return {"notice": "✓ Your AUP is ready. You can view or change it in step 1 of the Admin Center, and send it "
+                      "to your team in step 4.", "view": policy_summary_view(org)}
 
 
 def delegate_view(meta: dict) -> dict:
-    """Setup step 1 — 'Ask someone else': e.g. the boss asks a manager to
-    create the AUP. That person becomes an admin who can only do the AUP."""
-    return _modal("aidl_delegate_aup", "Ask someone else", [
-        {"type": "section", "text": _md("Pick the person who should create your AI policy (AUP). They get a message "
-                                        "with the *Create AUP* step and become an admin for the AUP only.")},
-        _input("person", "Who should create the AUP?",
-               {"type": "users_select", "action_id": "v", "placeholder": _text("Choose a person")}),
+    """Setup step 1 — 'Delegate AUP': e.g. the boss hands the AUP to a
+    manager. That person becomes an admin who can only create the AUP."""
+    return _modal("aidl_delegate_aup", "Delegate the AUP", [
+        {"type": "section", "text": _md("Choose a colleague to create your AI Acceptable Use Policy (AUP). They will "
+                                        "receive a message with the *Create AUP* step and become an admin for the AUP "
+                                        "only — they won't see anything else in the Admin Center.")},
+        _input("person", "Colleague",
+               {"type": "users_select", "action_id": "v", "placeholder": _text("Choose a colleague")}),
         _input("note", "Message (optional)", {"type": "plain_text_input", "action_id": "v", "multiline": True,
-               "placeholder": _text("Please set up our AI policy in AIDL — thanks!")}, optional=True),
-    ], submit="Send request", meta=meta)
+               "placeholder": _text("Could you set up our AI policy in AIDL? Thank you!")}, optional=True),
+    ], submit="Delegate", meta=meta)
 
 
 def submit_delegate(caller: AIDLUser, org: Organization, team_id: str, view: dict) -> dict:
@@ -193,7 +194,7 @@ def submit_delegate(caller: AIDLUser, org: Organization, team_id: str, view: dic
     from .slack_blocks import admin_card_blocks
 
     values = _values(view)
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller)
     if not d["can_admins"]:
         return errors(person="Only the admin who set up AIDL can do this.")
     token = slack_client.bot_token(org)
@@ -213,12 +214,14 @@ def submit_delegate(caller: AIDLUser, org: Organization, team_id: str, view: dic
                                "updated_at"])
     update(org, aup_delegate=str(person.pk))
     note = _value(values, "note")
-    asked = (f"*{caller.full_name or caller.email}* asked you to create *{org.name}'s* AI policy (AUP) in AIDL."
+    asked = (f"*{caller.full_name or caller.email}* has asked you to create *{org.name}'s* AI Acceptable Use "
+             "Policy (AUP) in AIDL. Click *Create AUP* below to get started."
              + (f"\n> {note}" if note else ""))
     in_background(lambda: slack_client.send_dm(
-        token, org, slack_user_id, text=f"{caller.full_name} asked you to create the AI policy",
+        token, org, slack_user_id, text=f"{caller.full_name} has delegated the AUP to you",
         blocks=[{"type": "section", "text": _md(asked)}] + admin_card_blocks(build_admin_cards_context(person), "home")))
-    return {"notice": f"✓ Asked {person.full_name or person.email} to create the AUP."}
+    return {"notice": f"✓ The AUP has been delegated to {person.full_name or person.email}. "
+                      "You'll get a message when it's ready."}
 
 
 def add_people_view(meta: dict, d: dict) -> dict:
@@ -241,7 +244,7 @@ def submit_add_people(caller: AIDLUser, org: Organization, view: dict) -> dict:
     from .plans import usage
     from .slack_onboarding import onboard_member
 
-    if not build_admin_cards_context(caller)["can_team"]:
+    if not light_admin_context(caller)["can_team"]:
         return errors(people="Only the admin who set up AIDL can add people.")
     picked = (_values(view).get("people", {}).get("v", {}) or {}).get("selected_users") or []
     if not picked:
@@ -597,7 +600,7 @@ def in_background(fn, *args, **kwargs) -> None:
 
 def submit_add_admin(caller: AIDLUser, org: Organization, team_id: str, view: dict) -> dict | None:
     values = _values(view)
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller)
     if d["admin_count"] >= d["admin_seat_limit"]:
         return errors(email=f"{d['admin_seat_limit']} of {d['admin_seat_limit']} admin seats used · no seats left")
     if not _value(values, "person") and not _value(values, "email"):
@@ -658,7 +661,7 @@ def submit_card_request(caller: AIDLUser, org: Organization, view: dict) -> dict
     except CardsError as exc:
         return {"response_action": "update", "view": _modal("aidl_card", "Send Cards", [
             {"type": "section", "text": _md(exc.message or "Monthly quota reached.")}], close="Close")}
-    card = _card(build_admin_cards_context(caller), meta["card_id"])
+    card = _card(light_admin_context(caller, cards=True), meta["card_id"])
     return {"response_action": "update", "view": card_send_view(card, meta)}
 
 
@@ -693,7 +696,7 @@ def _reference_card_blocks(card: dict, org: Organization, lights: list[str]) -> 
 def submit_card_send(caller: AIDLUser, org: Organization, view: dict) -> dict | None:
     meta = json.loads(view.get("private_metadata") or "{}")
     values = _values(view)
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller, cards=True)
     card = _card(d, meta.get("card_id", ""))
     if card is None:
         return errors(when="Unknown card.")
@@ -742,7 +745,7 @@ def submit_new_card(caller: AIDLUser, org: Organization, view: dict) -> dict | N
     name = _value(values, "name")
     if not name:
         return errors(name="Give the new card a name.")
-    d = build_admin_cards_context(caller)
+    d = light_admin_context(caller, cards=True)
     if d["quota_used"] >= d["quota_max"]:
         return errors(name="Monthly quota reached — new requests open next month.")
     desc = _value(values, "desc")

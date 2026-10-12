@@ -26,7 +26,7 @@ from .models import AIDLUser
 from . import admin_setup, slack_client, slack_modals
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
-from .slack_cards import build_admin_cards_context
+from .slack_cards import build_admin_cards_context, light_admin_context
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def _admin_for(payload: dict) -> AIDLUser | None:
 _PREOPENED: dict[str, str] = {}
 _PREOPEN_LOCK = threading.Lock()
 _POPUP_TITLES = {
-    "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP", "aidl_aup_delegate": "Ask someone else",
+    "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP", "aidl_aup_delegate": "Delegate the AUP",
     "aidl_add_people": "Add your team", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
@@ -177,7 +177,7 @@ def _handle_submission(payload: dict):
     org = get_organization_for_user(admin) if admin else None
     if admin is None or admin.role != AIDLUser.Role.ADMIN or org is None:
         return JsonResponse(slack_modals.errors(**{_first_block(view): "Only AIDL admins can do this."}))
-    d = build_admin_cards_context(admin)
+    d = light_admin_context(admin)  # quick: Slack needs the answer within 3 seconds
     allowed = tab in d["tabs"]
     if callback in ("aidl_card_request", "aidl_card_send"):
         allowed = d["can_manage_cards"]
@@ -596,6 +596,15 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
             _open_modal(org, payload.get("trigger_id", ""), view)
         return HttpResponse(status=200)
 
+    if tab == "home":
+        # Old messages still have a Home button. Private copies of the Admin
+        # Center never update, so point to the live message instead (and
+        # replace a stale copy if the click came from one).
+        publish_admin_center(org, user)
+        _reply(response_url, replace=is_ephemeral,
+               text="👆 Your Admin Center is the *🚦 AIDL Admin Center* message from AIDL in this channel — "
+                    "it's kept up to date as you complete each step.")
+        return HttpResponse(status=200)
     blocks = admin_card_blocks(d, tab, open_url=_private_link(request, user, tab))
     _reply(response_url, text=admin_card_text(d), blocks=blocks, replace=is_ephemeral)
     return HttpResponse(status=200)
