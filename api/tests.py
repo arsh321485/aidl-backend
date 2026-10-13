@@ -2422,3 +2422,83 @@ class AupChangedTests(TestCase):
             send_item(self.org, "aup")                       # send the new version
         self.org.refresh_from_db()
         self.assertFalse(aup_change(self.org)["changed"])
+
+
+class AupBuilderTests(SimpleTestCase):
+    """AUP generator (aup_builder.py) built from the manager's question bank."""
+
+    BASE = {"0.1": "Acme Trading W.L.L.", "0.3": "0.3.a", "0.4": "0.4.b", "0.5": "Bahrain", "0.6": ["0.6.b"],
+            "0.8": "it@acme.example", "0.9": "2026-11-01", "5.4": "5.4.c", "7.2": "ChatGPT Enterprise",
+            "8.5": "the Communications team"}
+    FILLS = {"6.2.b": "SharePoint", "9.2.a": "security@acme.example"}
+
+    def _answers(self, **changes):
+        from . import aup_builder
+
+        answers = aup_builder.recommended_answers()
+        answers.update(self.BASE)
+        answers.update({k.replace("_", "."): v for k, v in changes.items()})
+        return answers
+
+    def test_bank_loaded(self):
+        from . import aup_builder
+
+        bank = aup_builder.bank()
+        self.assertEqual(len(bank["sections"]), 15)
+        self.assertEqual(len(bank["questions"]), 68)
+
+    def test_recommended_answers_generate_all_14_points(self):
+        from . import aup_builder
+
+        aup = aup_builder.generate(self._answers(), self.FILLS)
+        self.assertEqual([p["no"] for p in aup["points"]], list(range(1, 15)))
+        self.assertTrue(all(p["clauses"] for p in aup["points"]))
+        text = aup_builder.as_text(aup)
+        self.assertIn('This policy applies to Acme Trading W.L.L. ("the Company").', text)
+        self.assertIn("The Company actively monitors the use of its systems.", text)          # reviewed wording
+        self.assertIn("Report incidents via: email: security@acme.example", text)             # specify fill
+        self.assertIn("This policy is effective from 1 November 2026.", text)                 # date, point 14
+        self.assertTrue(aup["version"].startswith("AUP-"))
+
+    def test_yes_no_answer(self):
+        from . import aup_builder
+
+        yes = aup_builder.as_text(aup_builder.generate(self._answers(), self.FILLS))
+        no = aup_builder.as_text(aup_builder.generate(self._answers(**{"9_4": "9.4.b"}), self.FILLS))
+        self.assertIn("Reports made in good faith will never lead to punishment.", yes)
+        self.assertNotIn("good faith", no)                                                     # "No" adds nothing
+
+    def test_show_if_hides_follow_ups(self):
+        from . import aup_builder
+
+        answers = self._answers(**{"2_1": "2.1.c"})                                           # No monitoring
+        hidden = {q["id"] for q in aup_builder.bank()["questions"]} - {q["id"] for q in aup_builder.visible_questions(answers)}
+        self.assertTrue({"2.2", "2.3", "2.4"} <= hidden)
+        point2 = aup_builder.generate(answers, self.FILLS)["points"][1]
+        self.assertEqual([c["text"] for c in point2["clauses"]], ["The Company does not monitor the use of its systems."])
+
+    def test_validation_lists_missing_answers_and_fills(self):
+        from . import aup_builder
+
+        errors = aup_builder.validate(aup_builder.recommended_answers())
+        for qid in ("0.1", "0.8", "0.9", "6.2", "9.2"):
+            self.assertIn(qid, errors)
+        with self.assertRaises(aup_builder.AupAnswersError):
+            aup_builder.generate({}, {})
+
+    def test_other_option_uses_typed_text(self):
+        from . import aup_builder
+
+        answers = self._answers(**{"4_1": ["4.1.a", "4.1.x"]})
+        text = aup_builder.as_text(aup_builder.generate(answers, {**self.FILLS, "4.1.x": "Using AI to write exam answers"}))
+        self.assertIn("Using AI to write exam answers", text)
+
+    def test_preview_endpoint(self):
+        resp = self.client.post("/api/aup/preview/", {"use_recommended": True, "answers": self.BASE, "fills": self.FILLS},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(len(resp.json()["aup"]["points"]), 14)
+        bad = self.client.post("/api/aup/preview/", {"answers": {}}, content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("0.1", bad.json()["errors"])
+        self.assertEqual(self.client.get("/api/aup/questions/").json()["sections"][0]["title"], "Organization Profile")
