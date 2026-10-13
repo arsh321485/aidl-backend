@@ -23,7 +23,7 @@ from django.views.decorators.http import require_POST
 
 from .auth_jwt import create_access_token
 from .models import AIDLUser
-from . import admin_setup, slack_client, slack_modals
+from . import admin_setup, aup_slack, aup_store, slack_client, slack_modals
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
 from .slack_cards import build_admin_cards_context, light_admin_context
@@ -161,9 +161,9 @@ _SUBMIT_TAB = {
     "aidl_card_send": "cards",
     "aidl_card_new": "cards",
     "aidl_add_app": "ai-apps",
-    "aidl_policy": "home",
     "aidl_delegate_aup": "home",
     "aidl_add_people": "home",
+    "aidl_aup_section": "home",
 }
 
 
@@ -183,6 +183,8 @@ def _handle_submission(payload: dict):
         allowed = d["can_manage_cards"]
     elif callback == "aidl_card_new":
         allowed = d["can_create_card"]
+    elif callback == "aidl_aup_section":
+        allowed = d["can_policy"]
     if not allowed:
         return JsonResponse(slack_modals.errors(**{_first_block(view): "Your admin permissions don't include this."}))
 
@@ -193,9 +195,9 @@ def _handle_submission(payload: dict):
         "aidl_card_send": lambda: slack_modals.submit_card_send(admin, org, view),
         "aidl_card_new": lambda: slack_modals.submit_new_card(admin, org, view),
         "aidl_add_app": lambda: slack_modals.submit_add_app(admin, org, view),
-        "aidl_policy": lambda: slack_modals.submit_policy(admin, org, view),
         "aidl_delegate_aup": lambda: slack_modals.submit_delegate(admin, org, team_id, view),
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
+        "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
     }
     result = handlers[callback]() or {}
     if "response_action" in result:
@@ -207,6 +209,44 @@ def _handle_submission(payload: dict):
         return JsonResponse({"response_action": "update", "view": result["view"]})
     # Close every stacked modal (e.g. Send Cards list → card detail).
     return JsonResponse({"response_action": "clear"})
+
+
+def _submit_aup_section(admin, org, view: dict) -> dict:
+    """Create AUP: Next / Generate on one section screen (aup_slack.py)."""
+    result = aup_slack.submit(org, admin, view)
+    if result.pop("published", False):
+        slack_modals.in_background(_after_aup_published, org, admin)
+    return result
+
+
+def _after_aup_published(org, admin) -> None:
+    """Refresh the Admin Center; tell the owner if someone else (a delegate)
+    created or changed the AUP."""
+    from .slack_onboarding import primary_admin
+
+    publish_admin_center(org, admin)
+    owner = primary_admin(org)
+    if owner is not None and owner.pk != admin.pk and owner.microsoft_id.startswith("slack:"):
+        slack_client.send_dm(
+            slack_client.bot_token(org), org, owner.microsoft_id.split(":")[-1], text="The AI policy is ready",
+            blocks=[{"type": "section", "text": {"type": "mrkdwn", "text":
+                f"✅ *{admin.full_name or admin.email}* created *{org.name}'s* AI policy (AUP). "
+                "Open the AIDL Admin Center to send it to your team."}}])
+
+
+def _aup_screen_action(payload: dict, action_id: str) -> None:
+    """Inside the Create AUP popup: an answer changed (redraw the screen to
+    show / hide follow-ups) or Back."""
+    user = _admin_for(payload)
+    org = get_organization_for_user(user) if user is not None else None
+    if org is None or user.role != AIDLUser.Role.ADMIN:
+        return
+    view = payload.get("view") or {}
+    new = aup_slack.back(org, view) if action_id == "aidl_aup_back" else aup_slack.redraw(org, view)
+    result = slack_client.slack_api("views.update", slack_client.bot_token(org),
+                                    json={"view_id": view.get("id", ""), "hash": view.get("hash", ""), "view": new})
+    if not result.get("ok"):
+        logger.info("aup screen redraw: %s", result.get("error"))
 
 
 def _send_coverage(org, slack_user: str, view_id: str, download_url: str) -> None:
@@ -281,7 +321,7 @@ def _send_or_remind(org, admin, item: str, *, remind: bool, response_url: str, v
                 "People who join later get it automatically.")
     if view_id:  # clicked inside the AUP-ready popup
         slack_client.slack_api("views.update", slack_client.bot_token(org), json={
-            "view_id": view_id, "view": slack_modals.policy_summary_view(org, notice=text)})
+            "view_id": view_id, "view": aup_slack.report_view(org, notice=text)})
     elif response_url:
         _reply(response_url, text=text)
     publish_admin_center(org, admin)  # the step moves on
@@ -291,7 +331,7 @@ def _ctx_line(org_name: str) -> dict:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*AIDL* · APP  for {org_name}"}]}
 
 
-_ACK_TAB = {"highway_code": "highway-code", "traffic_light": "traffic-light", "aup": "aup"}
+_ACK_TAB = {"highway_code": "highway-code", "traffic_light": "traffic-light"}
 
 
 def _acknowledge(org, member, payload: dict, item: str) -> None:
@@ -300,17 +340,25 @@ def _acknowledge(org, member, payload: dict, item: str) -> None:
     from .licensing import acknowledge, issue_learner_if_ready
     from .slack_blocks import user_dashboard_blocks
 
-    if item not in _ACK_TAB:
-        return
-    if item == "aup":
-        from .aup import generate_aup
+    from .aup_store import is_point_item, next_point, point_item, version
 
-        acknowledge(member, item, generate_aup(org)["version"])
-    else:
+    if is_point_item(item):
+        # One AUP point at a time; a button from an older card just refreshes.
+        n = next_point(member, org)
+        if n is not None and item == point_item(n):
+            acknowledge(member, item, version(org))
+        tab = "aup"
+    elif item in _ACK_TAB:
         acknowledge(member, item)
+        tab = _ACK_TAB[item]
+    elif item == "aup":  # button on an old single-card AUP message
+        tab = "aup"
+    else:
+        return
     result = issue_learner_if_ready(member, org)
     member.refresh_from_db()
-    tab = "license" if result in ("issued", "no_seats") else _ACK_TAB[item]
+    if result in ("issued", "no_seats"):
+        tab = "license"
     container = payload.get("container") or {}
     channel = container.get("channel_id") or (payload.get("channel") or {}).get("id", "")
     ts = container.get("message_ts") or (payload.get("message") or {}).get("ts", "")
@@ -335,7 +383,7 @@ def _acknowledge(org, member, payload: dict, item: str) -> None:
             slack_client.send_dm(token, org, admin.microsoft_id.split(":")[-1],
                                  text="AIDL: no free license seats", blocks=[
                 {"type": "section", "text": {"type": "mrkdwn", "text":
-                    f"⏳ *{member.full_name or member.email}* finished the Highway Code and Traffic Light Check, "
+                    f"⏳ *{member.full_name or member.email}* accepted the AUP, the Highway Code and the Traffic Light Check, "
                     f"but all {user_limit(org)} licenses on your plan are used. Their license is waiting for a free seat."}}])
 
 
@@ -438,6 +486,12 @@ def slack_interactions(request):
             slack_modals.in_background(_acknowledge, org, member, payload, action.get("value", ""))
         return HttpResponse(status=200)
 
+    # Inside the Create AUP popup: an answer changed, or Back.
+    if (payload.get("view") or {}).get("callback_id") == aup_slack.CALLBACK and (
+            action_id == "aidl_aup_back" or (action.get("block_id") or "").startswith("q|")):
+        slack_modals.in_background(_aup_screen_action, payload, action_id)
+        return HttpResponse(status=200)
+
     # User dashboard tabs (guide 10): swap the card shown in that message.
     if action_id.startswith("aidl_utab_"):
         org = _org_for_team(payload)
@@ -524,20 +578,20 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                                    view.get("id", ""), view.get("private_metadata") or "{}")
         return HttpResponse(status=200)
 
-    # The 8 policy questions (asked in Slack, not on the website). Until they're
-    # answered, the AUP buttons open them too.
-    policy_set = d["policy"].get("has_answers")
+    # Create / Change AUP: the question-bank screens, from where the admin
+    # left off. Until an AUP exists, the AUP buttons open them too.
     if org is not None and d["can_policy"] and (action_id == "aidl_policy_open"
-                            or (action_id in ("aidl_aup_view", "aidl_aup_send") and not policy_set)):
+                            or (action_id in ("aidl_aup_view", "aidl_aup_send") and not aup_store.is_complete(org))):
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
-        _open_modal(org, payload.get("trigger_id", ""), slack_modals.policy_view(org, meta))
+        draft = aup_store.draft(org)
+        _open_modal(org, payload.get("trigger_id", ""),
+                    aup_slack.section_view(org, draft["section"], draft["answers"], draft.get("fills") or {}, meta))
         return HttpResponse(status=200)
 
     in_modal = bool((payload.get("view") or {}).get("id"))
     if action_id == "aidl_aup_view":
         if org is not None:  # from the AUP-ready popup it opens on top of it
-            _open_modal(org, payload.get("trigger_id", ""), slack_modals.aup_view(org),
-                                       push=in_modal)
+            _open_modal(org, payload.get("trigger_id", ""), aup_slack.view_modal(org), push=in_modal)
         return HttpResponse(status=200)
 
     # Setup steps (admin_setup.py).

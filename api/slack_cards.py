@@ -583,7 +583,7 @@ def coverage_data(org) -> dict:
             "license_number": p["member"].licence_number,
             "license_issued": day(p["member"].licence_issued_at),
             "aup_signed": "yes" if p["member"].aup_signed else "no",
-            "aup_accepted": day(p["aup_at"]),
+            "aup_accepted": day(p["aup_at"]) or f"{p['aup_points']}/14 points",
             "cards_received": cards_sent,
         }
         for p in team_progress(org)["rows"]

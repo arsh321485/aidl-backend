@@ -53,6 +53,8 @@ class Organization(models.Model):
     # Step-by-step setup progress (admin_setup.py), JSON: which learning cards
     # were sent, skipped steps, who was asked to create the AUP.
     setup_state = models.TextField(blank=True, default="")
+    # The AUP built from the question bank (aup_store.py): draft + published.
+    aup_data = models.TextField(blank=True, default="")
     seats_renews_on = models.DateField(null=True, blank=True)
     admin_seat_limit = models.IntegerField(default=3)
     rollout_steps_done = models.IntegerField(default=3)

@@ -1,8 +1,9 @@
 """Licence rules — platform-neutral (Slack today, Teams later).
 
-A user earns the Learner (L) licence by acknowledging the Highway Code and
-the Traffic Light Check. Nobody issues licences by hand; admins only see
-the result. The organization's seat limit still applies.
+A user earns the Learner (L) licence by accepting the Highway Code, the
+Traffic Light Check and all 14 points of the organization's AUP
+(aup_store.py). Nobody issues licences by hand; admins only see the result.
+The organization's seat limit still applies.
 """
 
 from __future__ import annotations
@@ -19,9 +20,10 @@ from .models import Acknowledgement, AIDLUser, Organization
 # version (bump when the text changes so people re-acknowledge).
 LEARNER_REQUIREMENTS = ("highway_code", "traffic_light")
 ACK_VERSION = "v1"
-ACK_LABELS = {"highway_code": "📖 Highway Code", "traffic_light": "🚦 Traffic Light Check", "aup": "📄 AUP"}
-# Items a user can accept. The AUP is versioned by its content (aup.py); it is
-# not (yet) required for the Learner licence.
+ACK_LABELS = {"highway_code": "📖 Highway Code", "traffic_light": "🚦 Traffic Light Check",
+              "aup": "📄 AI Acceptable Use Policy (14 points)"}
+# Items a user can accept: the two above (version ACK_VERSION) and the AUP's
+# points "aup_1" … "aup_14" (versioned by the published AUP, aup_store.py).
 ACK_ITEMS = LEARNER_REQUIREMENTS + ("aup",)
 
 
@@ -39,7 +41,9 @@ def acknowledged_at(member: AIDLUser, item: str, version: str = ACK_VERSION):
 def acknowledge(member: AIDLUser, item: str, version: str = ACK_VERSION) -> bool:
     """Record that the user accepted `item` (at `version`). Returns False if
     they already had."""
-    if item not in ACK_ITEMS:
+    from .aup_store import is_point_item
+
+    if item not in ACK_ITEMS and not is_point_item(item):
         raise ValueError(f"unknown item {item!r}")
     try:
         Acknowledgement.objects.create(
@@ -47,6 +51,13 @@ def acknowledge(member: AIDLUser, item: str, version: str = ACK_VERSION) -> bool
         )
     except IntegrityError:
         return False
+    if is_point_item(item):
+        from .aup_store import all_points_accepted
+        from .org_service import get_organization_for_user
+
+        if not all_points_accepted(member, get_organization_for_user(member)):
+            return True
+        item = "aup"
     if item == "aup":
         from django.utils import timezone as tz
 
@@ -57,8 +68,16 @@ def acknowledge(member: AIDLUser, item: str, version: str = ACK_VERSION) -> bool
 
 
 def missing_for_learner(member: AIDLUser) -> list[str]:
+    """What's still needed for the licence: Highway Code, Traffic Light
+    Check and "aup" (all 14 points of the published AUP)."""
+    from .aup_store import all_points_accepted
+    from .org_service import get_organization_for_user
+
     done = acknowledged_items(member)
-    return [item for item in LEARNER_REQUIREMENTS if item not in done]
+    missing = [item for item in LEARNER_REQUIREMENTS if item not in done]
+    if not all_points_accepted(member, get_organization_for_user(member)):
+        missing.append("aup")
+    return missing
 
 
 def learners(org: Organization):
@@ -138,7 +157,7 @@ STATUS_LABELS = {
 
 
 def member_status(member: AIDLUser, done: set[str]) -> str:
-    complete = all(item in done for item in LEARNER_REQUIREMENTS)
+    complete = all(item in done for item in LEARNER_REQUIREMENTS + ("aup",))
     if member.licence_issued:
         # Licences from the old Add User flow were issued without acknowledgements.
         return "licensed" if complete else "legacy"
@@ -151,11 +170,21 @@ def team_progress(org: Organization) -> dict:
     """Each team member's journey: joined → Highway Code → Traffic Light →
     licence. Admins are not part of the team."""
     members = list(learners(org).order_by("full_name"))
-    from .aup import generate_aup
+    from .aup_store import POINTS, is_point_item, version
 
-    aup_version = generate_aup(org)["version"]
+    aup_version = version(org)
     acks: dict[str, dict[str, object]] = {}
-    for row in Acknowledgement.objects.filter(organization_id=str(org.pk), version__in=[ACK_VERSION, aup_version]):
+    points: dict[str, int] = {}
+    for row in Acknowledgement.objects.filter(organization_id=str(org.pk),
+                                              version__in=[ACK_VERSION, aup_version or ACK_VERSION]):
+        if is_point_item(row.item):
+            if row.version == aup_version:
+                points[row.user_id] = points.get(row.user_id, 0) + 1
+                if points[row.user_id] == POINTS:  # all points accepted → AUP done, at this time
+                    acks.setdefault(row.user_id, {})["aup"] = row.created_at
+            continue
+        if row.item == "aup":
+            continue  # acceptance of the old single-card AUP
         acks.setdefault(row.user_id, {})[row.item] = row.created_at
     rows = []
     for m in members:
@@ -168,6 +197,7 @@ def team_progress(org: Organization) -> dict:
             "highway_code_at": done.get("highway_code"),
             "traffic_light_at": done.get("traffic_light"),
             "aup_at": done.get("aup"),
+            "aup_points": points.get(str(m.pk), 0),
             "status": member_status(m, set(done)),
         })
     count = lambda pred: sum(1 for r in rows if pred(r))  # noqa: E731
