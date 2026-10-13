@@ -1,7 +1,7 @@
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from . import auth_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views
+from . import aup_views, auth_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
@@ -41,6 +41,8 @@ urlpatterns = [
     path("auth/refresh/", auth_views.refresh, name="auth-refresh"),
     path("auth/logout/", auth_views.logout, name="auth-logout"),
     # Signup form dropdowns — Country -> State -> City
+    path("aup/questions/", aup_views.questions, name="aup-questions"),
+    path("aup/preview/", aup_views.preview, name="aup-preview"),
     path("locations/countries/", location_views.countries, name="location-countries"),
     path("locations/states/", location_views.states, name="location-states"),
     path("locations/cities/", location_views.cities, name="location-cities"),

@@ -89,13 +89,16 @@ def _locked(n: int, title: str, after: str) -> dict:
 
 def _step_aup(d: dict, st: dict) -> list:
     if not st["aup_done"]:
-        blocks = [_section("*1 · Create your AI policy (AUP)*\nAnswer 8 quick questions about how your organization "
-                           "uses AI — AIDL writes your team's AI Acceptable Use Policy from them.")]
+        blocks = [_section("*1 · Create your AI policy (AUP)*\nAnswer a short questionnaire in 15 steps — recommended "
+                           "answers are already selected — and AIDL writes your team's AI Acceptable Use Policy "
+                           "(14 points).")]
         if st.get("delegate_name"):
             blocks.append(_context(f"⏳ Delegated to *{st['delegate_name']}* — waiting for them to create it."))
         if d["can_policy"]:
             blocks.append(_actions("aidl_step_aup",
-                                   _button("📝 Create AUP", "aidl_policy_open", value="policy", style="primary"),
+                                   _button("📝 Create AUP" if st.get("aup_draft_section") is None
+                                           else f"📝 Continue AUP (step {st['aup_draft_section'] + 1} of 15)",
+                                           "aidl_policy_open", value="policy", style="primary"),
                                    _button("👥 Delegate AUP", "aidl_aup_delegate", value="delegate")
                                    if d["can_admins"] else None))
         return blocks
@@ -432,23 +435,26 @@ def user_welcome_blocks(member, org) -> list:
         _context(f"*AIDL* · APP  for {org.name}"),
         {"type": "header", "text": {"type": "plain_text", "text": f"Welcome to AIDL, {first}! 👋", "emoji": True}},
         _section(f"You've been added to *{org.name}'s* AI Driving License programme."),
-        _context("Next: read your *AI Acceptable Use Policy*, then accept the *Highway Code* and the "
+        _context("Next: accept your *AI Acceptable Use Policy* one point at a time, the *Highway Code* and the "
                  "*Traffic Light Check* to earn your Learner's Permit."),
     ]
 
 
 def licence_progress_blocks(member, org) -> list:
     """License tab before the licence exists: what's left to earn it."""
-    from .licensing import ACK_LABELS, LEARNER_REQUIREMENTS, acknowledged_items, seats_left
+    from .aup_store import POINTS, points_accepted
+    from .licensing import ACK_LABELS, LEARNER_REQUIREMENTS, acknowledged_items, missing_for_learner, seats_left
 
     done = acknowledged_items(member)
     lines = [f"{'✅' if item in done else '⬜'}  {ACK_LABELS[item]}" for item in LEARNER_REQUIREMENTS]
+    accepted = len(points_accepted(member, org))
+    lines.append(f"{'✅' if accepted == POINTS else '⬜'}  📄 AI Acceptable Use Policy — {accepted} of {POINTS} points")
     blocks = [
         _context(f"*AIDL* · APP  for {org.name}"),
         {"type": "header", "text": {"type": "plain_text", "text": "🪪 Earn your Learner's Permit", "emoji": True}},
-        _section("Accept both of these and your AI Driving License is issued automatically:\n" + "\n".join(lines)),
+        _section("Accept all of these and your AI Driving License is issued automatically:\n" + "\n".join(lines)),
     ]
-    if len(done) == len(LEARNER_REQUIREMENTS) and seats_left(org) <= 0:
+    if not missing_for_learner(member) and seats_left(org) <= 0:
         blocks.append(_context("⏳ All done — your license is waiting for a free seat. Your admin has been told."))
     else:
         blocks.append(_context("Use the tabs below to open each one."))
@@ -633,9 +639,10 @@ def user_tab_buttons(active: str) -> dict:
 
 
 def _aup_for(member, org) -> list:
-    from .aup import generate_aup
+    """The AUP tab: the next point to accept (aup_slack.py)."""
+    from .aup_slack import employee_blocks
 
-    return aup_blocks(generate_aup(org), member)
+    return employee_blocks(member, org)
 
 
 def user_dashboard_blocks(member, org, tab: str = "license") -> list:

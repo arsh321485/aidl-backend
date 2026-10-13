@@ -1,0 +1,3434 @@
+{
+ "source": "AUP_Questionnaire_Question_Bank_with_wording.xlsx",
+ "sections": [
+  {
+   "no": 0,
+   "title": "Organization Profile",
+   "intro": "Tell us about your organization so the policy fits your context."
+  },
+  {
+   "no": 1,
+   "title": "Scope & Applicability",
+   "intro": "Who and what the policy covers."
+  },
+  {
+   "no": 2,
+   "title": "Monitoring & Privacy",
+   "intro": "Be transparent about what the Company can see."
+  },
+  {
+   "no": 3,
+   "title": "Personal Use",
+   "intro": "Whether staff may use company systems for personal tasks."
+  },
+  {
+   "no": 4,
+   "title": "Prohibited Activities",
+   "intro": "Activities that are never allowed."
+  },
+  {
+   "no": 5,
+   "title": "Passwords & Access",
+   "intro": "How accounts and passwords are protected."
+  },
+  {
+   "no": 6,
+   "title": "Data Protection & Confidentiality",
+   "intro": "How company and personal data must be handled."
+  },
+  {
+   "no": 7,
+   "title": "Generative AI & Third-Party Tools",
+   "intro": "Safe use of AI and online tools."
+  },
+  {
+   "no": 8,
+   "title": "Email, Messaging & Social Media",
+   "intro": "Professional communication and public posting."
+  },
+  {
+   "no": 9,
+   "title": "Security Incident Reporting",
+   "intro": "What to report, how, and how quickly."
+  },
+  {
+   "no": 10,
+   "title": "Remote Work & Mobile Devices",
+   "intro": "Staying secure outside the office."
+  },
+  {
+   "no": 11,
+   "title": "Intellectual Property",
+   "intro": "Who owns work and how to use others' material."
+  },
+  {
+   "no": 12,
+   "title": "Return of Assets",
+   "intro": "What happens to equipment and data when someone leaves."
+  },
+  {
+   "no": 13,
+   "title": "Violations & Consequences",
+   "intro": "What happens if the policy is broken."
+  },
+  {
+   "no": 14,
+   "title": "Acknowledgment & Review",
+   "intro": "How employees confirm they understand the policy."
+  }
+ ],
+ "questions": [
+  {
+   "id": "0.1",
+   "section": 0,
+   "text": "What is your organization's full legal name?",
+   "help": "Used throughout the policy.",
+   "type": "text",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Legal name",
+   "example": "Acme Trading W.L.L.",
+   "template": "This policy applies to {0.1} (\"the Company\").",
+   "options": []
+  },
+  {
+   "id": "0.2",
+   "section": 0,
+   "text": "What short name should the policy use for your organization?",
+   "help": "Optional. Defaults to the legal name.",
+   "type": "text",
+   "yes_no": false,
+   "required": false,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Short name",
+   "example": "Acme",
+   "template": "",
+   "options": []
+  },
+  {
+   "id": "0.3",
+   "section": 0,
+   "text": "Which industry best describes your organization?",
+   "help": "Lets the app suggest sector-specific clauses.",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Industry",
+   "example": "Banking & financial services",
+   "template": "",
+   "options": [
+    {
+     "id": "0.3.a",
+     "text": "Banking & financial services",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.b",
+     "text": "Insurance",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.c",
+     "text": "Healthcare",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.d",
+     "text": "Government / public sector",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.e",
+     "text": "Education",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.f",
+     "text": "Retail & e-commerce",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.g",
+     "text": "Technology / IT services",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.h",
+     "text": "Manufacturing",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.i",
+     "text": "Hospitality & travel",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.j",
+     "text": "Professional services (legal, consulting, audit)",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.3.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Industry",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "0.4",
+   "section": 0,
+   "text": "How many employees do you have?",
+   "help": "Helps size the policy (e.g., whether a dedicated security team exists).",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "51–250",
+   "template": "",
+   "options": [
+    {
+     "id": "0.4.a",
+     "text": "1–50",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.4.b",
+     "text": "51–250",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.4.c",
+     "text": "251–1,000",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.4.d",
+     "text": "More than 1,000",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "0.5",
+   "section": 0,
+   "text": "In which countries do you operate?",
+   "help": "Determines which laws the policy should reference.",
+   "type": "text",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Countries",
+   "example": "Country A, Country B",
+   "template": "",
+   "options": []
+  },
+  {
+   "id": "0.6",
+   "section": 0,
+   "text": "Which laws, regulations or standards apply to you?",
+   "help": "Select all that apply.",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Name of law / regulation",
+   "example": "Local national data protection law; PCI DSS",
+   "template": "This policy supports compliance with {0.6}.",
+   "options": [
+    {
+     "id": "0.6.a",
+     "text": "Local national data protection law",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.6.b",
+     "text": "EU / UK GDPR",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.6.c",
+     "text": "Sector regulator rules (e.g., central bank, health authority)",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.6.d",
+     "text": "PCI DSS (card payments)",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.6.e",
+     "text": "ISO 27001",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.6.f",
+     "text": "Not sure — please advise",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "0.6.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Name of law / regulation",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "0.7",
+   "section": 0,
+   "text": "Which department owns this policy?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Department",
+   "example": "Information Security",
+   "template": "This policy is owned and maintained by the {0.7} department.",
+   "options": [
+    {
+     "id": "0.7.a",
+     "text": "IT",
+     "recommended": true,
+     "note": "",
+     "wording": "This policy is owned and maintained by the IT department.",
+     "no_sentence": false
+    },
+    {
+     "id": "0.7.b",
+     "text": "Information Security",
+     "recommended": false,
+     "note": "",
+     "wording": "This policy is owned and maintained by the Information Security department.",
+     "no_sentence": false
+    },
+    {
+     "id": "0.7.c",
+     "text": "Human Resources",
+     "recommended": false,
+     "note": "",
+     "wording": "This policy is owned and maintained by the Human Resources department.",
+     "no_sentence": false
+    },
+    {
+     "id": "0.7.d",
+     "text": "Compliance / Risk",
+     "recommended": false,
+     "note": "",
+     "wording": "This policy is owned and maintained by the Compliance and Risk department.",
+     "no_sentence": false
+    },
+    {
+     "id": "0.7.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Department",
+     "wording": "This policy is owned and maintained by the {fill} department.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "0.8",
+   "section": 0,
+   "text": "Contact email for questions about this policy",
+   "help": "",
+   "type": "email",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Email address",
+   "example": "itsecurity@acme.com",
+   "template": "Questions about this policy should be sent to {0.8}.",
+   "options": []
+  },
+  {
+   "id": "0.9",
+   "section": 0,
+   "text": "Policy effective date",
+   "help": "",
+   "type": "date",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Date",
+   "example": "2026-11-01",
+   "template": "This policy is effective from {0.9}.",
+   "options": []
+  },
+  {
+   "id": "1.1",
+   "section": 1,
+   "text": "Who must follow this policy?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Other group",
+   "example": "Permanent employees; Contract and temporary staff; Interns and trainees",
+   "template": "This policy applies to all {1.1}.",
+   "options": [
+    {
+     "id": "1.1.a",
+     "text": "Permanent employees",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.1.b",
+     "text": "Contract and temporary staff",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.1.c",
+     "text": "Interns and trainees",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.1.d",
+     "text": "Consultants and vendors with system access",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.1.e",
+     "text": "Board members",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.1.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other group",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "1.2",
+   "section": 1,
+   "text": "Which company resources does this policy cover?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Other resource",
+   "example": "All recommended items",
+   "template": "It covers the following Company resources: {1.2}, wherever they are used — in the office, at home or while travelling.",
+   "options": [
+    {
+     "id": "1.2.a",
+     "text": "Laptops and desktops",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.b",
+     "text": "Company mobile phones and tablets",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.c",
+     "text": "Email and messaging tools",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.d",
+     "text": "Internet and network access (including Wi-Fi)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.e",
+     "text": "Cloud applications (e.g., Microsoft 365, Google Workspace)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.f",
+     "text": "Business applications (ERP, CRM, HR systems)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.g",
+     "text": "Printers and scanners",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.h",
+     "text": "Access cards and physical keys",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.2.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other resource",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "1.3",
+   "section": 1,
+   "text": "Can employees use their personal devices for work (BYOD)?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Yes — phones and laptops, with approval and required security settings",
+   "template": "Use of personal devices for work: {1.3}.",
+   "options": [
+    {
+     "id": "1.3.a",
+     "text": "No — company devices only",
+     "recommended": false,
+     "note": "",
+     "wording": "Personal devices may not be used for work; only Company-provided devices are permitted.",
+     "no_sentence": false
+    },
+    {
+     "id": "1.3.b",
+     "text": "Yes — personal phones for email and chat only",
+     "recommended": false,
+     "note": "",
+     "wording": "Personal phones may be used for work email and chat only.",
+     "no_sentence": false
+    },
+    {
+     "id": "1.3.c",
+     "text": "Yes — phones and laptops, with approval and required security settings",
+     "recommended": true,
+     "note": "",
+     "wording": "Personal phones and laptops may be used for work with prior approval and only with the required security settings in place.",
+     "no_sentence": false
+    },
+    {
+     "id": "1.3.d",
+     "text": "Yes — without restriction",
+     "recommended": false,
+     "note": "Not recommended",
+     "wording": "Personal devices may be used for work without restriction.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "1.4",
+   "section": 1,
+   "text": "What must personal devices have before being used for work?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "1.3 is any 'Yes' option",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "Personal devices used for work must have: {1.4}.",
+   "options": [
+    {
+     "id": "1.4.a",
+     "text": "Screen lock with PIN, password or biometrics",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.4.b",
+     "text": "Up-to-date operating system",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.4.c",
+     "text": "Company device management app (MDM) installed",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.4.d",
+     "text": "Antivirus / endpoint protection",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.4.e",
+     "text": "Device encryption",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "1.4.f",
+     "text": "Company may remotely wipe company data",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "2.1",
+   "section": 2,
+   "text": "Does your organization monitor the use of company systems?",
+   "help": "Employees must be told clearly that they have no expectation of privacy on company systems.",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Yes — we actively monitor",
+   "template": "Employees have no expectation of privacy when using Company systems. {2.1}.",
+   "options": [
+    {
+     "id": "2.1.a",
+     "text": "Yes — we actively monitor",
+     "recommended": true,
+     "note": "",
+     "wording": "Employees have no expectation of privacy when using Company systems. The Company actively monitors the use of its systems.",
+     "no_sentence": false
+    },
+    {
+     "id": "2.1.b",
+     "text": "Yes — we reserve the right but monitor only when needed (e.g., investigations)",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees have no expectation of privacy when using Company systems. The Company reserves the right to monitor the use of its systems and does so when needed, for example during investigations.",
+     "no_sentence": false
+    },
+    {
+     "id": "2.1.c",
+     "text": "No monitoring",
+     "recommended": false,
+     "note": "",
+     "wording": "The Company does not monitor the use of its systems.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "2.2",
+   "section": 2,
+   "text": "What may be monitored?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "2.1 is not 'No monitoring'",
+   "allow_other": true,
+   "fill_label": "Other monitoring",
+   "example": "Email; Internet browsing; Login and access activity",
+   "template": "The Company may monitor and log: {2.2}.",
+   "options": [
+    {
+     "id": "2.2.a",
+     "text": "Email",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.b",
+     "text": "Chat and collaboration tools (e.g., Teams, Slack)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.c",
+     "text": "Internet browsing",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.d",
+     "text": "File uploads, downloads and USB use",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.e",
+     "text": "Login and access activity",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.f",
+     "text": "CCTV in office areas",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.g",
+     "text": "Location of company mobile devices",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.h",
+     "text": "Call recording",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.i",
+     "text": "Screen recording / keystroke logging",
+     "recommended": false,
+     "note": "Check local law before selecting",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.2.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other monitoring",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "2.3",
+   "section": 2,
+   "text": "Who can access monitoring records?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "2.1 is not 'No monitoring'",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "IT / Information Security team; Human Resources (for investigations)",
+   "template": "Monitoring records may only be accessed by {2.3}.",
+   "options": [
+    {
+     "id": "2.3.a",
+     "text": "IT / Information Security team",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.3.b",
+     "text": "Human Resources (for investigations)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.3.c",
+     "text": "Legal / Compliance",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.3.d",
+     "text": "Senior management with written approval",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "2.3.e",
+     "text": "External auditors or authorities when legally required",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "2.4",
+   "section": 2,
+   "text": "How long are monitoring logs kept?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "2.1 is not 'No monitoring'",
+   "allow_other": true,
+   "fill_label": "Retention period",
+   "example": "1 year",
+   "template": "Logs are retained for {2.4}.",
+   "options": [
+    {
+     "id": "2.4.a",
+     "text": "90 days",
+     "recommended": false,
+     "note": "",
+     "wording": "Monitoring logs are retained for 90 days.",
+     "no_sentence": false
+    },
+    {
+     "id": "2.4.b",
+     "text": "6 months",
+     "recommended": false,
+     "note": "",
+     "wording": "Monitoring logs are retained for six months.",
+     "no_sentence": false
+    },
+    {
+     "id": "2.4.c",
+     "text": "1 year",
+     "recommended": true,
+     "note": "",
+     "wording": "Monitoring logs are retained for one year.",
+     "no_sentence": false
+    },
+    {
+     "id": "2.4.d",
+     "text": "3 years or more / as required by law",
+     "recommended": false,
+     "note": "",
+     "wording": "Monitoring logs are retained for three years or longer where required by law.",
+     "no_sentence": false
+    },
+    {
+     "id": "2.4.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Retention period",
+     "wording": "Monitoring logs are retained for {fill}.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "3.1",
+   "section": 3,
+   "text": "Is personal use of company systems allowed?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Limited, reasonable use during breaks or outside working hours",
+   "template": "Company systems are provided for business purposes. Personal use is {3.1}, provided it does not interfere with work, consume excessive resources or create risk.",
+   "options": [
+    {
+     "id": "3.1.a",
+     "text": "Not allowed",
+     "recommended": false,
+     "note": "",
+     "wording": "Company systems are provided for business purposes only; personal use is not allowed.",
+     "no_sentence": false
+    },
+    {
+     "id": "3.1.b",
+     "text": "Limited, reasonable use during breaks or outside working hours",
+     "recommended": true,
+     "note": "",
+     "wording": "Company systems are provided for business purposes. Limited, reasonable personal use is allowed during breaks or outside working hours, provided it does not interfere with work, consume excessive resources or create risk.",
+     "no_sentence": false
+    },
+    {
+     "id": "3.1.c",
+     "text": "Limited, reasonable use at any time if it does not affect work",
+     "recommended": false,
+     "note": "",
+     "wording": "Company systems are provided for business purposes. Limited, reasonable personal use is allowed at any time, provided it does not affect work, consume excessive resources or create risk.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "3.2",
+   "section": 3,
+   "text": "Which personal activities are acceptable?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "3.1 is not 'Not allowed'",
+   "allow_other": true,
+   "fill_label": "Other activity",
+   "example": "Personal email (webmail); Online banking and bill payments; News and general browsing",
+   "template": "Acceptable personal use includes: {3.2}.",
+   "options": [
+    {
+     "id": "3.2.a",
+     "text": "Personal email (webmail)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "3.2.b",
+     "text": "Online banking and bill payments",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "3.2.c",
+     "text": "News and general browsing",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "3.2.d",
+     "text": "Social media",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "3.2.e",
+     "text": "Online shopping",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "3.2.f",
+     "text": "Video or music streaming",
+     "recommended": false,
+     "note": "Uses network bandwidth",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "3.2.g",
+     "text": "Storing personal files on company devices",
+     "recommended": false,
+     "note": "Not recommended",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "3.2.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other activity",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "3.3",
+   "section": 3,
+   "text": "Is personal content on company devices treated as private?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "No — anything on company systems may be accessed by the Company",
+   "template": "{3.3}.",
+   "options": [
+    {
+     "id": "3.3.a",
+     "text": "No — anything on company systems may be accessed by the Company",
+     "recommended": true,
+     "note": "",
+     "wording": "Employees should have no expectation of privacy for personal content on Company systems; anything stored on Company systems may be accessed by the Company.",
+     "no_sentence": false
+    },
+    {
+     "id": "3.3.b",
+     "text": "Personal folders are respected except during investigations",
+     "recommended": false,
+     "note": "",
+     "wording": "Personal folders on Company systems are respected, except during investigations.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "4.1",
+   "section": 4,
+   "text": "Which activities are prohibited? (all are recommended)",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Additional prohibited activity",
+   "example": "All recommended items",
+   "template": "The following are strictly prohibited: {4.1}.",
+   "options": [
+    {
+     "id": "4.1.a",
+     "text": "Accessing, storing or sharing illegal, offensive, sexually explicit or discriminatory content",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.b",
+     "text": "Harassment, bullying or threats",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.c",
+     "text": "Installing unapproved software or browser extensions",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.d",
+     "text": "Using pirated software, music or video",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.e",
+     "text": "Bypassing security controls (personal VPNs, proxies, disabling antivirus)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.f",
+     "text": "Sharing accounts or using someone else's account",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.g",
+     "text": "Accessing systems or data without authorization",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.h",
+     "text": "Connecting unauthorized devices to the network (personal routers, unknown USBs)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.i",
+     "text": "Running a personal business or side job",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.j",
+     "text": "Gambling",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.k",
+     "text": "Cryptocurrency mining",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.l",
+     "text": "Political or religious campaigning",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.m",
+     "text": "Sending spam or chain messages",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.n",
+     "text": "Impersonating others",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.o",
+     "text": "Large downloads or streaming that slow the network",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "4.1.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Additional prohibited activity",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "4.2",
+   "section": 4,
+   "text": "How is software installed on company devices?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Only IT installs software",
+   "template": "Software installation: {4.2}.",
+   "options": [
+    {
+     "id": "4.2.a",
+     "text": "Only IT installs software",
+     "recommended": true,
+     "note": "",
+     "wording": "Only the IT team may install software on Company devices.",
+     "no_sentence": false
+    },
+    {
+     "id": "4.2.b",
+     "text": "Employees choose from an approved self-service catalog",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees may install software only from the Company's approved self-service catalogue.",
+     "no_sentence": false
+    },
+    {
+     "id": "4.2.c",
+     "text": "Employees may install with manager approval",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees may install software only with their manager's approval.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "5.1",
+   "section": 5,
+   "text": "Minimum password length",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "12 characters",
+   "template": "Passwords must be at least {5.1} long.",
+   "options": [
+    {
+     "id": "5.1.a",
+     "text": "8 characters",
+     "recommended": false,
+     "note": "",
+     "wording": "Passwords must be at least 8 characters long.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.1.b",
+     "text": "12 characters",
+     "recommended": true,
+     "note": "",
+     "wording": "Passwords must be at least 12 characters long.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.1.c",
+     "text": "14 characters or more",
+     "recommended": false,
+     "note": "",
+     "wording": "Passwords must be at least 14 characters long.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.1.d",
+     "text": "As enforced by our IT systems",
+     "recommended": false,
+     "note": "",
+     "wording": "Passwords must meet the length requirements enforced by the Company's IT systems.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "5.2",
+   "section": 5,
+   "text": "How often must passwords be changed?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Frequency",
+   "example": "Only when compromise is suspected (current best practice)",
+   "template": "Passwords must be changed {5.2}.",
+   "options": [
+    {
+     "id": "5.2.a",
+     "text": "Every 90 days",
+     "recommended": false,
+     "note": "",
+     "wording": "Passwords must be changed every 90 days.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.2.b",
+     "text": "Every 180 days",
+     "recommended": false,
+     "note": "",
+     "wording": "Passwords must be changed every 180 days.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.2.c",
+     "text": "Only when compromise is suspected (current best practice)",
+     "recommended": true,
+     "note": "",
+     "wording": "Passwords must be changed whenever a compromise is suspected.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.2.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Frequency",
+     "wording": "Passwords must be changed {fill}.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "5.3",
+   "section": 5,
+   "text": "Where is multi-factor authentication (MFA) required?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Email and office suite; VPN / remote access; Administrator accounts",
+   "template": "Multi-factor authentication is required for: {5.3}.",
+   "options": [
+    {
+     "id": "5.3.a",
+     "text": "Email and office suite",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.3.b",
+     "text": "VPN / remote access",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.3.c",
+     "text": "Administrator accounts",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.3.d",
+     "text": "Finance and payment systems",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.3.e",
+     "text": "All cloud applications",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.3.f",
+     "text": "MFA not used yet",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "5.4",
+   "section": 5,
+   "text": "Is a password manager approved?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Password manager name (if Yes)",
+   "example": "Yes — Bitwarden (company account)",
+   "template": "Approved password manager: {5.4}.",
+   "options": [
+    {
+     "id": "5.4.a",
+     "text": "Yes — specify the tool",
+     "recommended": false,
+     "note": "",
+     "wording": "Work passwords must be stored in the Company-approved password manager, {fill}.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.4.b",
+     "text": "No — not permitted",
+     "recommended": false,
+     "note": "",
+     "wording": "Password managers must not be used for work passwords.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.4.c",
+     "text": "No company standard yet",
+     "recommended": false,
+     "note": "",
+     "wording": "The Company has not yet approved a standard password manager.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "5.5",
+   "section": 5,
+   "text": "Screens must lock automatically after how long?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Time",
+   "example": "5 minutes",
+   "template": "Employees must lock their screen when leaving their device; screens lock automatically after {5.5} of inactivity.",
+   "options": [
+    {
+     "id": "5.5.a",
+     "text": "5 minutes",
+     "recommended": true,
+     "note": "",
+     "wording": "Employees must lock their screen when leaving their device; screens lock automatically after 5 minutes of inactivity.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.5.b",
+     "text": "10 minutes",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees must lock their screen when leaving their device; screens lock automatically after 10 minutes of inactivity.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.5.c",
+     "text": "15 minutes",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees must lock their screen when leaving their device; screens lock automatically after 15 minutes of inactivity.",
+     "no_sentence": false
+    },
+    {
+     "id": "5.5.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Time",
+     "wording": "Employees must lock their screen when leaving their device; screens lock automatically after {fill} of inactivity.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "5.6",
+   "section": 5,
+   "text": "Credential rules employees must follow (all recommended)",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "Employees must: {5.6}.",
+   "options": [
+    {
+     "id": "5.6.a",
+     "text": "Never share passwords with anyone, including IT",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.6.b",
+     "text": "Never reuse work passwords on other sites",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.6.c",
+     "text": "Never write passwords down or store them in plain text",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "5.6.d",
+     "text": "Report any suspected password compromise immediately",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "6.1",
+   "section": 6,
+   "text": "What data classification levels do you use?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Your classification levels (if own)",
+   "example": "Public / Internal / Confidential / Restricted",
+   "template": "Company information is classified as: {6.1}.",
+   "options": [
+    {
+     "id": "6.1.a",
+     "text": "Public / Internal / Confidential / Restricted",
+     "recommended": true,
+     "note": "",
+     "wording": "Company information is classified as Public, Internal, Confidential or Restricted.",
+     "no_sentence": false
+    },
+    {
+     "id": "6.1.b",
+     "text": "Public / Internal / Confidential",
+     "recommended": false,
+     "note": "",
+     "wording": "Company information is classified as Public, Internal or Confidential.",
+     "no_sentence": false
+    },
+    {
+     "id": "6.1.c",
+     "text": "We have our own (please specify)",
+     "recommended": false,
+     "note": "",
+     "wording": "Company information is classified according to the Company's own scheme: {fill}.",
+     "no_sentence": false
+    },
+    {
+     "id": "6.1.d",
+     "text": "None yet — use the recommended levels",
+     "recommended": false,
+     "note": "",
+     "wording": "Company information is classified as Public, Internal, Confidential or Restricted.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "6.2",
+   "section": 6,
+   "text": "Where may company data be stored?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Approved cloud storage name",
+   "example": "Company network drives; Approved company cloud storage — OneDrive",
+   "template": "Company data may only be stored in: {6.2}.",
+   "options": [
+    {
+     "id": "6.2.a",
+     "text": "Company network drives",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.2.b",
+     "text": "Approved company cloud storage (specify)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.2.c",
+     "text": "Company laptop (encrypted)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.2.d",
+     "text": "Personal cloud storage",
+     "recommended": false,
+     "note": "Not recommended",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.2.e",
+     "text": "Personal email",
+     "recommended": false,
+     "note": "Not recommended",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "6.3",
+   "section": 6,
+   "text": "What is your rule for USB drives and removable media?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Allowed only when encrypted and approved",
+   "template": "USB and removable media: {6.3}.",
+   "options": [
+    {
+     "id": "6.3.a",
+     "text": "Blocked entirely",
+     "recommended": false,
+     "note": "",
+     "wording": "USB drives and other removable media are blocked on Company devices.",
+     "no_sentence": false
+    },
+    {
+     "id": "6.3.b",
+     "text": "Allowed only when encrypted and approved",
+     "recommended": true,
+     "note": "",
+     "wording": "USB drives and other removable media may be used only when encrypted and approved.",
+     "no_sentence": false
+    },
+    {
+     "id": "6.3.c",
+     "text": "Allowed for non-confidential data only",
+     "recommended": false,
+     "note": "",
+     "wording": "USB drives and other removable media may be used for non-confidential data only.",
+     "no_sentence": false
+    },
+    {
+     "id": "6.3.d",
+     "text": "Allowed freely",
+     "recommended": false,
+     "note": "Not recommended",
+     "wording": "USB drives and other removable media may be used freely.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "6.4",
+   "section": 6,
+   "text": "Rules for sending confidential data outside the company",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "Confidential data sent externally: {6.4}.",
+   "options": [
+    {
+     "id": "6.4.a",
+     "text": "Must be encrypted or password protected",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.4.b",
+     "text": "Only through approved secure file-sharing tools",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.4.c",
+     "text": "Requires manager approval",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.4.d",
+     "text": "An NDA or contract must be in place",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "6.5",
+   "section": 6,
+   "text": "Rules for handling personal data (customers and employees)",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "When handling personal data, employees must: {6.5}.",
+   "options": [
+    {
+     "id": "6.5.a",
+     "text": "Collect only what is needed",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.5.b",
+     "text": "Access only what your job requires",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.5.c",
+     "text": "Never share outside approved channels",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.5.d",
+     "text": "Report any data breach immediately",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "6.6",
+   "section": 6,
+   "text": "Clean desk and printing rules",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": false,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "{6.6}.",
+   "options": [
+    {
+     "id": "6.6.a",
+     "text": "Lock away confidential documents",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.6.b",
+     "text": "Collect printouts immediately",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.6.c",
+     "text": "Shred confidential paper",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "6.6.d",
+     "text": "Clear whiteboards after meetings",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "7.1",
+   "section": 7,
+   "text": "What is your position on generative AI tools (chatbots, writing and coding assistants)?",
+   "help": "Unapproved AI tools are one of the most common sources of data leaks today.",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Allowed — approved tools only",
+   "template": "Use of generative AI tools: {7.1}.",
+   "options": [
+    {
+     "id": "7.1.a",
+     "text": "Prohibited entirely",
+     "recommended": false,
+     "note": "",
+     "wording": "The use of generative AI tools for work is prohibited.",
+     "no_sentence": false
+    },
+    {
+     "id": "7.1.b",
+     "text": "Allowed — approved tools only",
+     "recommended": true,
+     "note": "",
+     "wording": "Only Company-approved generative AI tools may be used for work.",
+     "no_sentence": false
+    },
+    {
+     "id": "7.1.c",
+     "text": "Allowed — any tool, for public information only",
+     "recommended": false,
+     "note": "",
+     "wording": "Any generative AI tool may be used for work, but only with public information.",
+     "no_sentence": false
+    },
+    {
+     "id": "7.1.d",
+     "text": "Not yet decided — please recommend",
+     "recommended": false,
+     "note": "",
+     "wording": "Until the Company decides its position on generative AI, only approved tools may be used and no confidential information may be entered into any AI tool.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "7.2",
+   "section": 7,
+   "text": "List your approved AI tools",
+   "help": "",
+   "type": "text",
+   "yes_no": false,
+   "required": true,
+   "show_if": "7.1 is 'Allowed — approved tools only'",
+   "allow_other": false,
+   "fill_label": "Approved AI tools",
+   "example": "[Tool name] — company account only",
+   "template": "Approved AI tools: {7.2}. Personal or free accounts must not be used for work.",
+   "options": []
+  },
+  {
+   "id": "7.3",
+   "section": 7,
+   "text": "What must never be entered into AI tools? (all recommended)",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "7.1 is not 'Prohibited entirely'",
+   "allow_other": true,
+   "fill_label": "Other restricted data",
+   "example": "All recommended items",
+   "template": "The following must never be entered into AI tools: {7.3}.",
+   "options": [
+    {
+     "id": "7.3.a",
+     "text": "Customer personal data",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.b",
+     "text": "Employee personal data",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.c",
+     "text": "Non-public financial information",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.d",
+     "text": "Source code",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.e",
+     "text": "Passwords, keys or credentials",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.f",
+     "text": "Contracts and legal documents",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.g",
+     "text": "Strategic or board-level plans",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.h",
+     "text": "Any Confidential or Restricted information",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.3.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other restricted data",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "7.4",
+   "section": 7,
+   "text": "Rules for using AI-generated output",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "7.1 is not 'Prohibited entirely'",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "When using AI output: {7.4}.",
+   "options": [
+    {
+     "id": "7.4.a",
+     "text": "A person must review output before it is used",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.4.b",
+     "text": "Facts must be verified before relying on them",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.4.c",
+     "text": "Disclose AI use in external-facing content",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "7.4.d",
+     "text": "AI must not be used alone for decisions about people (hiring, performance)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "7.5",
+   "section": 7,
+   "text": "Other free online tools (file converters, file-sharing sites, browser plug-ins)",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Only IT-approved tools may be used",
+   "template": "Third-party online tools: {7.5}.",
+   "options": [
+    {
+     "id": "7.5.a",
+     "text": "Only IT-approved tools may be used",
+     "recommended": true,
+     "note": "",
+     "wording": "Only IT-approved third-party online tools may be used for work.",
+     "no_sentence": false
+    },
+    {
+     "id": "7.5.b",
+     "text": "Allowed for public information only",
+     "recommended": false,
+     "note": "",
+     "wording": "Third-party online tools may be used for work with public information only.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "8.1",
+   "section": 8,
+   "text": "Approved channels for business communication",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Other channel",
+   "example": "Company email; Microsoft Teams",
+   "template": "Business communication must use: {8.1}.",
+   "options": [
+    {
+     "id": "8.1.a",
+     "text": "Company email",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.1.b",
+     "text": "Microsoft Teams",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.1.c",
+     "text": "Slack",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.1.d",
+     "text": "WhatsApp (company-approved)",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.1.e",
+     "text": "Company phone / SMS",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.1.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other channel",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "8.2",
+   "section": 8,
+   "text": "Can personal messaging apps (e.g., WhatsApp) be used for work?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Allowed for coordination only — no confidential data",
+   "template": "Personal messaging apps: {8.2}.",
+   "options": [
+    {
+     "id": "8.2.a",
+     "text": "Not allowed",
+     "recommended": false,
+     "note": "",
+     "wording": "Personal messaging apps (for example WhatsApp) must not be used for work.",
+     "no_sentence": false
+    },
+    {
+     "id": "8.2.b",
+     "text": "Allowed for coordination only — no confidential data",
+     "recommended": true,
+     "note": "",
+     "wording": "Personal messaging apps may be used for work coordination only and must never be used to share confidential data.",
+     "no_sentence": false
+    },
+    {
+     "id": "8.2.c",
+     "text": "Allowed via a company-managed business account",
+     "recommended": false,
+     "note": "",
+     "wording": "Messaging apps may be used for work only through a Company-managed business account.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "8.3",
+   "section": 8,
+   "text": "Can work email be auto-forwarded to personal email?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Prohibited",
+   "template": "Auto-forwarding of work email to personal accounts is {8.3}.",
+   "options": [
+    {
+     "id": "8.3.a",
+     "text": "Prohibited",
+     "recommended": true,
+     "note": "",
+     "wording": "Automatically forwarding work email to personal accounts is prohibited.",
+     "no_sentence": false
+    },
+    {
+     "id": "8.3.b",
+     "text": "Allowed with IT approval",
+     "recommended": false,
+     "note": "",
+     "wording": "Work email may be automatically forwarded to personal accounts only with IT approval.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "8.4",
+   "section": 8,
+   "text": "Social media rules",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "On social media, employees must follow these rules: {8.4}.",
+   "options": [
+    {
+     "id": "8.4.a",
+     "text": "Only authorized staff may speak on behalf of the Company",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.4.b",
+     "text": "Never disclose confidential information",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.4.c",
+     "text": "Personal opinions must not appear to be the Company's",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.4.d",
+     "text": "Do not post photos of screens, documents or restricted areas",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.4.e",
+     "text": "Be respectful — no harassment of colleagues or customers",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.4.f",
+     "text": "Disclose your employment when discussing Company products",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "8.5",
+   "section": 8,
+   "text": "Who is authorized to speak publicly for the Company?",
+   "help": "",
+   "type": "text",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Department / role",
+   "example": "Marketing & Communications Department",
+   "template": "Only {8.5} may make public statements on behalf of the Company.",
+   "options": []
+  },
+  {
+   "id": "8.6",
+   "section": 8,
+   "text": "Email communication rules",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "{8.6}.",
+   "options": [
+    {
+     "id": "8.6.a",
+     "text": "Be professional and courteous",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.6.b",
+     "text": "Check recipients before sending",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.6.c",
+     "text": "Be cautious with unexpected links and attachments",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "8.6.d",
+     "text": "Use the standard company signature",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "9.1",
+   "section": 9,
+   "text": "What must employees report? (all recommended)",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "Employees must report: {9.1}.",
+   "options": [
+    {
+     "id": "9.1.a",
+     "text": "Phishing or suspicious emails",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.1.b",
+     "text": "Malware or virus warnings",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.1.c",
+     "text": "Lost or stolen devices or access cards",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.1.d",
+     "text": "Data sent to the wrong person",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.1.e",
+     "text": "Suspicious account activity",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.1.f",
+     "text": "Unknown persons in restricted areas",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.1.g",
+     "text": "Policy violations by others",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "9.2",
+   "section": 9,
+   "text": "How should incidents be reported?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Email / phone / portal link",
+   "example": "Email — security@acme.com; 'Report phishing' button in email",
+   "template": "Report incidents via: {9.2}.",
+   "options": [
+    {
+     "id": "9.2.a",
+     "text": "Email (specify)",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.2.b",
+     "text": "Phone / hotline (specify)",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.2.c",
+     "text": "IT service desk portal (specify link)",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.2.d",
+     "text": "'Report phishing' button in email",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "9.2.e",
+     "text": "Directly to line manager",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "9.3",
+   "section": 9,
+   "text": "How quickly must incidents be reported?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Immediately (within 1 hour)",
+   "template": "Incidents must be reported {9.3}.",
+   "options": [
+    {
+     "id": "9.3.a",
+     "text": "Immediately (within 1 hour)",
+     "recommended": true,
+     "note": "",
+     "wording": "Incidents must be reported immediately, and in any case within one hour.",
+     "no_sentence": false
+    },
+    {
+     "id": "9.3.b",
+     "text": "Same working day",
+     "recommended": false,
+     "note": "",
+     "wording": "Incidents must be reported on the same working day.",
+     "no_sentence": false
+    },
+    {
+     "id": "9.3.c",
+     "text": "Within 24 hours",
+     "recommended": false,
+     "note": "",
+     "wording": "Incidents must be reported within 24 hours.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "9.4",
+   "section": 9,
+   "text": "Include a non-retaliation statement?",
+   "help": "Encourages early reporting, which limits damage.",
+   "type": "single",
+   "yes_no": true,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Yes",
+   "template": "{9.4}.",
+   "options": [
+    {
+     "id": "9.4.a",
+     "text": "Yes — good-faith reports will never be punished",
+     "recommended": true,
+     "note": "",
+     "wording": "Reports made in good faith will never lead to punishment.",
+     "no_sentence": false
+    },
+    {
+     "id": "9.4.b",
+     "text": "No",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": true
+    }
+   ]
+  },
+  {
+   "id": "10.1",
+   "section": 10,
+   "text": "Is remote working permitted?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Yes — hybrid",
+   "template": "Remote working: {10.1}.",
+   "options": [
+    {
+     "id": "10.1.a",
+     "text": "No",
+     "recommended": false,
+     "note": "",
+     "wording": "Remote working is not permitted.",
+     "no_sentence": false
+    },
+    {
+     "id": "10.1.b",
+     "text": "Yes — hybrid",
+     "recommended": true,
+     "note": "",
+     "wording": "Employees may work in a hybrid arrangement, partly from the office and partly remotely.",
+     "no_sentence": false
+    },
+    {
+     "id": "10.1.c",
+     "text": "Yes — fully remote",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees may work fully remotely.",
+     "no_sentence": false
+    },
+    {
+     "id": "10.1.d",
+     "text": "Yes — case-by-case with approval",
+     "recommended": false,
+     "note": "",
+     "wording": "Remote working is allowed case by case, with prior approval.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "10.2",
+   "section": 10,
+   "text": "Network rules when working remotely",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "10.1 is not 'No'",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Company VPN must be used; Public Wi-Fi only with VPN; Home Wi-Fi must be password protected",
+   "template": "When working remotely: {10.2}.",
+   "options": [
+    {
+     "id": "10.2.a",
+     "text": "Company VPN must be used",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.2.b",
+     "text": "Public Wi-Fi is prohibited",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.2.c",
+     "text": "Public Wi-Fi only with VPN",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.2.d",
+     "text": "Home Wi-Fi must be password protected",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "10.3",
+   "section": 10,
+   "text": "Device rules outside the office (all recommended)",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "{10.3}.",
+   "options": [
+    {
+     "id": "10.3.a",
+     "text": "Do not let family members or others use work devices",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.3.b",
+     "text": "Lock the screen whenever stepping away",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.3.c",
+     "text": "Use a privacy screen in public places",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.3.d",
+     "text": "Never leave devices unattended in cars or public places",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.3.e",
+     "text": "Keep the operating system and apps updated",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "10.3.f",
+     "text": "Device encryption must stay enabled",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "10.4",
+   "section": 10,
+   "text": "Can employees work from another country?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Number of days (if limited)",
+   "example": "Not without prior written approval",
+   "template": "Working from abroad: {10.4}.",
+   "options": [
+    {
+     "id": "10.4.a",
+     "text": "Not without prior written approval",
+     "recommended": true,
+     "note": "",
+     "wording": "Working from abroad is not permitted without prior written approval.",
+     "no_sentence": false
+    },
+    {
+     "id": "10.4.b",
+     "text": "Allowed for a limited number of days (specify)",
+     "recommended": false,
+     "note": "",
+     "wording": "Working from abroad is allowed for up to {fill}.",
+     "no_sentence": false
+    },
+    {
+     "id": "10.4.c",
+     "text": "Allowed freely",
+     "recommended": false,
+     "note": "",
+     "wording": "Working from abroad is allowed.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "11.1",
+   "section": 11,
+   "text": "Who owns work created by employees?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Contract clause reference",
+   "example": "The Company owns all work created during employment or using Company resources",
+   "template": "{11.1}.",
+   "options": [
+    {
+     "id": "11.1.a",
+     "text": "The Company owns all work created during employment or using Company resources",
+     "recommended": true,
+     "note": "",
+     "wording": "The Company owns all work created during employment or using Company resources.",
+     "no_sentence": false
+    },
+    {
+     "id": "11.1.b",
+     "text": "The Company owns work created as part of job duties",
+     "recommended": false,
+     "note": "",
+     "wording": "The Company owns all work created as part of employees' job duties.",
+     "no_sentence": false
+    },
+    {
+     "id": "11.1.c",
+     "text": "As defined in the employment contract (specify clause)",
+     "recommended": false,
+     "note": "",
+     "wording": "Ownership of work is defined in the employment contract ({fill}).",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "11.2",
+   "section": 11,
+   "text": "Rules for third-party material",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "{11.2}.",
+   "options": [
+    {
+     "id": "11.2.a",
+     "text": "Use only licensed software",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "11.2.b",
+     "text": "Respect copyright for images, fonts, music and video",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "11.2.c",
+     "text": "Open-source code only with approval",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "11.2.d",
+     "text": "Credit sources where required",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "12.1",
+   "section": 12,
+   "text": "When must company assets be returned?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "On the last working day; Upon Company request",
+   "template": "Company assets must be returned: {12.1}.",
+   "options": [
+    {
+     "id": "12.1.a",
+     "text": "On the last working day",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.1.b",
+     "text": "Upon Company request",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.1.c",
+     "text": "On extended leave",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.1.d",
+     "text": "On change of role",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "12.2",
+   "section": 12,
+   "text": "What must be returned?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Other item",
+   "example": "All recommended items",
+   "template": "Items to be returned: {12.2}.",
+   "options": [
+    {
+     "id": "12.2.a",
+     "text": "Laptops, phones and other devices",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.2.b",
+     "text": "Access cards and keys",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.2.c",
+     "text": "Security tokens",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.2.d",
+     "text": "Physical documents",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.2.e",
+     "text": "All Company data — no copies may be kept",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "12.2.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other item",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "12.3",
+   "section": 12,
+   "text": "When is system access removed for leavers?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "On the last working day",
+   "template": "System access is removed {12.3}.",
+   "options": [
+    {
+     "id": "12.3.a",
+     "text": "On the last working day",
+     "recommended": true,
+     "note": "",
+     "wording": "System access is removed on the employee's last working day.",
+     "no_sentence": false
+    },
+    {
+     "id": "12.3.b",
+     "text": "Immediately on notice for sensitive roles, otherwise last working day",
+     "recommended": false,
+     "note": "",
+     "wording": "System access is removed immediately on notice for sensitive roles, and on the last working day for everyone else.",
+     "no_sentence": false
+    },
+    {
+     "id": "12.3.c",
+     "text": "Within 24 hours of leaving",
+     "recommended": false,
+     "note": "",
+     "wording": "System access is removed within 24 hours of leaving.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "12.4",
+   "section": 12,
+   "text": "Company data on personal devices when leaving",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "1.3 is any 'Yes' option",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Must be deleted and confirmed in writing",
+   "template": "On leaving, Company data on personal devices {12.4}.",
+   "options": [
+    {
+     "id": "12.4.a",
+     "text": "Must be deleted and confirmed in writing",
+     "recommended": true,
+     "note": "",
+     "wording": "On leaving, Company data on personal devices must be deleted and the deletion confirmed in writing.",
+     "no_sentence": false
+    },
+    {
+     "id": "12.4.b",
+     "text": "The Company will remotely wipe Company data",
+     "recommended": false,
+     "note": "",
+     "wording": "On leaving, the Company will remotely wipe Company data from personal devices.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "12.5",
+   "section": 12,
+   "text": "What happens if assets are not returned?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Both of the above",
+   "template": "If assets are not returned: {12.5}.",
+   "options": [
+    {
+     "id": "12.5.a",
+     "text": "Cost deducted from final settlement (as permitted by law)",
+     "recommended": false,
+     "note": "",
+     "wording": "If Company assets are not returned, their cost may be deducted from the final settlement, as permitted by law.",
+     "no_sentence": false
+    },
+    {
+     "id": "12.5.b",
+     "text": "Legal action may be taken",
+     "recommended": false,
+     "note": "",
+     "wording": "If Company assets are not returned, legal action may be taken.",
+     "no_sentence": false
+    },
+    {
+     "id": "12.5.c",
+     "text": "Both of the above",
+     "recommended": true,
+     "note": "",
+     "wording": "If Company assets are not returned, their cost may be deducted from the final settlement (as permitted by law) and legal action may be taken.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "13.1",
+   "section": 13,
+   "text": "Possible consequences of violating the policy",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "Violations may result in: {13.1}, depending on severity.",
+   "options": [
+    {
+     "id": "13.1.a",
+     "text": "Verbal or written warning",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "13.1.b",
+     "text": "Suspension of system access",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "13.1.c",
+     "text": "Mandatory retraining",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "13.1.d",
+     "text": "Disciplinary action under HR policy",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "13.1.e",
+     "text": "Termination of employment or contract",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "13.1.f",
+     "text": "Legal action or reporting to authorities",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "13.1.g",
+     "text": "Recovery of costs or damages",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "13.2",
+   "section": 13,
+   "text": "Name or reference of your disciplinary procedure",
+   "help": "",
+   "type": "text",
+   "yes_no": false,
+   "required": false,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "Policy name / number",
+   "example": "HR Disciplinary Policy HR-POL-07",
+   "template": "Disciplinary action follows {13.2}.",
+   "options": []
+  },
+  {
+   "id": "13.3",
+   "section": 13,
+   "text": "How are exceptions to the policy handled?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Written request with manager approval, approved by the policy owner",
+   "template": "Exceptions: {13.3}.",
+   "options": [
+    {
+     "id": "13.3.a",
+     "text": "Written request with manager approval, approved by the policy owner",
+     "recommended": true,
+     "note": "",
+     "wording": "Exceptions to this policy require a written request approved by the employee's manager and the policy owner.",
+     "no_sentence": false
+    },
+    {
+     "id": "13.3.b",
+     "text": "Approved by senior management only",
+     "recommended": false,
+     "note": "",
+     "wording": "Exceptions to this policy may be approved by senior management only.",
+     "no_sentence": false
+    },
+    {
+     "id": "13.3.c",
+     "text": "No exceptions allowed",
+     "recommended": false,
+     "note": "",
+     "wording": "No exceptions to this policy are allowed.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "14.1",
+   "section": 14,
+   "text": "How will employees acknowledge the policy?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Electronic acceptance in this app",
+   "template": "Employees acknowledge this policy by {14.1}.",
+   "options": [
+    {
+     "id": "14.1.a",
+     "text": "Electronic acceptance in this app",
+     "recommended": true,
+     "note": "",
+     "wording": "Employees acknowledge this policy by accepting it electronically in AIDL.",
+     "no_sentence": false
+    },
+    {
+     "id": "14.1.b",
+     "text": "Signed paper form",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees acknowledge this policy by signing a paper acknowledgment form.",
+     "no_sentence": false
+    },
+    {
+     "id": "14.1.c",
+     "text": "Through the HR system",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees acknowledge this policy through the HR system.",
+     "no_sentence": false
+    },
+    {
+     "id": "14.1.d",
+     "text": "Email confirmation",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees acknowledge this policy by email confirmation.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "14.2",
+   "section": 14,
+   "text": "When must employees acknowledge it?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "All recommended items",
+   "template": "Acknowledgment is required: {14.2}.",
+   "options": [
+    {
+     "id": "14.2.a",
+     "text": "On joining, before system access is given",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "14.2.b",
+     "text": "Every year",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "14.2.c",
+     "text": "After every policy update",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "14.3",
+   "section": 14,
+   "text": "How often will the policy be reviewed?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Every year",
+   "template": "This policy is reviewed {14.3}.",
+   "options": [
+    {
+     "id": "14.3.a",
+     "text": "Every year",
+     "recommended": true,
+     "note": "",
+     "wording": "This policy is reviewed every year.",
+     "no_sentence": false
+    },
+    {
+     "id": "14.3.b",
+     "text": "Every two years",
+     "recommended": false,
+     "note": "",
+     "wording": "This policy is reviewed every two years.",
+     "no_sentence": false
+    },
+    {
+     "id": "14.3.c",
+     "text": "After any major change only",
+     "recommended": false,
+     "note": "",
+     "wording": "This policy is reviewed after any major change.",
+     "no_sentence": false
+    }
+   ]
+  },
+  {
+   "id": "14.4",
+   "section": 14,
+   "text": "Is awareness training required?",
+   "help": "",
+   "type": "single",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": false,
+   "fill_label": "",
+   "example": "Yes — at onboarding and an annual refresher",
+   "template": "Training: {14.4}.",
+   "options": [
+    {
+     "id": "14.4.a",
+     "text": "Yes — at onboarding and an annual refresher",
+     "recommended": true,
+     "note": "",
+     "wording": "Employees receive training on this policy at onboarding and an annual refresher.",
+     "no_sentence": false
+    },
+    {
+     "id": "14.4.b",
+     "text": "Onboarding only",
+     "recommended": false,
+     "note": "",
+     "wording": "Employees receive training on this policy at onboarding.",
+     "no_sentence": false
+    },
+    {
+     "id": "14.4.c",
+     "text": "No",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": true
+    }
+   ]
+  },
+  {
+   "id": "14.5",
+   "section": 14,
+   "text": "In which languages is the policy needed?",
+   "help": "",
+   "type": "multi",
+   "yes_no": false,
+   "required": true,
+   "show_if": "",
+   "allow_other": true,
+   "fill_label": "Other language",
+   "example": "English",
+   "template": "",
+   "options": [
+    {
+     "id": "14.5.a",
+     "text": "English",
+     "recommended": true,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "14.5.b",
+     "text": "Arabic",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "14.5.c",
+     "text": "French",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "14.5.d",
+     "text": "Hindi",
+     "recommended": false,
+     "note": "",
+     "wording": "",
+     "no_sentence": false
+    },
+    {
+     "id": "14.5.x",
+     "text": "Other (please specify)",
+     "recommended": false,
+     "note": "Opens text box: Other language",
+     "wording": "",
+     "no_sentence": false
+    }
+   ]
+  }
+ ]
+}

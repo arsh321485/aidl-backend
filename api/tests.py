@@ -44,10 +44,34 @@ def _shown_views(calls) -> list:
             and b["view"].get("callback_id") != "aidl_loading"]
 
 
-def _answer_policy(org: Organization) -> None:
-    from .org_policy import POLICY_QUESTIONS, save_answers
+AUP_BASE = {"0.1": "Acme Trading W.L.L.", "0.3": "0.3.a", "0.4": "0.4.b", "0.5": "Bahrain", "0.6": ["0.6.b"],
+            "0.8": "it@acme.example", "0.9": "2026-11-01", "5.4": "5.4.c", "7.2": "ChatGPT Enterprise",
+            "8.5": "the Communications team"}
+AUP_FILLS = {"6.2.b": "SharePoint", "9.2.a": "security@acme.example"}
 
-    save_answers(org, {qid: options[0] for qid, options in POLICY_QUESTIONS.items()})
+
+def _answer_policy(org: Organization, **changes) -> dict:
+    """Publish a complete question-bank AUP (recommended answers)."""
+    from . import aup_builder, aup_store
+
+    answers = aup_builder.recommended_answers()
+    answers.update(AUP_BASE)
+    answers.update(changes)
+    aup_store.save_draft(org, answers, dict(AUP_FILLS), 14)
+    return aup_store.publish(org)
+
+
+def _accept_aup(member: AIDLUser, org: Organization) -> None:
+    """The employee accepts all 14 points (publishes an AUP if needed)."""
+    from . import aup_store
+    from .licensing import acknowledge
+
+    org.refresh_from_db()
+    if not aup_store.is_complete(org):
+        _answer_policy(org)
+        org.refresh_from_db()
+    for n in range(1, aup_store.POINTS + 1):
+        acknowledge(member, aup_store.point_item(n), aup_store.version(org))
 
 
 def make_user(org: Organization, *, role=AIDLUser.Role.ADMIN, **kwargs) -> AIDLUser:
@@ -1518,6 +1542,10 @@ class SlackOnboardingTests(TestCase):
         self._click("U7", "highway_code")                     # double click — no effect
         self._click("U7", "traffic_light")
         user.refresh_from_db()
+        self.assertFalse(user.licence_issued)                 # AUP points still missing
+        _accept_aup(user, self.org)
+        self._click("U7", "traffic_light")                    # any acceptance re-checks the licence
+        user.refresh_from_db()
         self.assertTrue(user.licence_issued)
         self.assertTrue(user.licence_number.startswith("AIDL-L-"))
         update = [b for m, b in self.calls if m == "chat.update"][-1]
@@ -1531,6 +1559,7 @@ class SlackOnboardingTests(TestCase):
         self._event("U7")
         self.org.seats_purchased = 0
         self.org.save()
+        _accept_aup(AIDLUser.objects.get(microsoft_id="slack:T9:U7"), self.org)
         self._click("U7", "highway_code")
         self._click("U7", "traffic_light")
         self.assertFalse(AIDLUser.objects.get(microsoft_id="slack:T9:U7").licence_issued)
@@ -1562,6 +1591,7 @@ class AdminProgressViewTests(TestCase):
         for item in ("highway_code", "traffic_light"):
             Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(self.done.pk), item=item, version="v1")
         Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(self.half.pk), item="highway_code", version="v1")
+        _accept_aup(self.done, self.org)
 
     def test_statuses_and_counts(self):
         from .licensing import team_progress
@@ -1669,35 +1699,6 @@ class GeneratedAupTests(TestCase):
         self.assertNotIn("aidl_ack_aup", text)
         self.assertIn("You accepted this policy", text)
 
-    def test_admin_preview_and_progress(self):
-        from .aup import generate_aup
-        from .licensing import acknowledge, team_progress
-        from .slack_modals import aup_view
-
-        preview = json.dumps(aup_view(self.org), ensure_ascii=False)
-        self.assertIn("Team version", preview)
-        self.assertNotIn("aidl_ack_aup", preview)                            # admins only view it
-        acknowledge(self.learner, "aup", generate_aup(self.org)["version"])
-        t = team_progress(self.org)
-        self.assertEqual((t["members"], t["aup"]), (1, 1))
-
-    def test_send_aup_to_team_dms_learners_only(self):
-        from .slack_client import encrypt_token
-        from .slack_interactions import _send_aup_to_team
-
-        self.org.slack_bot_token = encrypt_token("xoxb-t")
-        self.org.save()
-        calls = []
-        with self.settings(SLACK_REPLY_SYNC=True), \
-                patch("api.slack_client.slack_api", side_effect=lambda m, t, **k: calls.append((m, k.get("json"))) or {"ok": True}), \
-                patch("api.slack_interactions.requests.post") as reply:
-            reply.return_value.status_code = 200
-            reply.return_value.text = "ok"
-            _send_aup_to_team(self.org, "https://hooks.slack.test/r")
-        dms = [j for m, j in calls if m == "chat.postMessage"]
-        self.assertEqual([d["channel"] for d in dms], ["U7"])
-        self.assertIn("aidl_ack_aup", json.dumps(dms[0]["blocks"]))
-        self.assertIn("AUP sent to 1 of 1", reply.call_args.kwargs["json"]["text"])
 
 
 class PlanLimitTests(TestCase):
@@ -1750,6 +1751,7 @@ class PlanLimitTests(TestCase):
             self._event(uid)
 
     def _licence(self, uid):
+        _accept_aup(self._member(uid), self.org)
         self._click(uid, "highway_code")
         self._click(uid, "traffic_light")
         return self._member(uid)
@@ -1941,9 +1943,170 @@ class RemovePeopleTests(TestCase):
         self.assertIn("aidl_member_remove", json.dumps(team_progress_view(self.org)))
 
 
-class SlackPolicyQuestionsTests(TestCase):
-    """The 8 policy questions are asked in Slack (from the AUP buttons), not
-    on the website."""
+class OrganizationOwnerTests(TestCase):
+    """The first admin is the recorded owner, not just the oldest account."""
+
+    def test_owner_wins_over_older_admin(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+        from .slack_onboarding import primary_admin
+
+        org = make_org(slack_team_id="T9")
+        older = make_user(org, microsoft_id="slack:T9:U2", full_name="Older Admin")
+        owner = make_user(org, microsoft_id="slack:T9:U1", full_name="Owner")
+        self.assertEqual(primary_admin(org).pk, older.pk)          # no owner yet → oldest
+        org.owner_user_id = str(owner.pk)
+        org.save()
+        self.assertEqual(primary_admin(org).pk, owner.pk)
+        # Only the owner can hand the AUP to someone else / add admins.
+        self.assertIn("aidl_aup_delegate", json.dumps(admin_card_blocks(build_admin_cards_context(owner), "home")))
+        self.assertNotIn("aidl_aup_delegate", json.dumps(admin_card_blocks(build_admin_cards_context(older), "home")))
+
+    def test_set_owner_command(self):
+        from django.core.management import call_command
+
+        org = make_org(slack_team_id="T9")
+        make_user(org, microsoft_id="slack:T9:U2", email="older@x.example")
+        owner = make_user(org, microsoft_id="slack:T9:U1", email="boss@x.example")
+        call_command("set_plan", "--team", "T9", "--owner", "boss@x.example", stdout=__import__("io").StringIO())
+        org.refresh_from_db()
+        self.assertEqual(org.owner_user_id, str(owner.pk))
+
+
+class SetupStepsTests(TestCase):
+    """Admin Center step-by-step setup (admin_setup.py)."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+    _event = PlanLimitTests._event
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), plan="trial")
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def _press(self, action_id, value="x", view=None):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "trigger_id": "TR", "channel": {"id": "C42"}, "response_url": "https://hooks.example/r",
+                   "actions": [{"action_id": action_id, "value": value}]}
+        if view:
+            payload["view"] = view
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def _submit(self, callback, values):
+        from urllib.parse import urlencode
+
+        payload = {"type": "view_submission", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "view": {"callback_id": callback, "private_metadata": "{}", "state": {"values": values}}}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def _home(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+
+    def test_steps_unlock_in_order(self):
+        from .admin_setup import update
+
+        self.assertIn("2 · Add admins (optional)*  —  _after step 1_", self._home())
+        _answer_policy(self.org)
+        self.assertIn("aidl_setup_skip", self._home())
+        self._press("aidl_setup_skip", "admins")
+        self.assertIn("*3 · Add your team*", self._home())
+        self._event("U5")                                         # someone joins
+        home = self._home()
+        self.assertIn("✅  *3 · Team*  ·  1 member", home)
+        self.assertEqual(home.count("aidl_send_item"), 3)         # AUP, Traffic Light, Highway Code
+        for item in ("aup", "traffic_light", "highway_code"):
+            update(self.org, **{f"{item}_sent": "2026-10-09"})
+        self.assertIn("*5 · Licences & awareness cards*", self._home())
+
+    def test_send_card_dms_team_and_marks_sent(self):
+        from .admin_setup import is_sent
+
+        _answer_policy(self.org)
+        self._event("U5")
+        self.calls.clear()
+        self._press("aidl_send_item", "highway_code")
+        dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U5")
+        self.assertIn("aidl_ack_highway_code", json.dumps(dm["blocks"]))
+        self.org.refresh_from_db()
+        self.assertTrue(is_sent(self.org, "highway_code"))
+        self.calls.clear()
+        self._press("aidl_remind_item", "highway_code")           # U5 hasn't accepted yet
+        self.assertTrue(any(m == "chat.postMessage" and b["channel"] == "U5" for m, b in self.calls))
+
+    def test_ask_someone_else_makes_aup_only_admin(self):
+        resp = self._submit("aidl_delegate_aup", {"person": {"v": {"type": "users_select", "selected_user": "U8"}},
+                                                  "note": {"v": {"value": "please"}}})
+        self.assertEqual(resp.json(), {"response_action": "clear"})
+        delegate = AIDLUser.objects.get(microsoft_id="slack:T9:U8")
+        self.assertEqual(delegate.role, AIDLUser.Role.ADMIN)
+        self.assertTrue(delegate.perm_policy)
+        self.assertFalse(delegate.perm_approve_apps or delegate.perm_access_cards or delegate.perm_create_card)
+        dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U8")
+        self.assertIn("aidl_policy_open", json.dumps(dm["blocks"]))
+        self.assertNotIn("aidl_open_add-admin", json.dumps(dm["blocks"]))   # AUP step only
+        self.assertIn("Delegated to", self._home())
+
+    def test_add_people_adds_to_channel_and_respects_plan(self):
+        users = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U5", "U6"]}}}
+        self.assertEqual(self._submit("aidl_add_people", users).json(), {"response_action": "clear"})
+        self.assertIn(("conversations.invite", {"channel": "C42", "users": "U5"}), self.calls)
+        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U5", "slack:T9:U6"]).count(), 2)
+        too_many = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U7", "U8", "U9", "U10"]}}}
+        resp = self._submit("aidl_add_people", too_many).json()
+        self.assertEqual(resp["response_action"], "errors")
+        self.assertIn("seats left", resp["errors"]["people"])
+
+    def test_old_home_button_points_to_live_message(self):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "response_url": "https://hooks.example/r", "container": {"is_ephemeral": True},
+                   "actions": [{"action_id": "aidl_tab_home", "value": "home"}]}
+        with patch("api.slack_interactions._post_reply") as post:
+            self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                         "application/x-www-form-urlencoded")
+        body = post.call_args[0][1]
+        self.assertTrue(body["replace_original"])                # the stale private copy is replaced
+        self.assertNotIn("blocks", body)
+        self.assertIn("AIDL Admin Center", body["text"])
+
+    def test_reset_command(self):
+        from django.core.management import call_command
+
+        from .admin_setup import is_sent, update
+        from .models import Acknowledgement
+        from .org_policy import policy_completed
+
+        _answer_policy(self.org)
+        update(self.org, aup_sent="2026-10-09")
+        learner = make_user(self.org, role=AIDLUser.Role.LEARNER, aup_signed=True)
+        Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(learner.pk), item="aup", version="AUP-1")
+        Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(learner.pk), item="highway_code", version="v1")
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            call_command("reset_setup", "--team", "T9", stdout=__import__("io").StringIO())
+        self.org.refresh_from_db()
+        learner.refresh_from_db()
+        self.assertFalse(policy_completed(self.org))
+        self.assertFalse(is_sent(self.org, "aup"))
+        self.assertFalse(learner.aup_signed)
+        self.assertEqual(list(Acknowledgement.objects.filter(user_id=str(learner.pk)).values_list("item", flat=True)),
+                         ["highway_code"])
+
+
+class PopupTimingTests(TestCase):
+    """Popup buttons open a Loading… popup before any slow work, then fill it."""
 
     SECRET = "shh"
     _signed = SlackOnboardingTests._signed
@@ -1954,66 +2117,327 @@ class SlackPolicyQuestionsTests(TestCase):
 
         self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
                             slack_bot_token=encrypt_token("xoxb-t"))
-        self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
         self.calls = []
 
-    def _home(self):
-        from .slack_blocks import admin_card_blocks
-        from .slack_cards import build_admin_cards_context
-
-        return json.dumps(admin_card_blocks(build_admin_cards_context(self.admin), "home"))
-
-    def _press(self, action_id):
+    def test_create_aup_opens_before_building_admin_center(self):
         from urllib.parse import urlencode
 
+        order = []
+        real = __import__("api.slack_cards", fromlist=["x"]).build_admin_cards_context
+
+        def slow_context(user):
+            order.append("context")
+            return real(user)
+
+        def fake(method, token, *, json=None, params=None):
+            if method in ("views.open", "views.update"):
+                order.append(f"{method}:{json['view'].get('callback_id')}")
+                return {"ok": True, "view": {"id": "V1"}}
+            return self._fake(method, token, json=json, params=params)
+
         payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
-                   "trigger_id": "TR", "channel": {"id": "C42"}, "actions": [{"action_id": action_id, "value": "x"}]}
+                   "trigger_id": "TR", "channel": {"id": "C42"},
+                   "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]}
+        with patch("api.slack_interactions.build_admin_cards_context", side_effect=slow_context):
+            self._fake_saved = self._fake
+            with self.settings(SLACK_SIGNING_SECRET=self.SECRET, SLACK_REPLY_SYNC=True), \
+                    patch("api.slack_client.slack_api", side_effect=fake), patch("requests.post"):
+                import hashlib, hmac, time
+                body = urlencode({"payload": json.dumps(payload)})
+                ts = str(int(time.time()))
+                sig = "v0=" + hmac.new(self.SECRET.encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
+                self.client.post("/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
+                                 HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
+        self.assertEqual(order[0], "views.open:aidl_loading")     # before the slow Admin Center data
+        self.assertIn("views.update:aidl_aup_section", order)
+
+
+class AupBuilderTests(SimpleTestCase):
+    """AUP generator (aup_builder.py) built from the manager's question bank."""
+
+    BASE = {"0.1": "Acme Trading W.L.L.", "0.3": "0.3.a", "0.4": "0.4.b", "0.5": "Bahrain", "0.6": ["0.6.b"],
+            "0.8": "it@acme.example", "0.9": "2026-11-01", "5.4": "5.4.c", "7.2": "ChatGPT Enterprise",
+            "8.5": "the Communications team"}
+    FILLS = {"6.2.b": "SharePoint", "9.2.a": "security@acme.example"}
+
+    def _answers(self, **changes):
+        from . import aup_builder
+
+        answers = aup_builder.recommended_answers()
+        answers.update(self.BASE)
+        answers.update({k.replace("_", "."): v for k, v in changes.items()})
+        return answers
+
+    def test_bank_loaded(self):
+        from . import aup_builder
+
+        bank = aup_builder.bank()
+        self.assertEqual(len(bank["sections"]), 15)
+        self.assertEqual(len(bank["questions"]), 68)
+
+    def test_recommended_answers_generate_all_14_points(self):
+        from . import aup_builder
+
+        aup = aup_builder.generate(self._answers(), self.FILLS)
+        self.assertEqual([p["no"] for p in aup["points"]], list(range(1, 15)))
+        self.assertTrue(all(p["clauses"] for p in aup["points"]))
+        text = aup_builder.as_text(aup)
+        self.assertIn('This policy applies to Acme Trading W.L.L. ("the Company").', text)
+        self.assertIn("The Company actively monitors the use of its systems.", text)          # reviewed wording
+        self.assertIn("Report incidents via: email: security@acme.example", text)             # specify fill
+        self.assertIn("This policy is effective from 1 November 2026.", text)                 # date, point 14
+        self.assertTrue(aup["version"].startswith("AUP-"))
+
+    def test_yes_no_answer(self):
+        from . import aup_builder
+
+        yes = aup_builder.as_text(aup_builder.generate(self._answers(), self.FILLS))
+        no = aup_builder.as_text(aup_builder.generate(self._answers(**{"9_4": "9.4.b"}), self.FILLS))
+        self.assertIn("Reports made in good faith will never lead to punishment.", yes)
+        self.assertNotIn("good faith", no)                                                     # "No" adds nothing
+
+    def test_show_if_hides_follow_ups(self):
+        from . import aup_builder
+
+        answers = self._answers(**{"2_1": "2.1.c"})                                           # No monitoring
+        hidden = {q["id"] for q in aup_builder.bank()["questions"]} - {q["id"] for q in aup_builder.visible_questions(answers)}
+        self.assertTrue({"2.2", "2.3", "2.4"} <= hidden)
+        point2 = aup_builder.generate(answers, self.FILLS)["points"][1]
+        self.assertEqual([c["text"] for c in point2["clauses"]], ["The Company does not monitor the use of its systems."])
+
+    def test_validation_lists_missing_answers_and_fills(self):
+        from . import aup_builder
+
+        errors = aup_builder.validate(aup_builder.recommended_answers())
+        for qid in ("0.1", "0.8", "0.9", "6.2", "9.2"):
+            self.assertIn(qid, errors)
+        with self.assertRaises(aup_builder.AupAnswersError):
+            aup_builder.generate({}, {})
+
+    def test_other_option_uses_typed_text(self):
+        from . import aup_builder
+
+        answers = self._answers(**{"4_1": ["4.1.a", "4.1.x"]})
+        text = aup_builder.as_text(aup_builder.generate(answers, {**self.FILLS, "4.1.x": "Using AI to write exam answers"}))
+        self.assertIn("Using AI to write exam answers", text)
+
+    def test_preview_endpoint(self):
+        resp = self.client.post("/api/aup/preview/", {"use_recommended": True, "answers": self.BASE, "fills": self.FILLS},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(len(resp.json()["aup"]["points"]), 14)
+        bad = self.client.post("/api/aup/preview/", {"answers": {}}, content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("0.1", bad.json()["errors"])
+        self.assertEqual(self.client.get("/api/aup/questions/").json()["sections"][0]["title"], "Organization Profile")
+
+
+
+class AupQuestionnaireSlackTests(TestCase):
+    """Create AUP in Slack from the question bank: 15 screens, then one AUP
+    point per card for employees; the licence needs all 14 points."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+    _event = PlanLimitTests._event
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(name="Acme", slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"))
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def _post(self, payload):
+        from urllib.parse import urlencode
+
+        payload = {"team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"}, **payload}
         return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
                             "application/x-www-form-urlencoded")
 
-    def test_home_asks_for_policy_until_answered(self):
-        home = self._home()
-        self.assertIn("Create AUP", home)
-        self.assertIn("aidl_aup_delegate", home)          # or ask someone else
-        self.assertNotIn("aidl_send_item", home)          # sending comes in step 4
-        _answer_policy(self.org)
-        self.assertIn("Change AUP", self._home())
-        self.assertIn("aidl_aup_view", self._home())
+    def _screen(self, section=0):
+        from . import aup_slack, aup_store
 
-    def test_aup_button_opens_questions_when_unanswered(self):
-        self._press("aidl_aup_view")
-        view = _shown_views(self.calls)[0]
-        self.assertEqual(view["callback_id"], "aidl_policy")
-        self.assertEqual(len([b for b in view["blocks"] if b["type"] == "input"]), 8)
+        d = aup_store.draft(self.org)
+        return aup_slack.section_view(self.org, section, d["answers"], d.get("fills") or {}, {})
 
-    def test_submitting_answers_saves_policy(self):
-        from urllib.parse import urlencode
+    def _values(self, view):
+        """What Slack sends back for a screen: the pre-selected / pre-filled values."""
+        values = {}
+        for b in view["blocks"]:
+            if b["type"] != "input":
+                continue
+            el = b["element"]
+            if "initial_option" in el:
+                v = {"selected_option": {"value": el["initial_option"]["value"]}}
+            elif "initial_options" in el:
+                v = {"selected_options": [{"value": o["value"]} for o in el["initial_options"]]}
+            elif "initial_date" in el:
+                v = {"selected_date": el["initial_date"]}
+            elif el["type"] in ("checkboxes", "multi_static_select"):
+                v = {"selected_options": []}
+            else:
+                v = {"value": el.get("initial_value", "")}
+            values[b["block_id"]] = {"v": v}
+        return values
 
-        from .org_policy import POLICY_QUESTIONS, policy_completed
+    def _submit(self, view, values):
+        return self._post({"type": "view_submission", "view": {**view, "state": {"values": values}}}).json()
 
-        values = {qid: {"v": {"type": "radio_buttons", "selected_option": {"value": opts[1]}}}
-                  for qid, opts in POLICY_QUESTIONS.items()}
-        payload = {"type": "view_submission", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
-                   "view": {"callback_id": "aidl_policy", "private_metadata": "{}", "state": {"values": values}}}
-        resp = self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
-                            "application/x-www-form-urlencoded")
-        body = resp.json()
-        self.assertEqual(body["response_action"], "update")          # AI-C-011: answers report
-        report = json.dumps(body["view"], ensure_ascii=False)
-        self.assertIn("YOUR POLICY ANSWERS", report)
-        self.assertIn(list(POLICY_QUESTIONS.values())[0][1], report)
+    def test_first_screen_has_recommended_answers_and_profile(self):
+        view = self._screen(0)
+        self.assertEqual(view["callback_id"], "aidl_aup_section")
+        self.assertEqual(view["submit"]["text"], "Next →")
+        text = json.dumps(view, ensure_ascii=False)
+        self.assertIn("Organization Profile", text)
+        self.assertIn('"initial_value": "Acme"', text)              # organization name pre-filled
+        policy = next(b for b in self._screen(2)["blocks"] if b.get("block_id") == "q|2.1")
+        self.assertEqual(policy["element"]["initial_option"]["value"], "2.1.a")   # recommended pre-selected
+        self.assertTrue(policy["dispatch_action"])                  # changing it shows / hides follow-ups
+
+    def test_show_if_hides_follow_ups_on_redraw(self):
+        from . import aup_store
+
+        view = self._screen(2)
+        self.assertIn("q|2.2", [b.get("block_id") for b in view["blocks"]])
+        values = self._values(view)
+        values["q|2.1"] = {"v": {"selected_option": {"value": "2.1.c"}}}     # No monitoring
+        self._post({"type": "block_actions", "view": {**view, "id": "V1", "hash": "h", "state": {"values": values}},
+                    "actions": [{"action_id": "v", "block_id": "q|2.1"}]})
+        update = next(b for m, b in self.calls if m == "views.update")
+        self.assertNotIn("q|2.2", [b.get("block_id") for b in update["view"]["blocks"]])
         self.org.refresh_from_db()
-        self.assertTrue(policy_completed(self.org))
+        self.assertEqual(aup_store.draft(self.org)["answers"]["2.1"], "2.1.c")
 
-    def test_missing_answer_shows_error(self):
-        from urllib.parse import urlencode
+    def test_next_validates_then_moves_on(self):
+        view = self._screen(0)
+        values = self._values(view)
+        resp = self._submit(view, values)                           # email / date / laws still empty
+        self.assertEqual(resp["response_action"], "errors")
+        self.assertIn("q|0.8", resp["errors"])
+        values.update({"q|0.3": {"v": {"selected_option": {"value": "0.3.a"}}},
+                       "q|0.4": {"v": {"selected_option": {"value": "0.4.b"}}},
+                       "q|0.5": {"v": {"value": "Bahrain"}}, "q|0.6": {"v": {"selected_options": [{"value": "0.6.b"}]}},
+                       "q|0.8": {"v": {"value": "it@acme.example"}}, "q|0.9": {"v": {"selected_date": "2026-11-01"}}})
+        resp = self._submit(view, values)
+        self.assertEqual(resp["response_action"], "update")
+        self.assertIn("Scope & Applicability", json.dumps(resp["view"]))
+        self.assertEqual(json.loads(resp["view"]["private_metadata"])["section"], 1)
 
-        payload = {"type": "view_submission", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
-                   "view": {"callback_id": "aidl_policy", "private_metadata": "{}", "state": {"values": {}}}}
-        resp = self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
-                            "application/x-www-form-urlencoded")
-        self.assertEqual(resp.json()["response_action"], "errors")
-        self.assertIn("ai_policy", resp.json()["errors"])
+    def test_last_screen_generates_aup_with_send_and_view(self):
+        from . import aup_builder, aup_store
+
+        answers = aup_builder.recommended_answers()
+        answers.update(AUP_BASE)
+        aup_store.save_draft(self.org, answers, dict(AUP_FILLS), 14)
+        view = self._screen(14)
+        self.assertEqual(view["submit"]["text"], "Generate AUP")
+        resp = self._submit(view, self._values(view))
+        self.assertEqual(resp["response_action"], "update")
+        text = json.dumps(resp["view"], ensure_ascii=False)
+        for label in ("Your AUP is ready", "aidl_send_item", "aidl_aup_view", "1 · Scope & Applicability",
+                      "14 · Acknowledgment & Review"):
+            self.assertIn(label, text)
+        self.org.refresh_from_db()
+        self.assertTrue(aup_store.is_complete(self.org))
+
+    def test_admin_center_create_then_view(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+        self.assertIn("📝 Create AUP", home)
+        _answer_policy(self.org)
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+        self.assertIn("View AUP", home)
+        self.assertIn("Change AUP", home)
+        self.assertNotIn("📝 Create AUP", home)
+
+    def test_continue_where_left_off(self):
+        from . import aup_store
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        d = aup_store.draft(self.org)
+        aup_store.save_draft(self.org, d["answers"], {}, 4)
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+        self.assertIn("Continue AUP (step 5 of 15)", home)
+
+    def test_employee_accepts_one_point_at_a_time_then_licence(self):
+        from . import aup_store
+        from .admin_setup import update
+        from .slack_blocks import user_dashboard_blocks
+
+        _answer_policy(self.org)
+        update(self.org, aup_sent="2026-10-13")
+        self._event("U5")
+        member = AIDLUser.objects.get(microsoft_id="slack:T9:U5")
+        self.assertIn("point 1 of 14", json.dumps(user_dashboard_blocks(member, self.org, "aup")))
+        for item in ("highway_code", "traffic_light"):
+            self._post({"type": "block_actions", "user": {"id": "U5", "team_id": "T9"},
+                        "container": {"channel_id": "D5", "message_ts": "1.1"},
+                        "actions": [{"action_id": f"aidl_ack_{item}", "value": item}]})
+        member.refresh_from_db()
+        self.assertFalse(member.licence_issued)                     # AUP not accepted yet
+        self._post({"type": "block_actions", "user": {"id": "U5", "team_id": "T9"},
+                    "container": {"channel_id": "D5", "message_ts": "1.1"},
+                    "actions": [{"action_id": "aidl_ack_aup", "value": "aup_3"}]})   # out of order → ignored
+        self.assertEqual(aup_store.points_accepted(member, self.org), set())
+        for n in range(1, 15):
+            self._post({"type": "block_actions", "user": {"id": "U5", "team_id": "T9"},
+                        "container": {"channel_id": "D5", "message_ts": "1.1"},
+                        "actions": [{"action_id": "aidl_ack_aup", "value": f"aup_{n}"}]})
+            if n == 1:
+                last = [b for m, b in self.calls if m == "chat.update"][-1]
+                self.assertIn("point 2 of 14", json.dumps(last["blocks"]))   # next point appears at once
+        member.refresh_from_db()
+        self.assertTrue(member.licence_issued)
+        self.assertTrue(member.aup_signed)
+
+    def test_changed_aup_shows_send_new_version(self):
+        from .admin_setup import aup_change, send_item
+        from .aup_slack import report_view
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        _answer_policy(self.org)
+        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", full_name="Jordan")
+        from .admin_setup import update
+
+        update(self.org, admins_step="skipped")
+        with patch("api.slack_client.slack_api", return_value={"ok": True}):
+            send_item(self.org, "aup")
+        self.assertFalse(aup_change(self.org)["changed"])
+        _answer_policy(self.org, **{"2.1": "2.1.c"})               # Change AUP
+        self.org.refresh_from_db()
+        self.assertTrue(aup_change(self.org)["changed"])
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+        self.assertIn("Send new version", home)
+        self.assertIn("Your AUP has been updated", json.dumps(report_view(self.org)))
+
+    def test_fresh_reset_clears_acceptances_and_licences(self):
+        from django.core.management import call_command
+
+        from . import aup_store
+        from .models import Acknowledgement
+
+        _answer_policy(self.org)
+        member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", licence_issued=True,
+                           licence_number="AIDL-L-1111-2222")
+        _accept_aup(member, self.org)
+        Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(member.pk), item="highway_code", version="v1")
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            call_command("reset_setup", "--team", "T9", "--fresh", stdout=__import__("io").StringIO())
+        member.refresh_from_db()
+        self.org.refresh_from_db()
+        self.assertFalse(member.licence_issued)
+        self.assertEqual(member.licence_number, "")
+        self.assertFalse(Acknowledgement.objects.filter(user_id=str(member.pk)).exists())
+        self.assertFalse(aup_store.is_complete(self.org))
+
 
 
 @override_settings(AUTH_EMAIL_OTP=False, AUTH_CAPTCHA=False)  # direct path; OTP/captcha tested below
@@ -2163,262 +2587,3 @@ class SendGridBackendTests(TestCase):
             post.return_value.text = "forbidden"
             with self.assertRaises(RuntimeError):
                 send_mail("s", "b", None, ["someone@example.com"])
-
-
-class OrganizationOwnerTests(TestCase):
-    """The first admin is the recorded owner, not just the oldest account."""
-
-    def test_owner_wins_over_older_admin(self):
-        from .slack_blocks import admin_card_blocks
-        from .slack_cards import build_admin_cards_context
-        from .slack_onboarding import primary_admin
-
-        org = make_org(slack_team_id="T9")
-        older = make_user(org, microsoft_id="slack:T9:U2", full_name="Older Admin")
-        owner = make_user(org, microsoft_id="slack:T9:U1", full_name="Owner")
-        self.assertEqual(primary_admin(org).pk, older.pk)          # no owner yet → oldest
-        org.owner_user_id = str(owner.pk)
-        org.save()
-        self.assertEqual(primary_admin(org).pk, owner.pk)
-        # Only the owner can hand the AUP to someone else / add admins.
-        self.assertIn("aidl_aup_delegate", json.dumps(admin_card_blocks(build_admin_cards_context(owner), "home")))
-        self.assertNotIn("aidl_aup_delegate", json.dumps(admin_card_blocks(build_admin_cards_context(older), "home")))
-
-    def test_set_owner_command(self):
-        from django.core.management import call_command
-
-        org = make_org(slack_team_id="T9")
-        make_user(org, microsoft_id="slack:T9:U2", email="older@x.example")
-        owner = make_user(org, microsoft_id="slack:T9:U1", email="boss@x.example")
-        call_command("set_plan", "--team", "T9", "--owner", "boss@x.example", stdout=__import__("io").StringIO())
-        org.refresh_from_db()
-        self.assertEqual(org.owner_user_id, str(owner.pk))
-
-
-class SetupStepsTests(TestCase):
-    """Admin Center step-by-step setup (admin_setup.py)."""
-
-    SECRET = "shh"
-    _signed = SlackOnboardingTests._signed
-    _fake = PlanLimitTests._fake
-    _event = PlanLimitTests._event
-
-    def setUp(self):
-        from .slack_client import encrypt_token
-
-        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
-                            slack_bot_token=encrypt_token("xoxb-t"), plan="trial")
-        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
-        self.calls = []
-
-    def _press(self, action_id, value="x", view=None):
-        from urllib.parse import urlencode
-
-        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
-                   "trigger_id": "TR", "channel": {"id": "C42"}, "response_url": "https://hooks.example/r",
-                   "actions": [{"action_id": action_id, "value": value}]}
-        if view:
-            payload["view"] = view
-        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
-                            "application/x-www-form-urlencoded")
-
-    def _submit(self, callback, values):
-        from urllib.parse import urlencode
-
-        payload = {"type": "view_submission", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
-                   "view": {"callback_id": callback, "private_metadata": "{}", "state": {"values": values}}}
-        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
-                            "application/x-www-form-urlencoded")
-
-    def _home(self):
-        from .slack_blocks import admin_card_blocks
-        from .slack_cards import build_admin_cards_context
-
-        return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-
-    def test_steps_unlock_in_order(self):
-        from .admin_setup import update
-
-        self.assertIn("2 · Add admins (optional)*  —  _after step 1_", self._home())
-        _answer_policy(self.org)
-        self.assertIn("aidl_setup_skip", self._home())
-        self._press("aidl_setup_skip", "admins")
-        self.assertIn("*3 · Add your team*", self._home())
-        self._event("U5")                                         # someone joins
-        home = self._home()
-        self.assertIn("✅  *3 · Team*  ·  1 member", home)
-        self.assertEqual(home.count("aidl_send_item"), 3)         # AUP, Traffic Light, Highway Code
-        for item in ("aup", "traffic_light", "highway_code"):
-            update(self.org, **{f"{item}_sent": "2026-10-09"})
-        self.assertIn("*5 · Licences & awareness cards*", self._home())
-
-    def test_send_card_dms_team_and_marks_sent(self):
-        from .admin_setup import is_sent
-
-        _answer_policy(self.org)
-        self._event("U5")
-        self.calls.clear()
-        self._press("aidl_send_item", "highway_code")
-        dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U5")
-        self.assertIn("aidl_ack_highway_code", json.dumps(dm["blocks"]))
-        self.org.refresh_from_db()
-        self.assertTrue(is_sent(self.org, "highway_code"))
-        self.calls.clear()
-        self._press("aidl_remind_item", "highway_code")           # U5 hasn't accepted yet
-        self.assertTrue(any(m == "chat.postMessage" and b["channel"] == "U5" for m, b in self.calls))
-
-    def test_aup_ready_popup_offers_send_and_view(self):
-        from .org_policy import POLICY_QUESTIONS
-
-        values = {qid: {"v": {"type": "radio_buttons", "selected_option": {"value": opts[0]}}}
-                  for qid, opts in POLICY_QUESTIONS.items()}
-        view = self._submit("aidl_policy", values).json()["view"]
-        text = json.dumps(view)
-        self.assertIn("aidl_send_item", text)
-        self.assertIn("aidl_aup_view", text)
-
-    def test_ask_someone_else_makes_aup_only_admin(self):
-        resp = self._submit("aidl_delegate_aup", {"person": {"v": {"type": "users_select", "selected_user": "U8"}},
-                                                  "note": {"v": {"value": "please"}}})
-        self.assertEqual(resp.json(), {"response_action": "clear"})
-        delegate = AIDLUser.objects.get(microsoft_id="slack:T9:U8")
-        self.assertEqual(delegate.role, AIDLUser.Role.ADMIN)
-        self.assertTrue(delegate.perm_policy)
-        self.assertFalse(delegate.perm_approve_apps or delegate.perm_access_cards or delegate.perm_create_card)
-        dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U8")
-        self.assertIn("aidl_policy_open", json.dumps(dm["blocks"]))
-        self.assertNotIn("aidl_open_add-admin", json.dumps(dm["blocks"]))   # AUP step only
-        self.assertIn("Delegated to", self._home())
-
-    def test_add_people_adds_to_channel_and_respects_plan(self):
-        users = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U5", "U6"]}}}
-        self.assertEqual(self._submit("aidl_add_people", users).json(), {"response_action": "clear"})
-        self.assertIn(("conversations.invite", {"channel": "C42", "users": "U5"}), self.calls)
-        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U5", "slack:T9:U6"]).count(), 2)
-        too_many = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U7", "U8", "U9", "U10"]}}}
-        resp = self._submit("aidl_add_people", too_many).json()
-        self.assertEqual(resp["response_action"], "errors")
-        self.assertIn("seats left", resp["errors"]["people"])
-
-    def test_old_home_button_points_to_live_message(self):
-        from urllib.parse import urlencode
-
-        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
-                   "response_url": "https://hooks.example/r", "container": {"is_ephemeral": True},
-                   "actions": [{"action_id": "aidl_tab_home", "value": "home"}]}
-        with patch("api.slack_interactions._post_reply") as post:
-            self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
-                         "application/x-www-form-urlencoded")
-        body = post.call_args[0][1]
-        self.assertTrue(body["replace_original"])                # the stale private copy is replaced
-        self.assertNotIn("blocks", body)
-        self.assertIn("AIDL Admin Center", body["text"])
-
-    def test_reset_command(self):
-        from django.core.management import call_command
-
-        from .admin_setup import is_sent, update
-        from .models import Acknowledgement
-        from .org_policy import policy_completed
-
-        _answer_policy(self.org)
-        update(self.org, aup_sent="2026-10-09")
-        learner = make_user(self.org, role=AIDLUser.Role.LEARNER, aup_signed=True)
-        Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(learner.pk), item="aup", version="AUP-1")
-        Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(learner.pk), item="highway_code", version="v1")
-        with patch("api.slack_client.slack_api", side_effect=self._fake):
-            call_command("reset_setup", "--team", "T9", stdout=__import__("io").StringIO())
-        self.org.refresh_from_db()
-        learner.refresh_from_db()
-        self.assertFalse(policy_completed(self.org))
-        self.assertFalse(is_sent(self.org, "aup"))
-        self.assertFalse(learner.aup_signed)
-        self.assertEqual(list(Acknowledgement.objects.filter(user_id=str(learner.pk)).values_list("item", flat=True)),
-                         ["highway_code"])
-
-
-class PopupTimingTests(TestCase):
-    """Popup buttons open a Loading… popup before any slow work, then fill it."""
-
-    SECRET = "shh"
-    _signed = SlackOnboardingTests._signed
-    _fake = PlanLimitTests._fake
-
-    def setUp(self):
-        from .slack_client import encrypt_token
-
-        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
-                            slack_bot_token=encrypt_token("xoxb-t"))
-        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
-        self.calls = []
-
-    def test_create_aup_opens_before_building_admin_center(self):
-        from urllib.parse import urlencode
-
-        order = []
-        real = __import__("api.slack_cards", fromlist=["x"]).build_admin_cards_context
-
-        def slow_context(user):
-            order.append("context")
-            return real(user)
-
-        def fake(method, token, *, json=None, params=None):
-            if method in ("views.open", "views.update"):
-                order.append(f"{method}:{json['view'].get('callback_id')}")
-                return {"ok": True, "view": {"id": "V1"}}
-            return self._fake(method, token, json=json, params=params)
-
-        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
-                   "trigger_id": "TR", "channel": {"id": "C42"},
-                   "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]}
-        with patch("api.slack_interactions.build_admin_cards_context", side_effect=slow_context):
-            self._fake_saved = self._fake
-            with self.settings(SLACK_SIGNING_SECRET=self.SECRET, SLACK_REPLY_SYNC=True), \
-                    patch("api.slack_client.slack_api", side_effect=fake), patch("requests.post"):
-                import hashlib, hmac, time
-                body = urlencode({"payload": json.dumps(payload)})
-                ts = str(int(time.time()))
-                sig = "v0=" + hmac.new(self.SECRET.encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
-                self.client.post("/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
-                                 HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
-        self.assertEqual(order[0], "views.open:aidl_loading")     # before the slow Admin Center data
-        self.assertIn("views.update:aidl_policy", order)
-
-
-class AupChangedTests(TestCase):
-    """Changing the AUP after it was sent asks the admin to send the new version."""
-
-    def setUp(self):
-        self.org = make_org(slack_team_id="T9", slack_channel_id="C42")
-        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
-        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", full_name="Jordan")
-        _answer_policy(self.org)
-
-    def _home(self):
-        from .slack_blocks import admin_card_blocks
-        from .slack_cards import build_admin_cards_context
-
-        return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-
-    def test_changed_aup_shows_send_new_version(self):
-        from .admin_setup import aup_change, send_item, update
-        from .org_policy import POLICY_QUESTIONS, save_answers
-        from .slack_modals import policy_summary_view
-
-        update(self.org, admins_step="skipped")
-        with patch("api.slack_client.slack_api", return_value={"ok": True}):
-            send_item(self.org, "aup")
-        self.assertFalse(aup_change(self.org)["changed"])
-        self.assertNotIn("Send new version", self._home())
-
-        save_answers(self.org, {qid: opts[-1] for qid, opts in POLICY_QUESTIONS.items()})  # Change AUP
-        self.org.refresh_from_db()
-        self.assertTrue(aup_change(self.org)["changed"])
-        self.assertIn("The AUP has changed", self._home())
-        self.assertIn("Send new version", self._home())
-        self.assertIn("Your AUP has been updated", json.dumps(policy_summary_view(self.org)))
-
-        with patch("api.slack_client.slack_api", return_value={"ok": True}):
-            send_item(self.org, "aup")                       # send the new version
-        self.org.refresh_from_db()
-        self.assertFalse(aup_change(self.org)["changed"])
