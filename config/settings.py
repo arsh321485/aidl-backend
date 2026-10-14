@@ -214,6 +214,17 @@ AIDL_INVITE_EXPIRY_DAYS = int(os.getenv("AIDL_INVITE_EXPIRY_DAYS", "14"))
 # Website sign-up / sign-in checks (auth_verification.py): picture captcha on
 # sign-in, emailed 6-digit code on sign-up and sign-in. The code email needs
 # the EMAIL_* settings above on Render.
+# Plan upgrades (billing.py). BILLING_PROVIDER = "" until a payment provider
+# (stripe / razorpay) is connected; BILLING_TEST_MODE=True lets admins
+# activate an upgrade without paying (testing only — never on a live site
+# with real customers). Prices are display text until the provider is set.
+BILLING_PROVIDER = os.getenv("BILLING_PROVIDER", "").strip().lower()
+BILLING_TEST_MODE = os.getenv("BILLING_TEST_MODE", "False").lower() in ("1", "true", "yes")
+PLAN_PRICES = {
+    "trial": os.getenv("PLAN_PRICE_TRIAL", "Free"),
+    "basic": os.getenv("PLAN_PRICE_BASIC", ""),
+    "enterprise": os.getenv("PLAN_PRICE_ENTERPRISE", ""),
+}
 AUTH_CAPTCHA = os.getenv("AUTH_CAPTCHA", "True").lower() in ("1", "true", "yes")
 AUTH_EMAIL_OTP = os.getenv("AUTH_EMAIL_OTP", "True").lower() in ("1", "true", "yes")
 

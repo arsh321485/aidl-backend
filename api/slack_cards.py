@@ -386,7 +386,7 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "admin_email": "priya@northwind.co",
             "seats_purchased": 50, "seats_renew": "01 Mar",
             "licences_issued": 18, "enrolled": 32, "aup_unsigned": 6,
-            "plan": {"label": "Basic", "package_label": "Basic package", "cards": 24, "cards_per_week": 2,
+            "plan": {"label": "Basic", "package_label": "Basic package", "cards": 24, "cadence": "2 cards a week (Mon, Thu)", "can_upgrade": True,
                      "limit": 50, "used": 32, "free": 18, "full": False},
             "admin_count": 2, "admin_seat_limit": 3,
             "approved_apps": approved, "total_apps": len(ai_apps) + len(it_apps),

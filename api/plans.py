@@ -1,8 +1,18 @@
 """AIDL plans — platform-neutral.
 
-Packages come from the manager's AI_Usage_Awareness_Packages.xlsx, exported
-to api/data/awareness_packages.json (Default = 12 cards, Basic = 24 cards,
-a superset of Default, both "post in the order shown", two posts a week).
+Cards come from the manager's AI_Usage_Awareness_Packages.xlsx, exported to
+api/data/awareness_packages.json (`python manage.py import_awareness_packages`):
+the Default package (12), the Basic package (24) and the full library
+(655 cards in 15 topics / categories).
+
+    Trial       Default 12 cards                         1 card a month
+    Basic       Default 12 + 12 from topics the admin    2 a week (Mon, Thu)
+                picks (no picks: the manager's Basic 24)
+    Enterprise  Basic 24 + 12 more from picked topics    4 a week, on days and
+                                                         at a time the admin picks
+
+Topic picks and the Enterprise schedule live in Organization.billing
+(billing.py), set when the admin upgrades on the website.
 
 User limit rules:
 - Every learner in the AIDL channel holds a seat (admins never do).
@@ -24,28 +34,121 @@ from django.db.models import Q
 
 from .models import AIDLUser, Organization
 
+ORDER = ("trial", "basic", "enterprise")
+TOPIC_CARDS = 12  # cards a plan adds from the topics the admin picks
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 PLANS = {
-    "trial": {"label": "Trial", "package": "default", "max_users": 5, "cards_per_week": 2},
-    "basic": {"label": "Basic", "package": "basic", "max_users": None, "cards_per_week": 2},
+    "trial": {"label": "Trial", "max_users": 5, "schedule": {"monthly": True, "hour": 10},
+              "cadence": "1 card a month", "picks_topics": False},
+    "basic": {"label": "Basic", "max_users": None, "schedule": {"days": (0, 3), "hour": 10},
+              "cadence": "2 cards a week (Mon, Thu)", "picks_topics": True},
+    "enterprise": {"label": "Enterprise", "max_users": None, "schedule": {"days": (0, 1, 3, 4), "hour": 10},
+                   "cadence": "4 cards a week, on your schedule", "picks_topics": True, "custom_schedule": True},
 }
-PACKAGE_LABELS = {"default": "Default package", "basic": "Basic package"}
+PACKAGE_LABELS = {"trial": "Default package", "basic": "Basic package", "enterprise": "Enterprise package"}
 _PACKAGES_FILE = Path(__file__).resolve().parent / "data" / "awareness_packages.json"
 
 
 @lru_cache(maxsize=1)
-def _packages() -> dict:
+def _data() -> dict:
     with open(_PACKAGES_FILE, encoding="utf-8") as fh:
-        return json.load(fh)["packages"]
+        return json.load(fh)
+
+
+def _packages() -> dict:
+    return _data()["packages"]
+
+
+def categories() -> list[dict]:
+    return _data().get("categories", [])
+
+
+def library() -> list[dict]:
+    return _data().get("library", [])
+
+
+def plan_key(org: Organization) -> str:
+    return org.plan if org.plan in PLANS else "trial"
 
 
 def plan_of(org: Organization) -> dict:
-    return PLANS.get(org.plan) or PLANS["trial"]
+    return PLANS[plan_key(org)]
+
+
+def rank(plan: str) -> int:
+    return ORDER.index(plan) if plan in ORDER else 0
+
+
+# ---------- cards ----------
+
+def pick_cards(topic_codes: list[str], exclude: set[str], n: int = TOPIC_CARDS) -> list[dict]:
+    """n library cards from the chosen topics, taken in turn from each topic
+    (library order), skipping cards already in the package."""
+    pools = {code: [c for c in library() if c["code"] == code and c["no"] not in exclude] for code in topic_codes}
+    picked: list[dict] = []
+    while len(picked) < n and any(pools.values()):
+        for code in topic_codes:
+            if pools[code] and len(picked) < n:
+                picked.append(pools[code].pop(0))
+    return picked
+
+
+def _billing(org: Organization) -> dict:
+    try:
+        return json.loads(org.billing or "{}")
+    except ValueError:
+        return {}
+
+
+def topics_for(org: Organization, plan: str) -> list[str]:
+    return list((_billing(org).get("topics") or {}).get(plan) or [])
+
+
+def cards_for_plan(org: Organization, plan: str, topics: dict[str, list[str]] | None = None) -> list[dict]:
+    """The cards a plan delivers, in posting order. `topics` overrides the
+    saved picks (used for the website preview)."""
+    def picks(p):
+        return topics[p] if topics and p in topics else topics_for(org, p)
+
+    default = list(_packages()["default"])
+    if plan == "trial":
+        return default
+    have = {c["no"] for c in default}
+    chosen = picks("basic")
+    if chosen:
+        basic_extra = pick_cards(chosen, have)
+    else:  # no topics picked: the manager's Basic package
+        basic_extra = [c for c in _packages()["basic"] if c["no"] not in have]
+    cards = default + basic_extra
+    if plan == "basic":
+        return cards
+    have |= {c["no"] for c in basic_extra}
+    return cards + pick_cards(picks("enterprise"), have)
 
 
 def package_cards(org: Organization) -> list[dict]:
-    """The plan's package cards, in posting order."""
-    return _packages()[plan_of(org)["package"]]
+    """The organization's package cards, in posting order."""
+    return cards_for_plan(org, plan_key(org))
 
+
+def schedule_of(org: Organization) -> dict:
+    """{"monthly": True, "hour"} or {"days": (...), "hour"} — Enterprise may
+    have its own days and time."""
+    base = dict(plan_of(org)["schedule"])
+    custom = _billing(org).get("schedule") or {}
+    if plan_of(org).get("custom_schedule") and custom.get("days"):
+        base = {"days": tuple(custom["days"]), "hour": int(custom.get("hour", base["hour"]))}
+    return base
+
+
+def cadence(org: Organization) -> str:
+    s = schedule_of(org)
+    if s.get("monthly"):
+        return "1 card a month"
+    return f"{len(s['days'])} cards a week ({', '.join(WEEKDAYS[d] for d in s['days'])}, {s['hour']:02d}:00)"
+
+
+# ---------- users ----------
 
 def user_limit(org: Organization) -> int:
     return plan_of(org)["max_users"] or org.seats_purchased
@@ -75,18 +178,19 @@ def can_join(org: Organization, member: AIDLUser | None) -> bool:
 
 
 def usage(org: Organization) -> dict:
-    plan = plan_of(org)
+    key = plan_key(org)
     limit = user_limit(org)
     used = seat_holders(org).count()
     return {
-        "plan": org.plan if org.plan in PLANS else "trial",
-        "label": plan["label"],
-        "package": plan["package"],
-        "package_label": PACKAGE_LABELS[plan["package"]],
+        "plan": key,
+        "label": PLANS[key]["label"],
+        "package": key,
+        "package_label": PACKAGE_LABELS[key],
         "cards": len(package_cards(org)),
-        "cards_per_week": plan["cards_per_week"],
+        "cadence": cadence(org),
         "limit": limit,
         "used": used,
         "free": max(limit - used, 0),
         "full": used >= limit,
+        "can_upgrade": key != ORDER[-1],
     }

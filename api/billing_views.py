@@ -1,0 +1,96 @@
+"""Plans page API (billing.py). Bearer token = the admin's AIDL access JWT
+from the Slack "Upgrade plan" link.
+
+    GET  /api/billing/plans/      current plan, the plans, topics, schedule
+    POST /api/billing/preview/    {plan, topics} → the 12 cards it adds (titles only)
+    POST /api/billing/checkout/   {plan, topics, schedule?, seats?} →
+                                  {status: redirect|activated|pending, url?, message}
+"""
+
+from __future__ import annotations
+
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiResponse, extend_schema
+from rest_framework import status
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from . import billing
+from .auth_views import JWTAuthentication
+from .models import AIDLUser
+from .org_service import get_organization_for_user
+
+
+def _org_for_admin(request):
+    if request.user.role != AIDLUser.Role.ADMIN:
+        return None, Response({"detail": "Only AIDL admins can manage the plan."}, status=status.HTTP_403_FORBIDDEN)
+    org = get_organization_for_user(request.user)
+    if org is None:
+        return None, Response({"detail": "Your account is not linked to an organization."},
+                              status=status.HTTP_404_NOT_FOUND)
+    return org, None
+
+
+def _topics(value) -> list[str]:
+    if isinstance(value, str):
+        value = [v for v in value.split(",") if v]
+    return [str(v).strip() for v in (value or []) if str(v).strip()]
+
+
+@extend_schema(summary="Plans page: current plan, plans, topics", responses=OpenApiResponse(OpenApiTypes.OBJECT))
+@api_view(["GET"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def plans_view(request):
+    org, error = _org_for_admin(request)
+    if error:
+        return error
+    from .slack_onboarding import primary_admin
+
+    owner = primary_admin(org)
+    data = billing.catalog(org)
+    data["can_upgrade"] = owner is not None and owner.pk == request.user.pk
+    return Response(data)
+
+
+@extend_schema(summary="Preview the cards a plan adds for the chosen topics", request=OpenApiTypes.OBJECT,
+               responses=OpenApiResponse(OpenApiTypes.OBJECT))
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def preview_view(request):
+    org, error = _org_for_admin(request)
+    if error:
+        return error
+    cards = billing.preview(org, str(request.data.get("plan") or ""), _topics(request.data.get("topics")))
+    return Response({"cards": cards})
+
+
+@extend_schema(summary="Upgrade: go to payment (or activate in test mode)", request=OpenApiTypes.OBJECT,
+               responses={200: OpenApiResponse(OpenApiTypes.OBJECT), 400: OpenApiResponse(OpenApiTypes.OBJECT)})
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def checkout_view(request):
+    org, error = _org_for_admin(request)
+    if error:
+        return error
+    from .slack_onboarding import primary_admin
+
+    owner = primary_admin(org)
+    if owner is None or owner.pk != request.user.pk:
+        return Response({"detail": "Only the admin who set up AIDL can change the plan."},
+                        status=status.HTTP_403_FORBIDDEN)
+    seats = request.data.get("seats")
+    try:
+        seats = int(seats) if seats not in (None, "") else None
+    except (TypeError, ValueError):
+        return Response({"seats": ["Enter a number."]}, status=status.HTTP_400_BAD_REQUEST)
+    schedule = request.data.get("schedule") if isinstance(request.data.get("schedule"), dict) else None
+    try:
+        result = billing.checkout(org, request.user, str(request.data.get("plan") or ""),
+                                  _topics(request.data.get("topics")), schedule, seats)
+    except billing.UpgradeError as exc:
+        return Response({k: [v] for k, v in exc.errors.items()}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)

@@ -2,8 +2,11 @@
 
 When a learner earns their licence, card 1 of their plan's package is sent
 to their DM straight away and the rest are scheduled with
-chat.scheduleMessage at the plan's cadence (2 a week: Monday and Thursday,
-10:00 in the learner's time zone). Slack then posts them — no cron job.
+chat.scheduleMessage at the plan's cadence (plans.py: Trial 1 a month,
+Basic Mon + Thu, Enterprise 4 a week on the admin's days), in the learner's
+time zone. Slack posts them. Slack only accepts messages up to 120 days
+ahead, so later cards are saved and handed to Slack by schedule_due() —
+run `python manage.py schedule_package_cards` daily.
 
 sync_package() is the one entry point: it keeps what was already sent,
 cancels what is still scheduled, and re-schedules the cards the learner
@@ -21,7 +24,7 @@ from django.utils import timezone
 
 from . import slack_client
 from .models import AIDLUser, Organization, PackageDelivery
-from .plans import package_cards, plan_of
+from .plans import package_cards, plan_key, plan_of, schedule_of
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +35,24 @@ _POST_HOUR = 10
 _MAX_AHEAD = timedelta(days=119)
 
 
-def post_times(start: datetime, count: int, per_week: int, tz_offset: int = 0) -> list[datetime]:
-    """The next `count` delivery slots after `start` (UTC), at 10:00 local."""
-    days = _WEEKDAYS.get(per_week, _WEEKDAYS[2])
+def post_times(start: datetime, count: int, schedule, tz_offset: int = 0) -> list[datetime]:
+    """The next `count` delivery slots after `start` (UTC), local time.
+    `schedule` is plans.schedule_of(): {"days": (Mon=0 …), "hour"} or
+    {"monthly": True, "hour"} (first Monday of each month); a plain number
+    means that many cards a week."""
+    if isinstance(schedule, int):
+        schedule = {"days": _WEEKDAYS.get(schedule, _WEEKDAYS[2]), "hour": _POST_HOUR}
+    hour = int(schedule.get("hour", _POST_HOUR))
     offset = timedelta(seconds=tz_offset)
-    local = (start + offset).replace(hour=_POST_HOUR, minute=0, second=0, microsecond=0)
+    local = (start + offset).replace(hour=hour, minute=0, second=0, microsecond=0)
     times: list[datetime] = []
     while len(times) < count:
         utc = local - offset
-        if local.weekday() in days and utc > start + timedelta(hours=1):
+        if schedule.get("monthly"):
+            ok = local.weekday() == 0 and local.day <= 7  # first Monday of the month
+        else:
+            ok = local.weekday() in schedule["days"]
+        if ok and utc > start + timedelta(hours=1):
             times.append(utc)
         local += timedelta(days=1)
     return times
@@ -87,8 +99,10 @@ def card_blocks(org: Organization, card: dict, position: int, total: int) -> lis
 
 
 def _mark_sent(member: AIDLUser) -> None:
-    PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
-                                   post_at__lte=timezone.now()).update(status=PackageDelivery.Status.SENT)
+    """Cards Slack has posted by now (only those handed to Slack)."""
+    (PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
+                                    post_at__lte=timezone.now()).exclude(scheduled_message_id="")
+     .update(status=PackageDelivery.Status.SENT))
 
 
 def pause_package(org: Organization, member: AIDLUser) -> int:
@@ -133,7 +147,7 @@ def sync_package(org: Organization, member: AIDLUser) -> dict:
     tz_offset = int(((info.get("user") or {}).get("tz_offset")) or 0)
     plan = plan_of(org)
     now = timezone.now()
-    common = {"organization_id": str(org.pk), "user_id": str(member.pk), "package": plan["package"],
+    common = {"organization_id": str(org.pk), "user_id": str(member.pk), "package": plan_key(org),
               "slack_channel_id": channel}
     result = {"sent_now": 0, "scheduled": 0}
 
@@ -146,7 +160,7 @@ def sync_package(org: Organization, member: AIDLUser) -> dict:
                                        error=res.get("error", "") or "")
         result["sent_now"] = 1
 
-    for (position, card), when in zip(todo, post_times(now, len(todo), plan["cards_per_week"], tz_offset)):
+    for (position, card), when in zip(todo, post_times(now, len(todo), schedule_of(org), tz_offset)):
         row = PackageDelivery(**common, card_no=card["no"], post_order=position, post_at=when)
         if when - now <= _MAX_AHEAD:
             res = slack_client.slack_api("chat.scheduleMessage", token, json={
@@ -160,6 +174,36 @@ def sync_package(org: Organization, member: AIDLUser) -> dict:
                 row.error = res.get("error", "") or "schedule failed"
         row.save()
     return result
+
+
+def schedule_due(org: Organization) -> int:
+    """Hand Slack the saved cards that are now within its 120-day window.
+    Returns how many were scheduled."""
+    token = slack_client.bot_token(org)
+    if not token:
+        return 0
+    cards = {c["no"]: c for c in package_cards(org)}
+    total = len(cards)
+    limit = timezone.now() + _MAX_AHEAD
+    done = 0
+    for row in PackageDelivery.objects.filter(organization_id=str(org.pk), status=PackageDelivery.Status.SCHEDULED,
+                                              scheduled_message_id="", post_at__lte=limit):
+        card = cards.get(row.card_no)
+        if card is None:
+            continue
+        if row.post_at <= timezone.now() + timedelta(minutes=2):  # missed its slot → a few minutes from now
+            row.post_at = timezone.now() + timedelta(minutes=5)
+        res = slack_client.slack_api("chat.scheduleMessage", token, json={
+            "channel": row.slack_channel_id, "post_at": int(row.post_at.astimezone(dt_timezone.utc).timestamp()),
+            "text": f"AIDL card: {card['title']}", "blocks": card_blocks(org, card, row.post_order, total)})
+        if res.get("ok"):
+            row.scheduled_message_id = res.get("scheduled_message_id", "")
+            done += 1
+        else:
+            row.status = PackageDelivery.Status.FAILED
+            row.error = res.get("error", "") or "schedule failed"
+        row.save()
+    return done
 
 
 def sync_organization(org: Organization) -> dict:

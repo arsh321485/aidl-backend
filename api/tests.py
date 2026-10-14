@@ -1813,7 +1813,7 @@ class PlanLimitTests(TestCase):
         self.assertEqual(rows.count(), 12)
         self.assertEqual(rows.filter(status="sent").get().card_no, "006")  # card 1 right away
         scheduled = [j for m, j in self.calls if m == "chat.scheduleMessage"]
-        self.assertEqual(len(scheduled), 11)
+        self.assertEqual(len(scheduled), 4)   # Trial: 1 a month; Slack takes 120 days ahead
         self.assertEqual(scheduled[0]["text"], "AIDL card: Traffic Light Check")  # sheet's posting order
 
     def test_leaving_cancels_scheduled_cards_and_rejoin_resumes(self):
@@ -1823,11 +1823,11 @@ class PlanLimitTests(TestCase):
         u2 = self._licence("U2")
         self.calls.clear()
         self._event("U2", "member_left_channel")
-        self.assertEqual(len([m for m, _ in self.calls if m == "chat.deleteScheduledMessage"]), 11)
+        self.assertEqual(len([m for m, _ in self.calls if m == "chat.deleteScheduledMessage"]), 4)
         self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="cancelled").count(), 11)
         self.calls.clear()
         self._event("U2")
-        self.assertEqual(len([m for m, _ in self.calls if m == "chat.scheduleMessage"]), 11)
+        self.assertEqual(len([m for m, _ in self.calls if m == "chat.scheduleMessage"]), 4)
         self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="sent").count(), 1)
 
     def test_upgrade_to_basic_schedules_remaining_cards(self):
@@ -2602,3 +2602,89 @@ class SetPlanCommandTests(TestCase):
         org.refresh_from_db()
         self.assertEqual((org.plan, org.seats_purchased, org.admin_seat_limit), ("basic", 500, 50))
         self.assertEqual(usage(org)["limit"], 500)
+
+
+class PlanUpgradeTests(TestCase):
+    """Trial → Basic → Enterprise: topic-picked cards, schedules and the
+    website upgrade (billing.py)."""
+
+    def setUp(self):
+        self.org = make_org(slack_team_id="T9", plan="trial")
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(self.owner)}")
+
+    def test_cards_per_plan(self):
+        from .plans import cards_for_plan, package_cards
+
+        self.assertEqual(len(package_cards(self.org)), 12)                       # Trial: Default
+        basic = cards_for_plan(self.org, "basic", {"basic": ["C13", "C14"]})
+        self.assertEqual(len(basic), 24)
+        self.assertEqual({c["code"] for c in basic[12:]}, {"C13", "C14"})        # extra 12 from picked topics
+        ent = cards_for_plan(self.org, "enterprise", {"basic": ["C13"], "enterprise": ["C12"]})
+        self.assertEqual(len(ent), 36)
+        self.assertEqual({c["code"] for c in ent[24:]}, {"C12"})
+        self.assertEqual(len({c["no"] for c in ent}), 36)                         # no duplicates
+        self.assertEqual(len(cards_for_plan(self.org, "basic")), 24)              # no picks → manager's Basic 24
+
+    def test_schedules(self):
+        import datetime as dt
+
+        from .package_delivery import post_times
+        from .plans import schedule_of
+
+        start = dt.datetime(2026, 10, 14, 12, 0, tzinfo=dt.timezone.utc)        # a Wednesday
+        monthly = post_times(start, 3, schedule_of(self.org))
+        self.assertEqual([t.strftime("%a %d %b") for t in monthly], ["Mon 02 Nov", "Mon 07 Dec", "Mon 04 Jan"])
+        self.org.plan = "enterprise"
+        self.org.billing = json.dumps({"schedule": {"days": [1, 2, 3, 4], "hour": 9}})
+        weekly = post_times(start, 4, schedule_of(self.org))
+        self.assertEqual([t.strftime("%a %H") for t in weekly], ["Thu 09", "Fri 09", "Tue 09", "Wed 09"])
+
+    def test_plans_page_and_preview(self):
+        data = self.client.get("/api/billing/plans/").json()
+        self.assertEqual(data["current"], "trial")
+        self.assertTrue(data["can_upgrade"])
+        self.assertEqual([p["key"] for p in data["plans"]], ["trial", "basic", "enterprise"])
+        self.assertEqual(len(data["categories"]), 15)
+        cards = self.client.post("/api/billing/preview/", {"plan": "basic", "topics": ["C10"]}, format="json").json()["cards"]
+        self.assertEqual(len(cards), 12)
+        self.assertNotIn("message", cards[0])                                     # card text stays on the server
+
+    @override_settings(BILLING_TEST_MODE=True, BILLING_PROVIDER="")
+    def test_test_mode_upgrade_activates(self):
+        from .plans import package_cards
+
+        resp = self.client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10", "C13"], "seats": 50},
+                                format="json")
+        self.assertEqual(resp.json()["status"], "activated", resp.content)
+        self.org.refresh_from_db()
+        self.assertEqual((self.org.plan, self.org.seats_purchased), ("basic", 50))
+        self.assertEqual({c["code"] for c in package_cards(self.org)[12:]}, {"C10", "C13"})
+        bad = self.client.post("/api/billing/checkout/", {"plan": "enterprise", "topics": ["C12"],
+                                                          "schedule": {"days": [0, 1], "hour": 10}}, format="json")
+        self.assertIn("schedule", bad.json())
+
+    @override_settings(BILLING_TEST_MODE=False, BILLING_PROVIDER="")
+    def test_without_payment_provider_request_is_pending(self):
+        resp = self.client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]}, format="json")
+        self.assertEqual(resp.json()["status"], "pending")
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "trial")
+        self.assertEqual(json.loads(self.org.billing)["pending"]["plan"], "basic")
+
+    def test_only_owner_can_check_out(self):
+        other = make_user(self.org, microsoft_id="slack:T9:U2")
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(other)}")
+        self.assertEqual(client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]},
+                                     format="json").status_code, 403)
+
+    def test_admin_center_upgrade_button(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+        self.assertIn("aidl_upgrade", home)
+        self.assertIn("Trial plan", home)
+        self.assertIn("1 card a month", home)

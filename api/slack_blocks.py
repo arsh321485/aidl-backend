@@ -186,7 +186,7 @@ def _step_licences(d: dict, st: dict) -> list:
     t = d.get("team") or {}
     p = d.get("plan") or {}
     waiting = f"  ·  ⏳ {t['waiting_seat']} waiting for a seat" if t.get("waiting_seat") else ""
-    package = (f"📘 {p['package_label']}: {p['cards']} awareness cards, {p['cards_per_week']} a week — sent "
+    package = (f"📘 {p['package_label']}: {p['cards']} awareness cards, {p['cadence']} — sent "
                "automatically after each licence") if p else ""
     return [
         _section(f"*5 · Licences & awareness cards*\n🪪 *{t.get('licensed', 0)}* of {t.get('members', 0)} licensed"
@@ -211,6 +211,7 @@ def _home(d: dict) -> list:
         _section(f"👋 *Welcome, {name}.* Let's set up AI Driving License for *{d['org_name']}* — "
                  "a few short steps, top to bottom.\n" + "🟩" * done + "⬜" * (4 - done)
                  + f"  *{done} of 4 setup steps done*"),
+        *_plan_line(d),
         {"type": "divider"},
     ]
     if d.get("policy_only"):  # asked to create the AUP only
@@ -221,12 +222,26 @@ def _home(d: dict) -> list:
     return blocks[:-1]
 
 
+def _plan_line(d: dict) -> list:
+    """Current plan + Upgrade (the owner gets a private link to the plans
+    page on the website)."""
+    p = d.get("plan")
+    if not p or d.get("policy_only"):
+        return []
+    block = _section(f"📦  *{p['label']} plan*  ·  {p['cards']} awareness cards, {p['cadence']}  ·  "
+                     f"{p['used']} of {p['limit']} users")
+    if d.get("can_admins"):
+        block["accessory"] = _button("⬆️ Upgrade plan" if p.get("can_upgrade", True) else "⚙️ Change topics",
+                                     "aidl_upgrade", value="upgrade", style="primary" if p.get("can_upgrade") else "")
+    return [block]
+
+
 def _plan_field(d: dict) -> dict:
     p = d.get("plan")
     if not p:
         return _md(f"*Seats purchased*\n*{d['seats_purchased']}* seats  ·  _renews {d['seats_renew']}_")
     return _md(f"*{p['label']} plan*\n*{p['used']}* of {p['limit']} users  ·  "
-               f"_{p['package_label']}: {p['cards']} cards, {p['cards_per_week']}/week_")
+               f"_{p['package_label']}: {p['cards']} cards, {p['cadence']}_")
 
 
 def _plan_notice(d: dict) -> list:
