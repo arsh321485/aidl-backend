@@ -2,6 +2,7 @@
 
     python manage.py set_plan --team T0123 --plan basic --seats 50
     python manage.py set_plan --team T0123 --plan trial
+    python manage.py set_plan --team T0123 --admins 50   # admin seat limit
     python manage.py set_plan --team T0123            # just show the plan
     python manage.py set_plan --team T0123 --owner shivraj@company.com
         # make that admin the organization's first admin (Add Admin, remove admins)
@@ -27,6 +28,7 @@ class Command(BaseCommand):
         parser.add_argument("--plan", choices=sorted(PLANS), default="")
         parser.add_argument("--seats", type=int, default=0, help="Basic plan: number of users")
         parser.add_argument("--owner", default="", help="email of the admin who owns the organization")
+        parser.add_argument("--admins", type=int, default=0, help="admin seat limit")
 
     def handle(self, *args, **options):
         org = Organization.objects.filter(slack_team_id=options["team"]).first()
@@ -46,10 +48,14 @@ class Command(BaseCommand):
         if options["seats"]:
             org.seats_purchased = options["seats"]
             changed.append("seats_purchased")
+        if options["admins"]:
+            org.admin_seat_limit = options["admins"]
+            changed.append("admin_seat_limit")
         if changed:
             org.save(update_fields=[*changed, "updated_at"])
             if "plan" in changed:
                 self.stdout.write(f"Cards re-scheduled: {sync_organization(org)}")
         u = usage(org)
+        self.stdout.write(f"{org.name}: {org.admin_seat_limit} admin seats")
         self.stdout.write(f"{org.name}: {u['label']} plan · {u['used']} of {u['limit']} users · "
                           f"{u['package_label']} ({u['cards']} cards, {u['cards_per_week']}/week)")
