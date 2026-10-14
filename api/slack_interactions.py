@@ -602,6 +602,21 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                             response_url=response_url, view_id=(payload.get("view") or {}).get("id", ""))
         return HttpResponse(status=200)
 
+    # Upgrade plan: a private link (only this admin sees it) to the plans page
+    # on the website, signed in with a short-lived AIDL token.
+    if org is not None and action_id == "aidl_upgrade":
+        if not d["can_admins"]:
+            _reply(response_url, text="Only the admin who set up AIDL can change the plan.")
+            return HttpResponse(status=200)
+        url = f"{settings.FRONTEND_URL.rstrip('/')}/plans?token={create_access_token(user)}"
+        _reply(response_url, text="Open the plans page to upgrade", blocks=[
+            {"type": "section", "text": {"type": "mrkdwn", "text":
+                "⬆️ *Upgrade your AIDL plan* — compare plans, pick your topics and preview the cards you'll get. "
+                "This link is only for you and expires soon."},
+             "accessory": {"type": "button", "text": {"type": "plain_text", "text": "Open plans page"},
+                           "url": url, "action_id": "aidl_link_plans", "style": "primary"}}])
+        return HttpResponse(status=200)
+
     if org is not None and action_id == "aidl_aup_delegate" and d["can_admins"]:
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
         _open_modal(org, payload.get("trigger_id", ""), slack_modals.delegate_view(meta))

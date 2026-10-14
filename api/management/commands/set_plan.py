@@ -58,4 +58,4 @@ class Command(BaseCommand):
         u = usage(org)
         self.stdout.write(f"{org.name}: {org.admin_seat_limit} admin seats")
         self.stdout.write(f"{org.name}: {u['label']} plan · {u['used']} of {u['limit']} users · "
-                          f"{u['package_label']} ({u['cards']} cards, {u['cards_per_week']}/week)")
+                          f"{u['package_label']} ({u['cards']} cards, {u['cadence']})")
