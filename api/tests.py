@@ -1389,7 +1389,7 @@ class SlackDmFallbackTests(TestCase):
             self.assertEqual(onboard_member(org, "U7"), "onboarded")
 
         shown = [b["text"] for m, b in calls if m == "chat.postEphemeral" and b["user"] == "U7"]
-        self.assertEqual(shown, ["Welcome to AIDL, Anshul!", "Your AIDL dashboard"])
+        self.assertEqual(shown, ["Welcome to AIDL, Anshul!"])
         warning = next(b["text"] for m, b in calls if m == "chat.postEphemeral" and b["user"] == "U1")
         self.assertIn("Messages tab", warning)
 
@@ -1512,17 +1512,17 @@ class SlackOnboardingTests(TestCase):
         self.assertFalse(user.licence_issued)                 # earned later, not on join
         self.assertIsNotNone(user.slack_onboarded_at)
         dms = [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
-        self.assertEqual([d["text"] for d in dms], ["Welcome to AIDL, Jordan!", "Your AIDL dashboard"])
-        self.assertNotIn("aidl_ack_aup", json.dumps(dms[1]["blocks"]))    # AUP not sent by the admin yet
+        self.assertEqual([d["text"] for d in dms], ["Welcome to AIDL, Jordan!"])   # programme not started yet
 
     def test_joiner_gets_cards_the_admin_already_sent(self):
         from .admin_setup import update
 
         _answer_policy(self.org)
-        update(self.org, aup_sent="2026-10-09T10:00:00")
+        update(self.org, flow_started="2026-10-09T10:00:00")      # the admin started the programme
         self._event("U7")
         dms = [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U7"]
-        self.assertIn("aidl_ack_aup", json.dumps(dms[1]["blocks"]))       # opens on the AUP tab
+        self.assertEqual(len(dms), 1)
+        self.assertIn("aidl_flow_start", json.dumps(dms[0]))       # the design's Welcome card
 
     def test_rejoin_bots_other_channels_and_retries_are_ignored(self):
         self._event("U7")
@@ -2025,24 +2025,23 @@ class SetupStepsTests(TestCase):
         self._event("U5")                                         # someone joins
         home = self._home()
         self.assertIn("✅  *3 · Team*  ·  1 member", home)
-        self.assertEqual(home.count("aidl_send_item"), 3)         # AUP, Traffic Light, Highway Code
-        for item in ("aup", "traffic_light", "highway_code"):
-            update(self.org, **{f"{item}_sent": "2026-10-09"})
+        self.assertEqual(home.count("aidl_send_item"), 1)         # Start the programme
+        update(self.org, flow_started="2026-10-09")
         self.assertIn("*5 · Licences & awareness cards*", self._home())
 
-    def test_send_card_dms_team_and_marks_sent(self):
-        from .admin_setup import is_sent
+    def test_start_programme_sends_welcome_and_remind(self):
+        from .admin_setup import started
 
         _answer_policy(self.org)
         self._event("U5")
         self.calls.clear()
-        self._press("aidl_send_item", "highway_code")
+        self._press("aidl_send_item", "flow")
         dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U5")
-        self.assertIn("aidl_ack_highway_code", json.dumps(dm["blocks"]))
+        self.assertIn("aidl_flow_start", json.dumps(dm))
         self.org.refresh_from_db()
-        self.assertTrue(is_sent(self.org, "highway_code"))
+        self.assertTrue(started(self.org))
         self.calls.clear()
-        self._press("aidl_remind_item", "highway_code")           # U5 hasn't accepted yet
+        self._press("aidl_remind_item", "flow")                   # U5 hasn't finished → current card again
         self.assertTrue(any(m == "chat.postMessage" and b["channel"] == "U5" for m, b in self.calls))
 
     def test_add_people_adds_to_channel_and_respects_plan(self):
@@ -2748,3 +2747,115 @@ class StripeBillingTests(TestCase):
         post.assert_not_called()
         self.org.refresh_from_db()
         self.assertEqual(self.org.plan, "basic")
+
+
+
+class EmployeeFlowTests(TestCase):
+    """The design's card flow: Welcome → AUP (14 points) → Traffic Light →
+    Highway Code → licence card with the licence image."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+    _event = PlanLimitTests._event
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(name="SpinifexIT", slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"))
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+        _answer_policy(self.org)
+        from .admin_setup import update
+
+        update(self.org, flow_started="2026-10-14")
+        self._event("U5")
+        self.member = AIDLUser.objects.get(microsoft_id="slack:T9:U5")
+
+    def _press(self, action_id, value="x"):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U5", "team_id": "T9"},
+                   "container": {"channel_id": "D5", "message_ts": "1.1"},
+                   "actions": [{"action_id": action_id, "value": value}]}
+        self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                     "application/x-www-form-urlencoded")
+
+    def _posted(self):
+        return [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U5"]
+
+    def test_full_flow_to_licence(self):
+        self.calls.clear()
+        self._press("aidl_flow_start", "start")
+        card = self._posted()[-1]
+        self.assertIn("Card 1 of 3", json.dumps(card))
+        self.assertEqual(card["attachments"][0]["color"], "#14140F")               # design's coloured bar
+        for n in range(1, 15):
+            self._press("aidl_flow_aup", f"aup_{n}")
+        update = [b for m, b in self.calls if m == "chat.update"][-1]
+        self.assertIn("AGREED", json.dumps(update))
+        self.assertIn("Traffic Light Check", json.dumps(self._posted()[-1]))
+        self._press("aidl_flow_tl", "next")
+        self.assertIn("The Highway Code", json.dumps(self._posted()[-1]))
+        self._press("aidl_flow_hc", "next")
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.licence_issued)
+        licence = self._posted()[-1]
+        image = next(b for b in licence["attachments"][0]["blocks"] if b["type"] == "image")
+        self.assertIn(f"/api/licenses/{self.member.licence_number}.png?s=", image["image_url"])
+
+    def test_points_must_be_in_order(self):
+        from . import aup_store
+
+        self._press("aidl_flow_aup", "aup_5")
+        self.assertEqual(aup_store.points_accepted(self.member, self.org), set())
+
+    def test_licence_image_endpoint(self):
+        import base64
+
+        from .licence_image import image_url, save_logo
+        from PIL import Image
+        import io
+
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 40), "#336699").save(buf, "PNG")
+        self.org.logo_data = save_logo(buf.getvalue())
+        self.org.save()
+        self.member.licence_issued = True
+        self.member.licence_number = "AIDL-L-1234-5678"
+        self.member.save()
+        path = image_url("AIDL-L-1234-5678").split("onrender.com", 1)[-1]
+        resp = self.client.get(path)
+        self.assertEqual(resp["Content-Type"], "image/png")
+        self.assertEqual(resp.content[1:4], b"PNG")
+        self.assertEqual(self.client.get("/api/licenses/AIDL-L-1234-5678.png?s=wrong").status_code, 404)
+        dl = self.client.get(path + "&download=1")
+        self.assertIn("attachment", dl["Content-Disposition"])
+
+    def test_logo_upload_saved(self):
+        import io
+
+        from PIL import Image
+        from urllib.parse import urlencode
+
+        buf = io.BytesIO()
+        Image.new("RGB", (800, 600), "#AA3300").save(buf, "PNG")
+        view = {"callback_id": "aidl_logo", "private_metadata": "{}", "state": {"values": {"logo": {"v": {
+            "type": "file_input", "files": [{"id": "F1", "url_private_download": "https://files.slack.com/F1/logo.png"}]}}}}}
+        payload = {"type": "view_submission", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"}, "view": view}
+        with patch("requests.get") as get:
+            get.return_value.content = buf.getvalue()
+            get.return_value.raise_for_status = lambda: None
+            self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                         "application/x-www-form-urlencoded")
+        self.org.refresh_from_db()
+        self.assertTrue(self.org.logo_data)
+        self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer xoxb-t")
+
+    def test_admin_center_logo_button(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+        self.assertIn("aidl_logo_open", home)

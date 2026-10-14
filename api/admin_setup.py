@@ -1,14 +1,14 @@
 """The admin's step-by-step setup (Slack Admin Center):
 
-  1. Create the AI policy (AUP) — or ask someone else to
+  1. Create the AI policy (AUP)
   2. Add admins (optional)
   3. Add your team
-  4. Send the learning cards: AUP, Traffic Light Check, Highway Code
+  4. Start the programme — every employee gets the Welcome card and moves
+     through the AUP, the Traffic Light Check and the Highway Code to their
+     licence (employee_flow.py); people who join later start automatically
   5. Licences & awareness cards
 
-Learning cards reach employees only after the admin sends each one the
-first time; anyone who joins later gets the already-sent cards
-automatically. Progress lives in Organization.setup_state (JSON).
+Progress lives in Organization.setup_state (JSON).
 """
 
 from __future__ import annotations
@@ -74,40 +74,32 @@ def _slack_learners(org: Organization):
     return learners(org).filter(microsoft_id__startswith=f"slack:{org.slack_team_id}:")
 
 
+def started(org: Organization) -> bool:
+    return bool(state(org).get("flow_started"))
+
+
 def send_item(org: Organization, item: str) -> tuple[int, int]:
-    """DM every team member the card (their dashboard opened on it) and mark
-    it sent, so later joiners get it automatically. Returns (sent, total)."""
-    from .slack_blocks import user_dashboard_blocks
+    """Step 4 "Start" (item "flow"), or "aup" = send the AUP: starts the
+    programme, or — once started — sends everyone the new AUP version.
+    Returns (sent, total)."""
+    from . import employee_flow
+    from .aup_store import version
 
-    sent_info = {f"{item}_sent": timezone.now().isoformat()}
-    if item == "aup":  # remember which version went out, to spot later changes
-        from .aup_store import version
-
-        sent_info["aup_sent_version"] = version(org)
-    update(org, **sent_info)
-    token = slack_client.bot_token(org)
-    members = list(_slack_learners(org))
-    sent = 0
-    for member in members:
-        result = slack_client.send_dm(token, org, member.microsoft_id.split(":")[-1],
-                                      text=ITEM_LABEL[item], blocks=user_dashboard_blocks(member, org, ITEM_TAB[item]))
-        sent += 1 if result.get("ok") or result.get("fallback_ok") else 0
-    return sent, len(members)
+    now = timezone.now().isoformat()
+    if started(org) and item == "aup":
+        update(org, aup_sent=now, aup_sent_version=version(org))
+        return employee_flow.send_new_aup(org)
+    # The older dashboard tabs show these cards once "sent".
+    update(org, flow_started=now, aup_sent=now, traffic_light_sent=now, highway_code_sent=now,
+           aup_sent_version=version(org))
+    return employee_flow.start_everyone(org)
 
 
-def remind_item(org: Organization, item: str) -> tuple[int, int]:
-    """DM only the team members who haven't accepted the card yet."""
-    from .slack_blocks import user_dashboard_blocks
+def remind_item(org: Organization, item: str = "flow") -> tuple[int, int]:
+    """Post each unfinished employee's current card again."""
+    from . import employee_flow
 
-    token = slack_client.bot_token(org)
-    pending = [m for m in _slack_learners(org) if not has_acknowledged(m, item)]
-    sent = 0
-    for member in pending:
-        result = slack_client.send_dm(token, org, member.microsoft_id.split(":")[-1],
-                                      text=f"Reminder: {ITEM_LABEL[item]}",
-                                      blocks=user_dashboard_blocks(member, org, ITEM_TAB[item]))
-        sent += 1 if result.get("ok") or result.get("fallback_ok") else 0
-    return sent, len(pending)
+    return employee_flow.remind_everyone(org)
 
 
 def aup_change(org: Organization, st: dict | None = None) -> dict:
@@ -155,7 +147,8 @@ def summary(org: Organization) -> dict:
     aup_done = is_complete(org)
     admins_done = bool(st.get("admins_step")) or admins > 1
     team_done = members > 0
-    cards_done = all(s["sent"] for s in sends.values())
+    cards_done = started(org) or all(s["sent"] for s in sends.values())
+    licensed = _slack_learners(org).filter(licence_issued=True).count()
     return {
         "aup_done": aup_done,
         "aup_draft_section": draft(org)["section"] if not aup_done and has_draft(org) else None,
@@ -163,6 +156,7 @@ def summary(org: Organization) -> dict:
         "team_done": team_done,
         "cards_done": cards_done,
         "members": members,
+        "licensed": licensed,
         "sends": sends,
         "done_count": sum([aup_done, admins_done, team_done, cards_done]),
     }

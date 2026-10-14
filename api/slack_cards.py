@@ -415,6 +415,7 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "seats_purchased": org.seats_purchased,
             "seats_renew": metrics["seats_renews_on"],
             "plan": usage(org),
+            "has_logo": bool(org.logo_data),
             # Team numbers exclude admins (IT / HR run AIDL, they don't take part).
             "licences_issued": sum(1 for m in metrics["members"] if m.licence_issued and m.role != AIDLUser.Role.ADMIN and not m.slack_left_at),
             "enrolled": sum(1 for m in metrics["members"] if m.role != AIDLUser.Role.ADMIN and not m.slack_left_at),

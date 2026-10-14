@@ -58,6 +58,9 @@ class Organization(models.Model):
     # Plan choices (plans.py / billing.py), JSON: topics picked per plan,
     # Enterprise delivery schedule, a pending upgrade and the history.
     billing = models.TextField(blank=True, default="")
+    # Company logo (PNG, base64) uploaded in the Slack Admin Center — shown on
+    # the licence image as the header logo and a faint watermark.
+    logo_data = models.TextField(blank=True, default="")
     seats_renews_on = models.DateField(null=True, blank=True)
     admin_seat_limit = models.IntegerField(default=3)
     rollout_steps_done = models.IntegerField(default=3)
