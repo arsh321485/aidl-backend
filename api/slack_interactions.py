@@ -97,7 +97,7 @@ def _admin_for(payload: dict) -> AIDLUser | None:
 _PREOPENED: dict[str, str] = {}
 _PREOPEN_LOCK = threading.Lock()
 _POPUP_TITLES = {
-    "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP", "aidl_aup_delegate": "Delegate the AUP",
+    "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP",
     "aidl_add_people": "Add your team", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
@@ -161,7 +161,6 @@ _SUBMIT_TAB = {
     "aidl_card_send": "cards",
     "aidl_card_new": "cards",
     "aidl_add_app": "ai-apps",
-    "aidl_delegate_aup": "home",
     "aidl_add_people": "home",
     "aidl_aup_section": "home",
 }
@@ -195,7 +194,6 @@ def _handle_submission(payload: dict):
         "aidl_card_send": lambda: slack_modals.submit_card_send(admin, org, view),
         "aidl_card_new": lambda: slack_modals.submit_new_card(admin, org, view),
         "aidl_add_app": lambda: slack_modals.submit_add_app(admin, org, view),
-        "aidl_delegate_aup": lambda: slack_modals.submit_delegate(admin, org, team_id, view),
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
         "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
     }
@@ -220,8 +218,8 @@ def _submit_aup_section(admin, org, view: dict) -> dict:
 
 
 def _after_aup_published(org, admin) -> None:
-    """Refresh the Admin Center; tell the owner if someone else (a delegate)
-    created or changed the AUP."""
+    """Refresh the Admin Center; tell the owner if another admin created or
+    changed the AUP."""
     from .slack_onboarding import primary_admin
 
     publish_admin_center(org, admin)
@@ -615,11 +613,6 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                 "This link is only for you and expires soon."},
              "accessory": {"type": "button", "text": {"type": "plain_text", "text": "Open plans page"},
                            "url": url, "action_id": "aidl_link_plans", "style": "primary"}}])
-        return HttpResponse(status=200)
-
-    if org is not None and action_id == "aidl_aup_delegate" and d["can_admins"]:
-        meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
-        _open_modal(org, payload.get("trigger_id", ""), slack_modals.delegate_view(meta))
         return HttpResponse(status=200)
 
     if org is not None and action_id == "aidl_add_people" and d["can_team"]:

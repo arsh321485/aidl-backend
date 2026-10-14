@@ -218,7 +218,19 @@ AIDL_INVITE_EXPIRY_DAYS = int(os.getenv("AIDL_INVITE_EXPIRY_DAYS", "14"))
 # (stripe / razorpay) is connected; BILLING_TEST_MODE=True lets admins
 # activate an upgrade without paying (testing only — never on a live site
 # with real customers). Prices are display text until the provider is set.
-BILLING_PROVIDER = os.getenv("BILLING_PROVIDER", "").strip().lower()
+# Stripe: hosted Checkout (subscription per user) + webhook
+# /api/billing/stripe/webhook/. STRIPE_PRICE_<PLAN> = the plan's recurring
+# Price id from the Stripe dashboard (price_...), billed per user.
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICES = {"basic": os.getenv("STRIPE_PRICE_BASIC", ""), "enterprise": os.getenv("STRIPE_PRICE_ENTERPRISE", "")}
+BILLING_PROVIDER = os.getenv("BILLING_PROVIDER", "stripe" if STRIPE_SECRET_KEY else "").strip().lower()
+# Upgrade requests without online payment go here.
+BILLING_SALES_EMAIL = os.getenv("BILLING_SALES_EMAIL", "")
+# Admins (emails, comma-separated) who can upgrade without paying.
+BILLING_UNLIMITED_ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("BILLING_UNLIMITED_ADMIN_EMAILS", "").split(",")
+                                  if e.strip()}
 BILLING_TEST_MODE = os.getenv("BILLING_TEST_MODE", "False").lower() in ("1", "true", "yes")
 PLAN_PRICES = {
     "trial": os.getenv("PLAN_PRICE_TRIAL", "Free"),

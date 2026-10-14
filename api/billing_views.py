@@ -9,6 +9,12 @@ from the Slack "Upgrade plan" link.
 
 from __future__ import annotations
 
+import logging
+
+from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
@@ -20,6 +26,8 @@ from . import billing
 from .auth_views import JWTAuthentication
 from .models import AIDLUser
 from .org_service import get_organization_for_user
+
+logger = logging.getLogger(__name__)
 
 
 def _org_for_admin(request):
@@ -93,4 +101,25 @@ def checkout_view(request):
                                   _topics(request.data.get("topics")), schedule, seats)
     except billing.UpgradeError as exc:
         return Response({k: [v] for k, v in exc.errors.items()}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:  # noqa: BLE001 — e.g. Stripe refused the session
+        from .stripe_billing import StripeError
+
+        if not isinstance(exc, StripeError):
+            raise
+        return Response({"detail": f"Payment could not be started: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
     return Response(result)
+
+
+@csrf_exempt
+@require_POST
+def stripe_webhook(request):
+    """Stripe → AIDL: activate a paid upgrade / downgrade a cancelled one."""
+    from . import stripe_billing
+
+    try:
+        event = stripe_billing.verify(request.body, request.headers.get("Stripe-Signature", ""))
+    except (stripe_billing.StripeError, ValueError) as exc:
+        logger.warning("stripe webhook rejected: %s", exc)
+        return HttpResponse(status=400)
+    logger.info("stripe webhook %s: %s", event.get("type"), stripe_billing.handle(event))
+    return HttpResponse(status=200)

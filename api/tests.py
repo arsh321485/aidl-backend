@@ -1958,9 +1958,9 @@ class OrganizationOwnerTests(TestCase):
         org.owner_user_id = str(owner.pk)
         org.save()
         self.assertEqual(primary_admin(org).pk, owner.pk)
-        # Only the owner can hand the AUP to someone else / add admins.
-        self.assertIn("aidl_aup_delegate", json.dumps(admin_card_blocks(build_admin_cards_context(owner), "home")))
-        self.assertNotIn("aidl_aup_delegate", json.dumps(admin_card_blocks(build_admin_cards_context(older), "home")))
+        # Only the owner can change the plan.
+        self.assertIn("aidl_upgrade", json.dumps(admin_card_blocks(build_admin_cards_context(owner), "home")))
+        self.assertNotIn("aidl_upgrade", json.dumps(admin_card_blocks(build_admin_cards_context(older), "home")))
 
     def test_set_owner_command(self):
         from django.core.management import call_command
@@ -2044,19 +2044,6 @@ class SetupStepsTests(TestCase):
         self.calls.clear()
         self._press("aidl_remind_item", "highway_code")           # U5 hasn't accepted yet
         self.assertTrue(any(m == "chat.postMessage" and b["channel"] == "U5" for m, b in self.calls))
-
-    def test_ask_someone_else_makes_aup_only_admin(self):
-        resp = self._submit("aidl_delegate_aup", {"person": {"v": {"type": "users_select", "selected_user": "U8"}},
-                                                  "note": {"v": {"value": "please"}}})
-        self.assertEqual(resp.json(), {"response_action": "clear"})
-        delegate = AIDLUser.objects.get(microsoft_id="slack:T9:U8")
-        self.assertEqual(delegate.role, AIDLUser.Role.ADMIN)
-        self.assertTrue(delegate.perm_policy)
-        self.assertFalse(delegate.perm_approve_apps or delegate.perm_access_cards or delegate.perm_create_card)
-        dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U8")
-        self.assertIn("aidl_policy_open", json.dumps(dm["blocks"]))
-        self.assertNotIn("aidl_open_add-admin", json.dumps(dm["blocks"]))   # AUP step only
-        self.assertIn("Delegated to", self._home())
 
     def test_add_people_adds_to_channel_and_respects_plan(self):
         users = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U5", "U6"]}}}
@@ -2688,3 +2675,76 @@ class PlanUpgradeTests(TestCase):
         self.assertIn("aidl_upgrade", home)
         self.assertIn("Trial plan", home)
         self.assertIn("1 card a month", home)
+
+
+@override_settings(STRIPE_SECRET_KEY="sk_test_x", STRIPE_WEBHOOK_SECRET="whsec_test", BILLING_PROVIDER="stripe",
+                   STRIPE_PRICES={"basic": "price_basic", "enterprise": "price_ent"}, BILLING_TEST_MODE=False,
+                   BILLING_UNLIMITED_ADMIN_EMAILS={"free@aidl.example"})
+class StripeBillingTests(TestCase):
+    def setUp(self):
+        self.org = make_org(slack_team_id="T9", plan="trial")
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", email="owner@acme.example")
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(self.owner)}")
+
+    def _webhook(self, event):
+        import hashlib, hmac, time
+
+        body = json.dumps(event).encode()
+        ts = str(int(time.time()))
+        sig = hmac.new(b"whsec_test", f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+        return self.client.post("/api/billing/stripe/webhook/", body, content_type="application/json",
+                                HTTP_STRIPE_SIGNATURE=f"t={ts},v1={sig}")
+
+    def test_checkout_creates_stripe_session(self):
+        with patch("api.stripe_billing.requests.post") as post:
+            post.return_value.status_code = 200
+            post.return_value.content = b"{}"
+            post.return_value.json.return_value = {"url": "https://checkout.stripe.com/c/pay/cs_test_1"}
+            resp = self.client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"], "seats": 20}, format="json")
+        self.assertEqual(resp.json(), {"status": "redirect", "url": "https://checkout.stripe.com/c/pay/cs_test_1"})
+        data = post.call_args.kwargs["data"]
+        self.assertEqual((data["mode"], data["line_items[0][price]"], data["line_items[0][quantity]"]),
+                         ("subscription", "price_basic", "20"))
+        self.assertEqual((data["metadata[app]"], data["metadata[plan]"], data["metadata[topics]"]), ("aidl", "basic", "C10"))
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "trial")                       # nothing changes until Stripe confirms
+
+    def test_webhook_activates_paid_upgrade_once(self):
+        event = {"id": "evt_1", "type": "checkout.session.completed", "data": {"object": {
+            "payment_status": "paid", "customer": "cus_1", "subscription": "sub_1",
+            "metadata": {"app": "aidl", "org_id": str(self.org.pk), "plan": "enterprise", "topics": "C12,C13",
+                         "days": "0,1,2,3", "hour": "9", "seats": "40", "by": "owner@acme.example"}}}}
+        self.assertEqual(self._webhook(event).status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual((self.org.plan, self.org.seats_purchased), ("enterprise", 40))
+        from .plans import schedule_of
+
+        self.assertEqual(schedule_of(self.org), {"days": (0, 1, 2, 3), "hour": 9})
+        self._webhook(event)                                            # Stripe retry → no second activation
+        self.assertEqual(len(json.loads(self.org.billing)["history"]), 1)
+        cancel = {"id": "evt_2", "type": "customer.subscription.deleted",
+                  "data": {"object": {"id": "sub_1", "metadata": {"app": "aidl"}}}}
+        self._webhook(cancel)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "trial")
+
+    def test_webhook_rejects_bad_signature_and_other_products(self):
+        bad = self.client.post("/api/billing/stripe/webhook/", b"{}", content_type="application/json",
+                               HTTP_STRIPE_SIGNATURE="t=1,v1=nope")
+        self.assertEqual(bad.status_code, 400)
+        other = {"id": "evt_3", "type": "checkout.session.completed",
+                 "data": {"object": {"payment_status": "paid", "client_reference_id": "vaptfix-123", "metadata": {}}}}
+        self.assertEqual(self._webhook(other).status_code, 200)       # VAPTFIX checkout on the shared account
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "trial")
+
+    def test_unlimited_admin_upgrades_without_payment(self):
+        self.owner.email = "free@aidl.example"
+        self.owner.save()
+        with patch("api.stripe_billing.requests.post") as post:
+            resp = self.client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]}, format="json")
+        self.assertEqual(resp.json()["status"], "activated")
+        post.assert_not_called()
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "basic")

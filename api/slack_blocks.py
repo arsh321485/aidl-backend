@@ -72,7 +72,7 @@ def _open_button(tab: str, open_url: str) -> dict:
 
 # ---------- Admin Center: step-by-step setup (admin_setup.py) ----------
 
-_DEMO_SETUP = {"aup_done": False, "delegate_name": "", "admins_done": False, "team_done": False,
+_DEMO_SETUP = {"aup_done": False, "admins_done": False, "team_done": False,
                "cards_done": False, "members": 0, "done_count": 0,
                "sends": {i: {"sent": False, "accepted": 0} for i in ("aup", "traffic_light", "highway_code")}}
 _SEND_LABEL = {"aup": "📄 AI Acceptable Use Policy", "traffic_light": "🚦 Traffic Light Check",
@@ -92,15 +92,11 @@ def _step_aup(d: dict, st: dict) -> list:
         blocks = [_section("*1 · Create your AI policy (AUP)*\nAnswer a short questionnaire in 15 steps — recommended "
                            "answers are already selected — and AIDL writes your team's AI Acceptable Use Policy "
                            "(14 points).")]
-        if st.get("delegate_name"):
-            blocks.append(_context(f"⏳ Delegated to *{st['delegate_name']}* — waiting for them to create it."))
         if d["can_policy"]:
             blocks.append(_actions("aidl_step_aup",
                                    _button("📝 Create AUP" if st.get("aup_draft_section") is None
                                            else f"📝 Continue AUP (step {st['aup_draft_section'] + 1} of 15)",
-                                           "aidl_policy_open", value="policy", style="primary"),
-                                   _button("👥 Delegate AUP", "aidl_aup_delegate", value="delegate")
-                                   if d["can_admins"] else None))
+                                           "aidl_policy_open", value="policy", style="primary")))
         return blocks
     apps = f"{d['approved_apps']} of {d['total_apps']} apps approved"
     return [
