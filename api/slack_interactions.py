@@ -23,7 +23,7 @@ from django.views.decorators.http import require_POST
 
 from .auth_jwt import create_access_token
 from .models import AIDLUser
-from . import admin_setup, aup_slack, aup_store, slack_client, slack_modals
+from . import admin_setup, aup_slack, aup_store, employee_flow, slack_client, slack_modals
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
 from .slack_cards import build_admin_cards_context, light_admin_context
@@ -98,7 +98,7 @@ _PREOPENED: dict[str, str] = {}
 _PREOPEN_LOCK = threading.Lock()
 _POPUP_TITLES = {
     "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP",
-    "aidl_add_people": "Add your team", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
+    "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
 }
@@ -163,6 +163,7 @@ _SUBMIT_TAB = {
     "aidl_add_app": "ai-apps",
     "aidl_add_people": "home",
     "aidl_aup_section": "home",
+    "aidl_logo": "home",
 }
 
 
@@ -184,6 +185,8 @@ def _handle_submission(payload: dict):
         allowed = d["can_create_card"]
     elif callback == "aidl_aup_section":
         allowed = d["can_policy"]
+    elif callback == "aidl_logo":
+        allowed = d["can_admins"]
     if not allowed:
         return JsonResponse(slack_modals.errors(**{_first_block(view): "Your admin permissions don't include this."}))
 
@@ -196,6 +199,7 @@ def _handle_submission(payload: dict):
         "aidl_add_app": lambda: slack_modals.submit_add_app(admin, org, view),
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
         "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
+        "aidl_logo": lambda: slack_modals.submit_logo(org, view),
     }
     result = handlers[callback]() or {}
     if "response_action" in result:
@@ -312,11 +316,14 @@ def _send_or_remind(org, admin, item: str, *, remind: bool, response_url: str, v
     get it automatically) or remind the people who haven't accepted it."""
     if remind:
         sent, total = admin_setup.remind_item(org, item)
-        text = f"🔔 Reminder sent to {sent} of {total} who haven't accepted {admin_setup.ITEM_LABEL[item]}."
-    else:
+        text = f"🔔 Reminder sent to {sent} of {total} people who haven't finished yet."
+    elif item == "aup" and admin_setup.started(org):
         sent, total = admin_setup.send_item(org, item)
-        text = (f"✓ {admin_setup.ITEM_LABEL[item]} sent to {sent} of {total} team member(s). "
-                "People who join later get it automatically.")
+        text = f"✓ The new AUP version was sent to {sent} of {total} team member(s)."
+    else:
+        sent, total = admin_setup.send_item(org, "flow")
+        text = (f"✓ Programme started — the Welcome card went to {sent} of {total} team member(s). "
+                "People who join later start automatically.")
     if view_id:  # clicked inside the AUP-ready popup
         slack_client.slack_api("views.update", slack_client.bot_token(org), json={
             "view_id": view_id, "view": aup_slack.report_view(org, notice=text)})
@@ -484,6 +491,18 @@ def slack_interactions(request):
             slack_modals.in_background(_acknowledge, org, member, payload, action.get("value", ""))
         return HttpResponse(status=200)
 
+    # The employee card flow (employee_flow.py): Let's go / I agree / Got it.
+    if action_id.startswith("aidl_flow_"):
+        org = _org_for_team(payload)
+        member = _admin_for(payload)  # any AIDL account for this Slack user
+        if org is not None and member is not None:
+            container = payload.get("container") or {}
+            channel = container.get("channel_id") or (payload.get("channel") or {}).get("id", "")
+            ts = container.get("message_ts") or (payload.get("message") or {}).get("ts", "")
+            slack_modals.in_background(employee_flow.advance, org, member, action_id, action.get("value", ""),
+                                       channel, ts)
+        return HttpResponse(status=200)
+
     # Inside the Create AUP popup: an answer changed, or Back.
     if (payload.get("view") or {}).get("callback_id") == aup_slack.CALLBACK and (
             action_id == "aidl_aup_back" or (action.get("block_id") or "").startswith("q|")):
@@ -595,7 +614,7 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
     # Setup steps (admin_setup.py).
     if org is not None and action_id in ("aidl_aup_send", "aidl_send_item", "aidl_remind_item"):
         item = "aup" if action_id == "aidl_aup_send" else action.get("value", "")
-        if item in admin_setup.ITEMS and d["can_send"]:
+        if item in admin_setup.ITEMS + ("flow",) and d["can_send"]:
             _send_or_remind(org, user, item, remind=action_id == "aidl_remind_item",
                             response_url=response_url, view_id=(payload.get("view") or {}).get("id", ""))
         return HttpResponse(status=200)
@@ -613,6 +632,11 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                 "This link is only for you and expires soon."},
              "accessory": {"type": "button", "text": {"type": "plain_text", "text": "Open plans page"},
                            "url": url, "action_id": "aidl_link_plans", "style": "primary"}}])
+        return HttpResponse(status=200)
+
+    if org is not None and action_id == "aidl_logo_open" and d["can_admins"]:
+        meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
+        _open_modal(org, payload.get("trigger_id", ""), slack_modals.logo_view(org, meta))
         return HttpResponse(status=200)
 
     if org is not None and action_id == "aidl_add_people" and d["can_team"]:

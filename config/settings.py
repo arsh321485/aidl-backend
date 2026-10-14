@@ -33,6 +33,8 @@ ALLOWED_HOSTS = [
 ]
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://aidl-frontend-8owk.vercel.app")
+# This backend's public address — Slack downloads licence images from it.
+BACKEND_URL = os.getenv("BACKEND_URL", "https://aidl-backend.onrender.com").rstrip("/")
 # After Teams login, browser lands on frontend with tokens
 AUTH_SUCCESS_REDIRECT = os.getenv(
     "AUTH_SUCCESS_REDIRECT",
@@ -54,7 +56,7 @@ SLACK_SCOPES = os.getenv("SLACK_SCOPES", "openid,email,profile")
 # create/reuse #aidl, invite admins, post the Admin cards.
 SLACK_BOT_SCOPES = os.getenv(
     "SLACK_BOT_SCOPES",
-    "channels:manage,channels:join,channels:read,chat:write,users:read,users:read.email,im:write,files:write",
+    "channels:manage,channels:join,channels:read,chat:write,users:read,users:read.email,im:write,files:write,files:read",
 )
 # Slack channel names must be lowercase with no spaces ("AIDL Driving License"
 # → "aidl-driving-license").

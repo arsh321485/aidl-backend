@@ -1,7 +1,7 @@
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from . import aup_views, auth_views, billing_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views
+from . import aup_views, auth_views, billing_views, licence_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
@@ -41,6 +41,7 @@ urlpatterns = [
     path("auth/refresh/", auth_views.refresh, name="auth-refresh"),
     path("auth/logout/", auth_views.logout, name="auth-logout"),
     # Signup form dropdowns — Country -> State -> City
+    path("licenses/<str:number>.png", licence_views.licence_png, name="licence-png"),
     path("billing/plans/", billing_views.plans_view, name="billing-plans"),
     path("billing/preview/", billing_views.preview_view, name="billing-preview"),
     path("billing/checkout/", billing_views.checkout_view, name="billing-checkout"),

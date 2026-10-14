@@ -84,6 +84,81 @@ def errors(**fields) -> dict:
 # ---------- views ----------
 
 
+def logo_view(org: Organization, meta: dict) -> dict:
+    """Company logo for the licence image (header + faint watermark)."""
+    blocks = [
+        {"type": "section", "text": _md("Your logo appears on every AI Driving License issued for "
+                                        f"*{org.name}*: in the header and as a faint watermark, so licences carry "
+                                        "your company's mark and can't be passed off as anyone else's.")},
+        _input("logo", "Logo (PNG or JPG, square works best)",
+               {"type": "file_input", "action_id": "v", "filetypes": ["png", "jpg", "jpeg"], "max_files": 1},
+               optional=bool(org.logo_data)),
+    ]
+    if org.logo_data:
+        blocks.append(_input("remove", "Current logo", {"type": "checkboxes", "action_id": "v", "options": [
+            _option("Remove the current logo", "remove")]}, optional=True,
+            hint="A logo is set. Upload a new file to replace it, or tick to remove it."))
+    return _modal("aidl_logo", "Company logo", blocks, submit="Save", meta=meta)
+
+
+def submit_logo(org: Organization, view: dict) -> dict:
+    values = _values(view)
+    files = ((values.get("logo") or {}).get("v") or {}).get("files") or []
+    remove = "remove" in (_value(values, "remove") or [])
+    if not files and not remove:
+        return errors(logo="Choose a file to upload.")
+    meta = json.loads(view.get("private_metadata") or "{}")
+    in_background(_save_logo, org.pk, files[0] if files else None, remove, meta.get("channel_id", ""))
+    return {"notice": "✓ Logo removed." if remove and not files else "⏳ Saving your logo…"}
+
+
+def _save_logo(org_pk, file_obj: dict | None, remove: bool, channel_id: str) -> None:
+    """Download the uploaded file from Slack (files:read), store it as a PNG."""
+    import requests
+
+    from .licence_image import save_logo
+    from .slack_blocks import publish_admin_center
+    from .slack_onboarding import primary_admin
+
+    org = Organization.objects.get(pk=org_pk)
+    if file_obj is None:
+        org.logo_data = ""
+        org.save(update_fields=["logo_data", "updated_at"])
+    else:
+        token = slack_client.bot_token(org)
+        url = file_obj.get("url_private_download") or file_obj.get("url_private")
+        if not url:
+            info = slack_client.slack_api("files.info", token, params={"file": file_obj.get("id", "")})
+            url = (info.get("file") or {}).get("url_private_download", "")
+            if info.get("error") == "missing_scope":
+                _tell_owner(org, "⚠️ AIDL couldn't read the logo file: the Slack app needs the *files:read* "
+                                 "permission. Sign in with Slack again on the AIDL website (Organization → Slack → "
+                                 "Allow) to grant it, then upload the logo again.")
+                return
+        try:
+            resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
+            resp.raise_for_status()
+            org.logo_data = save_logo(resp.content)
+        except Exception:  # noqa: BLE001
+            _tell_owner(org, "⚠️ AIDL couldn't read that logo file. Please upload a PNG or JPG image.")
+            return
+        org.save(update_fields=["logo_data", "updated_at"])
+        _tell_owner(org, "✅ Your company logo is saved — it now appears on every AI Driving License for "
+                         f"*{org.name}*.")
+    admin = primary_admin(org)
+    if admin is not None:
+        publish_admin_center(org, admin)
+
+
+def _tell_owner(org: Organization, text: str) -> None:
+    from .slack_onboarding import primary_admin
+
+    owner = primary_admin(org)
+    if owner is not None and owner.microsoft_id.startswith("slack:"):
+        slack_client.send_dm(slack_client.bot_token(org), org, owner.microsoft_id.split(":")[-1], text=text,
+                             blocks=[{"type": "section", "text": _md(text)}])
+
+
 def add_people_view(meta: dict, d: dict) -> dict:
     """Setup step 3 — pick people; AIDL adds them to the AIDL channel and
     onboarding does the rest (no Add User form)."""

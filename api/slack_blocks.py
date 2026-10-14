@@ -149,31 +149,37 @@ def _step_team(d: dict, st: dict) -> list:
 
 
 def _step_send(d: dict, st: dict) -> list:
+    """Step 4 — start the employee card flow (employee_flow.py) once."""
     if not (st["aup_done"] and st["team_done"]):
-        return [_locked(4, "Send the learning cards", "step 3")]
-    head = ("*4 · Send the learning cards*\nSend each card to your team once — people who join later get it "
-            "automatically. Accepting the Highway Code and Traffic Light Check earns the licence."
-            if not st["cards_done"] else "✅  *4 · Learning cards sent*")
-    blocks = [_section(head)]
+        return [_locked(4, "Start the programme", "step 3")]
     members = st["members"]
-    for item in ("aup", "traffic_light", "highway_code"):
-        s = st["sends"][item]
-        if s.get("changed"):  # the AUP was changed after it was sent
-            line = (f"{_SEND_LABEL[item]}\n⚠️ *The AUP has changed* (`{s['sent_version']}` → `{s['version']}`) — "
-                    f"your team still has the old version  ·  *{s['accepted']}* of {members} accepted the new one")
-        else:
-            line = f"{_SEND_LABEL[item]}\n" + (f"✓ Sent  ·  *{s['accepted']}* of {members} accepted" if s["sent"]
-                                                 else "_Not sent yet_")
-        block = _section(line)
+    aup = st["sends"]["aup"]
+    if not st["cards_done"]:
+        block = _section("*4 · Start the programme*\nEveryone gets a Welcome card in Slack and moves through the AUP "
+                         f"({aup_points_label()}), the Traffic Light Check and the Highway Code at their own pace — "
+                         "their AI Driving License is issued at the end. People who join later start automatically.")
         if d["can_send"]:
-            if s.get("changed"):
-                block["accessory"] = _button("📤 Send new version", "aidl_send_item", value=item, style="primary")
-            elif not s["sent"]:
-                block["accessory"] = _button("📤 Send", "aidl_send_item", value=item, style="primary")
-            elif s["accepted"] < members:
-                block["accessory"] = _button("🔔 Remind", "aidl_remind_item", value=item)
-        blocks.append(block)
+            block["accessory"] = _button(f"📤 Start for {members}", "aidl_send_item", value="flow", style="primary")
+        return [block]
+    blocks = [_section(f"✅  *4 · Programme started*  ·  *{aup['accepted']}* of {members} agreed to the AUP  ·  "
+                       f"*{st.get('licensed', 0)}* of {members} licensed")]
+    if d["can_send"]:
+        if aup.get("changed"):  # the AUP was changed after it was sent
+            blocks.append(_section(f"⚠️ *The AUP has changed* (`{aup['sent_version']}` → `{aup['version']}`) — your "
+                                   "team still has the old version.",
+                                   accessory=_button("📤 Send new version", "aidl_send_item", value="aup",
+                                                     style="primary")))
+        elif st.get("licensed", 0) < members:
+            blocks.append(_actions("aidl_step_send", _button("🔔 Remind people who haven't finished",
+                                                             "aidl_remind_item", value="flow")))
     return blocks
+
+
+def aup_points_label() -> str:
+    from .aup_store import POINTS
+
+    return f"{POINTS} short points"
+
 
 
 def _step_licences(d: dict, st: dict) -> list:
@@ -229,6 +235,11 @@ def _plan_line(d: dict) -> list:
     if d.get("can_admins"):
         block["accessory"] = _button("⬆️ Upgrade plan" if p.get("can_upgrade", True) else "⚙️ Change topics",
                                      "aidl_upgrade", value="upgrade", style="primary" if p.get("can_upgrade") else "")
+        logo = _section("🖼️  *Company logo on licences:* " + ("✅ set" if d.get("has_logo") else
+                                                                  "_not set — add it so licences carry your mark_"),
+                        accessory=_button("Change logo" if d.get("has_logo") else "Add logo", "aidl_logo_open",
+                                          value="logo"))
+        return [block, logo]
     return [block]
 
 
@@ -446,8 +457,7 @@ def user_welcome_blocks(member, org) -> list:
         _context(f"*AIDL* · APP  for {org.name}"),
         {"type": "header", "text": {"type": "plain_text", "text": f"Welcome to AIDL, {first}! 👋", "emoji": True}},
         _section(f"You've been added to *{org.name}'s* AI Driving License programme."),
-        _context("Next: accept your *AI Acceptable Use Policy* one point at a time, the *Highway Code* and the "
-                 "*Traffic Light Check* to earn your Learner's Permit."),
+        _context("Your AIDL admin is getting things ready — your first card arrives here soon."),
     ]
 
 

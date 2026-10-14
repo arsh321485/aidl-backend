@@ -96,9 +96,14 @@ def onboard_member(org: Organization, slack_user_id: str, *, force: bool = False
         member.slack_left_at = None
         member.save(update_fields=["slack_left_at", "updated_at"])
         if member.slack_onboarded_at and not force:
-            tab = "license" if member.licence_issued else "home"
-            slack_client.send_dm(token, org, slack_user_id, text="Welcome back to AIDL",
-                                 blocks=user_dashboard_blocks(member, org, tab))
+            from . import admin_setup, employee_flow
+
+            if admin_setup.started(org):
+                employee_flow.resend_current(org, member)  # the card they were on, or their licence
+            else:
+                tab = "license" if member.licence_issued else "home"
+                slack_client.send_dm(token, org, slack_user_id, text="Welcome back to AIDL",
+                                     blocks=user_dashboard_blocks(member, org, tab))
             sync_package(org, member)  # resumes the cards they hadn't had yet
             return "rejoined"
     if member.slack_onboarded_at and not force:
@@ -111,16 +116,14 @@ def onboard_member(org: Organization, slack_user_id: str, *, force: bool = False
         return "already"
     member.refresh_from_db()
 
-    from .admin_setup import first_tab
+    from . import admin_setup, aup_store, employee_flow
 
     first = (member.full_name or "there").split()[0]
-    tab = first_tab(member, org)  # the first learning card the admin has sent
-    results = [
-        slack_client.send_dm(token, org, slack_user_id, text=f"Welcome to AIDL, {first}!",
-                             blocks=user_welcome_blocks(member, org)),
-        slack_client.send_dm(token, org, slack_user_id, text="Your AIDL dashboard",
-                             blocks=user_dashboard_blocks(member, org, tab)),
-    ]
+    if admin_setup.started(org) and aup_store.is_complete(org):
+        results = [employee_flow.start(org, member)]  # the Welcome card → AUP → Traffic Light → Highway Code
+    else:  # the admin hasn't started the programme yet; the Welcome card follows when they do
+        results = [slack_client.send_dm(token, org, slack_user_id, text=f"Welcome to AIDL, {first}!",
+                                        blocks=user_welcome_blocks(member, org))]
     admin = primary_admin(org)
     if admin is not None:
         _warn_if_dm_failed(token, org, admin, member, results)

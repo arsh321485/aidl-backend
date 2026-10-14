@@ -279,18 +279,21 @@ DM_BLOCKED = {
 }
 
 
-def send_dm(token: str, org: Organization, slack_user_id: str, *, text: str, blocks: list) -> dict:
+def send_dm(token: str, org: Organization, slack_user_id: str, *, text: str, blocks: list,
+            attachments: list | None = None) -> dict:
     """DM a message from the AIDL bot. If Slack refuses the DM, show the same
     message privately to that person in the org's channel instead, so they
-    still see it. The result says whether the DM itself worked."""
+    still see it. The result says whether the DM itself worked.
+    `attachments` carry the coloured cards (employee_flow.py)."""
     from .slack_blocks import has_images, text_fallback
 
-    result = slack_api("chat.postMessage", token, json={"channel": slack_user_id, "text": text, "blocks": blocks})
+    extra = {"attachments": attachments} if attachments else {}
+    result = slack_api("chat.postMessage", token, json={"channel": slack_user_id, "text": text, "blocks": blocks, **extra})
     if result.get("error") == "invalid_blocks" and has_images(blocks):
         blocks = text_fallback(blocks)
-        result = slack_api("chat.postMessage", token, json={"channel": slack_user_id, "text": text, "blocks": blocks})
+        result = slack_api("chat.postMessage", token, json={"channel": slack_user_id, "text": text, "blocks": blocks, **extra})
     if result.get("ok") or not org.slack_channel_id:
         return result
     fallback = slack_api("chat.postEphemeral", token, json={
-        "channel": org.slack_channel_id, "user": slack_user_id, "text": text, "blocks": blocks})
+        "channel": org.slack_channel_id, "user": slack_user_id, "text": text, "blocks": blocks, **extra})
     return {**result, "fallback_ok": bool(fallback.get("ok"))}
