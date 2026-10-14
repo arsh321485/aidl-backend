@@ -2587,3 +2587,18 @@ class SendGridBackendTests(TestCase):
             post.return_value.text = "forbidden"
             with self.assertRaises(RuntimeError):
                 send_mail("s", "b", None, ["someone@example.com"])
+
+
+class SetPlanCommandTests(TestCase):
+    def test_basic_plan_with_more_users_and_admins(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from .plans import usage
+
+        org = make_org(slack_team_id="T9", plan="trial")
+        call_command("set_plan", "--team", "T9", "--plan", "basic", "--seats", "500", "--admins", "50", stdout=StringIO())
+        org.refresh_from_db()
+        self.assertEqual((org.plan, org.seats_purchased, org.admin_seat_limit), ("basic", 500, 50))
+        self.assertEqual(usage(org)["limit"], 500)
