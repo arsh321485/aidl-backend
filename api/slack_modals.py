@@ -83,54 +83,6 @@ def errors(**fields) -> dict:
 
 # ---------- views ----------
 
-def delegate_view(meta: dict) -> dict:
-    """Setup step 1 — 'Delegate AUP': e.g. the boss hands the AUP to a
-    manager. That person becomes an admin who can only create the AUP."""
-    return _modal("aidl_delegate_aup", "Delegate the AUP", [
-        {"type": "section", "text": _md("Choose a colleague to create your AI Acceptable Use Policy (AUP). They will "
-                                        "receive a message with the *Create AUP* step and become an admin for the AUP "
-                                        "only — they won't see anything else in the Admin Center.")},
-        _input("person", "Colleague",
-               {"type": "users_select", "action_id": "v", "placeholder": _text("Choose a colleague")}),
-        _input("note", "Message (optional)", {"type": "plain_text_input", "action_id": "v", "multiline": True,
-               "placeholder": _text("Could you set up our AI policy in AIDL? Thank you!")}, optional=True),
-    ], submit="Delegate", meta=meta)
-
-
-def submit_delegate(caller: AIDLUser, org: Organization, team_id: str, view: dict) -> dict:
-    from .admin_setup import update
-    from .slack_blocks import admin_card_blocks
-
-    values = _values(view)
-    d = light_admin_context(caller)
-    if not d["can_admins"]:
-        return errors(person="Only the admin who set up AIDL can do this.")
-    token = slack_client.bot_token(org)
-    slack_user_id, profile = _resolve_slack_user(token, values)
-    if not slack_user_id:
-        return errors(person="Pick a person from your Slack workspace.")
-    person = _upsert_member(org, team_id, slack_user_id, profile)
-    if person is None:
-        return errors(person="This person already belongs to another AIDL organization.")
-    if person.role != AIDLUser.Role.ADMIN:
-        if d["admin_count"] >= d["admin_seat_limit"]:
-            return errors(person=f"{d['admin_seat_limit']} of {d['admin_seat_limit']} admin seats used · no seats left")
-        person.role = AIDLUser.Role.ADMIN
-        person.perm_approve_apps = person.perm_access_cards = person.perm_create_card = False
-    person.perm_policy = True
-    person.save(update_fields=["role", "perm_approve_apps", "perm_access_cards", "perm_create_card", "perm_policy",
-                               "updated_at"])
-    update(org, aup_delegate=str(person.pk))
-    note = _value(values, "note")
-    asked = (f"*{caller.full_name or caller.email}* has asked you to create *{org.name}'s* AI Acceptable Use "
-             "Policy (AUP) in AIDL. Click *Create AUP* below to get started."
-             + (f"\n> {note}" if note else ""))
-    in_background(lambda: slack_client.send_dm(
-        token, org, slack_user_id, text=f"{caller.full_name} has delegated the AUP to you",
-        blocks=[{"type": "section", "text": _md(asked)}] + admin_card_blocks(build_admin_cards_context(person), "home")))
-    return {"notice": f"✓ The AUP has been delegated to {person.full_name or person.email}. "
-                      "You'll get a message when it's ready."}
-
 
 def add_people_view(meta: dict, d: dict) -> dict:
     """Setup step 3 — pick people; AIDL adds them to the AIDL channel and

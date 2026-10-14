@@ -5,11 +5,12 @@ picks the next plan, the topics its extra 12 cards come from, and — for
 Enterprise — the delivery days and time, previews those cards (blurred) and
 goes to checkout.
 
-Checkout is provider-ready: settings.BILLING_PROVIDER names the payment
-provider (stripe / razorpay) once it is connected — create_checkout() is the
-place to call it. Until then:
-- BILLING_TEST_MODE=True activates the upgrade straight away (testing)
-- otherwise the request is saved as pending and the AIDL team is told
+Checkout:
+- admins listed in BILLING_UNLIMITED_ADMIN_EMAILS upgrade without paying
+- Stripe (stripe_billing.py) when STRIPE_SECRET_KEY and the plan's
+  STRIPE_PRICE_<PLAN> are set → hosted Checkout; the webhook activates it
+- BILLING_TEST_MODE=True activates straight away (testing)
+- otherwise the request is saved as pending and BILLING_SALES_EMAIL is told
 Organization.billing (JSON): {"topics": {plan: [codes]}, "schedule": {days,
 hour}, "pending": {...}, "history": [...]}.
 """
@@ -79,6 +80,8 @@ def catalog(org: Organization) -> dict:
         "pending": data.get("pending"),
         "test_mode": settings.BILLING_TEST_MODE,
         "provider": settings.BILLING_PROVIDER,
+        "payment_ready": {k: _stripe_ready(k) for k in ("basic", "enterprise")},
+        "sales_email": settings.BILLING_SALES_EMAIL,
         "topic_cards": plans.TOPIC_CARDS,
         "weekdays": list(plans.WEEKDAYS),
     }
@@ -124,9 +127,11 @@ def validate(org: Organization, plan: str, topics: list[str], schedule: dict | N
 
 
 def activate(org: Organization, plan: str, topics: list[str], schedule: dict | None, seats: int | None,
-             by: AIDLUser | None, how: str) -> None:
+             by: AIDLUser | None, how: str, stripe: dict | None = None) -> None:
     """Switch the plan, save the picks and reschedule everyone's cards."""
     data = _load(org)
+    if stripe:
+        data["stripe"] = {k: v for k, v in stripe.items() if v}
     data.setdefault("topics", {})[plan] = topics
     if plan == "enterprise" and schedule:
         data["schedule"] = {"days": sorted({int(d) for d in schedule["days"]}), "hour": int(schedule["hour"])}
@@ -145,11 +150,58 @@ def activate(org: Organization, plan: str, topics: list[str], schedule: dict | N
     sync_organization(org)
 
 
+def _stripe_ready(plan: str) -> bool:
+    from . import stripe_billing
+
+    return settings.BILLING_PROVIDER == "stripe" and stripe_billing.ready(plan)
+
+
 def create_checkout(org: Organization, request_data: dict, by: AIDLUser) -> str:
-    """Return the payment provider's checkout URL. Connect the provider here
-    (e.g. Stripe Checkout Session / Razorpay Payment Link) and activate the
-    upgrade from its webhook with activate(..., how=provider)."""
-    raise ProviderNotConnected(f"Payment provider '{settings.BILLING_PROVIDER}' is not connected yet.")
+    """The payment provider's checkout URL (activated later by its webhook)."""
+    if settings.BILLING_PROVIDER == "stripe" and _stripe_ready(request_data["plan"]):
+        from . import stripe_billing
+
+        return stripe_billing.create_checkout_session(org, by, request_data)
+    raise ProviderNotConnected(f"Payment provider '{settings.BILLING_PROVIDER}' is not set up for this plan.")
+
+
+def unlimited(user: AIDLUser) -> bool:
+    return (user.email or "").strip().lower() in settings.BILLING_UNLIMITED_ADMIN_EMAILS
+
+
+def seen_event(org: Organization, event_id: str) -> bool:
+    """Remember processed webhook events (Stripe may send one twice)."""
+    if not event_id:
+        return False
+    data = _load(org)
+    seen = data.setdefault("events", [])
+    if event_id in seen:
+        return True
+    data["events"] = (seen + [event_id])[-50:]
+    _save(org, data)
+    return False
+
+
+def org_for_subscription(subscription_id: str) -> Organization | None:
+    if not subscription_id:
+        return None
+    for org in Organization.objects.filter(billing__contains=subscription_id):
+        if (_load(org).get("stripe") or {}).get("subscription") == subscription_id:
+            return org
+    return None
+
+
+def downgrade_to_trial(org: Organization, how: str) -> None:
+    data = _load(org)
+    data.setdefault("history", []).append({"plan": "trial", "from": plans.plan_key(org), "how": how,
+                                           "at": timezone.now().isoformat()})
+    data.pop("stripe", None)
+    org.billing = json.dumps(data, ensure_ascii=False)
+    org.plan = "trial"
+    org.save(update_fields=["billing", "plan", "updated_at"])
+    from .package_delivery import sync_organization
+
+    sync_organization(org)
 
 
 def checkout(org: Organization, by: AIDLUser, plan: str, topics: list[str], schedule: dict | None,
@@ -158,6 +210,11 @@ def checkout(org: Organization, by: AIDLUser, plan: str, topics: list[str], sche
     if errors:
         raise UpgradeError(errors)
     request_data = {"plan": plan, "topics": topics, "schedule": schedule, "seats": seats}
+    if unlimited(by):
+        activate(org, plan, topics, schedule, seats, by, how="complimentary")
+        refresh_slack(org, by)
+        return {"status": "activated",
+                "message": f"Your {plans.PLANS[plan]['label']} plan is active — no payment needed for this account."}
     if settings.BILLING_PROVIDER:
         try:
             return {"status": "redirect", "url": create_checkout(org, request_data, by)}
@@ -165,7 +222,7 @@ def checkout(org: Organization, by: AIDLUser, plan: str, topics: list[str], sche
             pass
     if settings.BILLING_TEST_MODE:
         activate(org, plan, topics, schedule, seats, by, how="test_mode")
-        _refresh_slack(org, by)
+        refresh_slack(org, by)
         return {"status": "activated",
                 "message": f"Test mode: your {plans.PLANS[plan]['label']} plan is active — no payment was taken."}
     data = _load(org)
@@ -177,7 +234,7 @@ def checkout(org: Organization, by: AIDLUser, plan: str, topics: list[str], sche
                        "to complete the upgrade."}
 
 
-def _refresh_slack(org: Organization, by: AIDLUser) -> None:
+def refresh_slack(org: Organization, by: AIDLUser) -> None:
     if not org.slack_channel_id:
         return
     try:
@@ -197,7 +254,7 @@ def _notify_aidl_team(org: Organization, by: AIDLUser, request_data: dict) -> No
                           f"{request_data['plan']}.\nTopics: {', '.join(request_data['topics'])}\n"
                           f"Schedule: {request_data.get('schedule')}\nSeats: {request_data.get('seats')}",
                   from_email=settings.DEFAULT_FROM_EMAIL,
-                  recipient_list=[settings.DEFAULT_FROM_EMAIL.split("<")[-1].strip(">").strip()],
+                  recipient_list=[settings.BILLING_SALES_EMAIL or settings.DEFAULT_FROM_EMAIL.split("<")[-1].strip(">")],
                   fail_silently=True)
     except Exception:  # noqa: BLE001
         pass

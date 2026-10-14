@@ -44,6 +44,7 @@ urlpatterns = [
     path("billing/plans/", billing_views.plans_view, name="billing-plans"),
     path("billing/preview/", billing_views.preview_view, name="billing-preview"),
     path("billing/checkout/", billing_views.checkout_view, name="billing-checkout"),
+    path("billing/stripe/webhook/", billing_views.stripe_webhook, name="billing-stripe-webhook"),
     path("aup/questions/", aup_views.questions, name="aup-questions"),
     path("aup/preview/", aup_views.preview, name="aup-preview"),
     path("locations/countries/", location_views.countries, name="location-countries"),

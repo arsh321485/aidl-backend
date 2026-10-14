@@ -147,7 +147,6 @@ def summary(org: Organization) -> dict:
     from .aup_store import draft, has_draft, is_complete
 
     st = state(org)
-    delegate = AIDLUser.objects.filter(pk=st["aup_delegate"]).first() if st.get("aup_delegate") else None
     members = _slack_learners(org).count()
     admins = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True).count()
     sends = {item: {"sent": bool(st.get(f"{item}_sent")), "accepted": accepted_count(org, item), "changed": False}
@@ -160,7 +159,6 @@ def summary(org: Organization) -> dict:
     return {
         "aup_done": aup_done,
         "aup_draft_section": draft(org)["section"] if not aup_done and has_draft(org) else None,
-        "delegate_name": (delegate.full_name or delegate.email) if delegate and not aup_done else "",
         "admins_done": admins_done,
         "team_done": team_done,
         "cards_done": cards_done,
