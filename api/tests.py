@@ -1924,7 +1924,7 @@ class RemovePeopleTests(TestCase):
         self._press("U2", "aidl_admin_remove", str(self.owner.pk))
         self.owner.refresh_from_db()
         self.assertEqual(self.owner.role, AIDLUser.Role.ADMIN)
-        self.assertIn("Only the admin who set up AIDL", self._popup_text())
+        self.assertIn("Only the master admin", self._popup_text())
 
     def test_admin_removes_member(self):
         self._event("U3")
@@ -2859,3 +2859,80 @@ class EmployeeFlowTests(TestCase):
 
         home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
         self.assertIn("aidl_logo_open", home)
+
+
+class AdminPermissionTests(TestCase):
+    """Master admin (can't be removed / changed) + delegated permissions:
+    Manage admins and Manage plan & billing."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), admin_seat_limit=10)
+        self.master = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Master")
+        self.manager = make_user(self.org, microsoft_id="slack:T9:U2", full_name="Mo Manager",
+                                 perm_manage_admins=True, perm_billing=False)
+        self.other = make_user(self.org, microsoft_id="slack:T9:U3", full_name="Ola Other", perm_manage_admins=False)
+        self.calls = []
+
+    def _post(self, user, payload):
+        from urllib.parse import urlencode
+
+        payload = {"team": {"id": "T9"}, "user": {"id": user, "team_id": "T9"}, **payload}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def test_admin_list_marks_master_and_offers_edit(self):
+        from .slack_cards import build_admin_cards_context
+        from .slack_modals import add_admin_view
+
+        view = json.dumps(add_admin_view(build_admin_cards_context(self.manager), {}), ensure_ascii=False)
+        self.assertIn("👑 Master admin", view)
+        self.assertNotIn(f'"value": "{self.master.pk}"', view)              # no Edit / Remove for the master
+        self.assertIn("aidl_admin_edit", view)
+        self.assertNotIn('"value": "billing"', view)                       # manager can't grant billing
+
+    def test_manager_edits_permissions_within_own_rights(self):
+        view = {"callback_id": "aidl_admin_perms", "private_metadata": json.dumps({"user_id": str(self.other.pk)}),
+                "state": {"values": {"perms": {"v": {"type": "checkboxes", "selected_options": [
+                    {"value": "manage_admins"}, {"value": "billing"}]}}}}}
+        self._post("U2", {"type": "view_submission", "view": view})
+        self.other.refresh_from_db()
+        self.assertTrue(self.other.perm_manage_admins)
+        self.assertFalse(self.other.perm_billing)                          # manager doesn't have billing
+        self.assertTrue(any(m == "chat.postMessage" and b["channel"] == "U1" for m, b in self.calls))  # master told
+
+    def test_master_cannot_be_edited_or_removed(self):
+        from .admin_people import remove_admin
+
+        view = {"callback_id": "aidl_admin_perms", "private_metadata": json.dumps({"user_id": str(self.master.pk)}),
+                "state": {"values": {}}}
+        resp = self._post("U2", {"type": "view_submission", "view": view}).json()
+        self.assertEqual(resp["response_action"], "errors")
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            ok, msg = remove_admin(self.org, self.manager, str(self.master.pk))
+        self.assertFalse(ok)
+        self.assertIn("master admin can't be removed", msg)
+
+    def test_manager_removes_admin_but_plain_admin_cannot(self):
+        from .admin_people import remove_admin
+
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            self.assertFalse(remove_admin(self.org, self.other, str(self.manager.pk))[0])
+            self.assertTrue(remove_admin(self.org, self.manager, str(self.other.pk))[0])
+
+    def test_billing_permission_controls_upgrade(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(self.manager)}")
+        self.assertEqual(client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]},
+                                     format="json").status_code, 403)
+        self.manager.perm_billing = True
+        self.manager.save()
+        with self.settings(BILLING_TEST_MODE=True, BILLING_PROVIDER=""):
+            resp = client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]}, format="json")
+        self.assertEqual(resp.json()["status"], "activated")

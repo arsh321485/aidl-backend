@@ -1,8 +1,9 @@
 """Admins removing admins and team members (Slack Admin Center).
 
 Rules:
-- Only the organization's first admin (the one who installed AIDL) removes
-  admins. They can't remove themselves, so there's always one admin left.
+- The master admin (who connected AIDL) and admins with "Manage admins"
+  remove admins. Nobody can remove the master admin or themselves, so
+  there's always one admin left.
 - A removed admin loses Admin Center access. If they're still in the AIDL
   channel they become a team member when the plan has a free seat;
   otherwise AIDL takes them out of the channel.
@@ -42,18 +43,26 @@ def _target(org: Organization, user_id: str) -> AIDLUser | None:
 
 def remove_admin(org: Organization, by: AIDLUser, user_id: str) -> tuple[bool, str]:
     """Returns (done, message for the admin who clicked)."""
-    if not is_primary_admin(org, by):
-        return False, "Only the admin who set up AIDL can remove admins."
+    from .admin_perms import has, notify_master
+
+    if not has(org, by, "manage_admins"):
+        return False, "Only the master admin, or admins allowed to manage admins, can remove admins."
     target = _target(org, user_id)
     if target is None or target.role != AIDLUser.Role.ADMIN:
         return False, "That person isn't an admin any more."
-    if target.pk == by.pk or is_primary_admin(org, target):
-        return False, "The admin who set up AIDL can't be removed."
+    if is_primary_admin(org, target):
+        return False, "The master admin can't be removed."
+    if target.pk == by.pk:
+        return False, "You can't remove yourself — ask another admin."
 
     name = target.full_name or target.email
+    notify_master(org, by, f"🗑️ *{by.full_name or by.email}* removed *{name}* as an admin.")
     target.role = AIDLUser.Role.LEARNER
-    target.perm_approve_apps = target.perm_access_cards = target.perm_create_card = False
-    target.save(update_fields=["role", "perm_approve_apps", "perm_access_cards", "perm_create_card", "updated_at"])
+    from .admin_perms import FIELDS
+
+    for field in FIELDS:
+        setattr(target, field, False)
+    target.save(update_fields=["role", *FIELDS, "updated_at"])
 
     token = slack_client.bot_token(org)
     slack_id = _slack_id(target)

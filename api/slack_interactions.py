@@ -98,7 +98,7 @@ _PREOPENED: dict[str, str] = {}
 _PREOPEN_LOCK = threading.Lock()
 _POPUP_TITLES = {
     "aidl_policy_open": "AI policy questions", "aidl_aup_view": "Team AUP",
-    "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
+    "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_admin_edit": "Edit permissions", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
 }
@@ -164,6 +164,7 @@ _SUBMIT_TAB = {
     "aidl_add_people": "home",
     "aidl_aup_section": "home",
     "aidl_logo": "home",
+    "aidl_admin_perms": "add-admin",
 }
 
 
@@ -200,6 +201,7 @@ def _handle_submission(payload: dict):
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
         "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
         "aidl_logo": lambda: slack_modals.submit_logo(org, view),
+        "aidl_admin_perms": lambda: slack_modals.submit_edit_admin(admin, org, view),
     }
     result = handlers[callback]() or {}
     if "response_action" in result:
@@ -622,8 +624,8 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
     # Upgrade plan: a private link (only this admin sees it) to the plans page
     # on the website, signed in with a short-lived AIDL token.
     if org is not None and action_id == "aidl_upgrade":
-        if not d["can_admins"]:
-            _reply(response_url, text="Only the admin who set up AIDL can change the plan.")
+        if not d["can_billing"]:
+            _reply(response_url, text="Only the master admin, or admins allowed to manage the plan, can upgrade.")
             return HttpResponse(status=200)
         url = f"{settings.FRONTEND_URL.rstrip('/')}/plans?token={create_access_token(user)}"
         _reply(response_url, text="Open the plans page to upgrade", blocks=[
@@ -632,6 +634,13 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                 "This link is only for you and expires soon."},
              "accessory": {"type": "button", "text": {"type": "plain_text", "text": "Open plans page"},
                            "url": url, "action_id": "aidl_link_plans", "style": "primary"}}])
+        return HttpResponse(status=200)
+
+    if org is not None and action_id == "aidl_admin_edit" and d["can_admins"]:
+        target = next((a for a in d.get("admins") or [] if a["id"] == action.get("value") and not a["primary"]), None)
+        if target is not None:
+            _open_modal(org, payload.get("trigger_id", ""), slack_modals.edit_admin_view(d, target, {}),
+                        push=bool((payload.get("view") or {}).get("id")))
         return HttpResponse(status=200)
 
     if org is not None and action_id == "aidl_logo_open" and d["can_admins"]:

@@ -15,6 +15,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from .cards_catalog_data import MONTHLY_CARD_QUOTA
+from . import admin_perms
 from .plans import usage
 from .models import AIDLUser, CardRequest, RegisteredApp
 from .org_policy import get_answers, policy_effects
@@ -260,6 +261,8 @@ def _visible_admin_tabs(user: AIDLUser | None, is_primary: bool) -> list[str]:
     if user is None or is_primary:
         return [tab_id for tab_id, _l, _i in ADMIN_TABS]
     tabs = ["home"]
+    if user.perm_manage_admins:
+        tabs.append("add-admin")
     if user.perm_access_cards or user.perm_create_card:
         tabs.append("cards")
     if user.perm_approve_apps:
@@ -438,9 +441,8 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "is_primary": is_primary,
             "admins": [{
                 "id": str(a.pk), "name": a.full_name or a.email, "email": a.email, "primary": a.pk == admins[0].pk,
-                "perms": [label for flag, label in ((a.perm_approve_apps, "Approve Apps"),
-                                                    (a.perm_access_cards, "Access Cards"),
-                                                    (a.perm_create_card, "Create Card")) if flag],
+                "perms": admin_perms.labels(a),
+                "keys": [k for k, f, _l, _d in admin_perms.PERMS if getattr(a, f, False)],
             } for a in admins],
         }
 
@@ -456,8 +458,11 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
     owner = data.get("is_primary", True) or user is None
     data["can_policy"] = owner or bool(user and (user.perm_policy or user.perm_approve_apps))
     data["can_apps"] = owner or bool(user and user.perm_approve_apps)
-    data["can_admins"] = owner
-    data["can_team"] = owner
+    data["can_admins"] = owner or bool(user and user.perm_manage_admins)
+    data["can_team"] = data["can_admins"]
+    data["can_billing"] = owner or bool(user and user.perm_billing)
+    data["grantable"] = [k for k, _f, _l, _d in admin_perms.PERMS] if owner else (
+        admin_perms.grantable(org, user) if user is not None else [])
     data["can_send"] = owner or bool(user and user.perm_access_cards)
     data["policy_only"] = bool(user and user.perm_policy and not owner and not user.perm_approve_apps
                                and not user.perm_access_cards and not user.perm_create_card)
@@ -626,8 +631,10 @@ def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
         "can_manage_cards": owner or user.perm_access_cards,
         "can_create_card": owner or user.perm_create_card,
         "can_policy": owner or user.perm_policy or user.perm_approve_apps,
-        "can_admins": owner,
-        "can_team": owner,
+        "can_admins": owner or user.perm_manage_admins,
+        "can_team": owner or user.perm_manage_admins,
+        "can_billing": owner or user.perm_billing,
+        "grantable": admin_perms.grantable(org, user),
         "can_send": owner or user.perm_access_cards,
         "admin_count": AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN,
                                                is_active=True).count() if org is not None else 0,

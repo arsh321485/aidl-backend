@@ -54,11 +54,10 @@ def plans_view(request):
     org, error = _org_for_admin(request)
     if error:
         return error
-    from .slack_onboarding import primary_admin
+    from .admin_perms import has
 
-    owner = primary_admin(org)
     data = billing.catalog(org)
-    data["can_upgrade"] = owner is not None and owner.pk == request.user.pk
+    data["can_upgrade"] = has(org, request.user, "billing")
     return Response(data)
 
 
@@ -84,11 +83,10 @@ def checkout_view(request):
     org, error = _org_for_admin(request)
     if error:
         return error
-    from .slack_onboarding import primary_admin
+    from .admin_perms import has
 
-    owner = primary_admin(org)
-    if owner is None or owner.pk != request.user.pk:
-        return Response({"detail": "Only the admin who set up AIDL can change the plan."},
+    if not has(org, request.user, "billing"):
+        return Response({"detail": "Only the master admin, or admins allowed to manage the plan, can upgrade."},
                         status=status.HTTP_403_FORBIDDEN)
     seats = request.data.get("seats")
     try:

@@ -145,6 +145,10 @@ class AIDLUser(models.Model):
     perm_create_card = models.BooleanField(default=True)
     # Delegated to create the AI policy (AUP) only — setup step 1.
     perm_policy = models.BooleanField(default=False)
+    # Granted by the master admin (admin_perms.py): add / edit / remove admins,
+    # and upgrade the plan.
+    perm_manage_admins = models.BooleanField(default=False)
+    perm_billing = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
     # Microsoft OAuth refresh token (requires the "offline_access" scope), so
