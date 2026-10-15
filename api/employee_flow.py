@@ -136,46 +136,28 @@ def aup_card(member: AIDLUser, org: Organization) -> dict:
     ])
 
 
+def _card_image(kind: str, org: Organization) -> dict:
+    """The designed card as an image (card_image.py) — with the company
+    logo and watermark on Basic and Enterprise."""
+    from . import card_image
+
+    return {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": card_image.alt_text(kind)}
+
+
 def traffic(member: AIDLUser, org: Organization, done: bool = False) -> dict:
-    return card("Card 2 of 3: Traffic Light Check. Before you paste anything into an AI tool, check the lights.",
-                "*Card 2 of 3*", COLOR["green"], [
-        _header(":vertical_traffic_light: Traffic Light Check"),
-        _context("Before you paste anything into an AI tool, check the lights."),
-        DIVIDER,
-        _section(":large_green_circle:  *GREEN · GO*\n_Public, non-personal_\nGeneral questions, public articles, "
-                 "brainstorming, explaining a concept.\n:arrow_right: *Use any approved AI tool, then check the facts*"),
-        DIVIDER,
-        _section(":large_orange_circle:  *AMBER · CAUTION*\n_Internal or a little personal_\nInternal process notes, "
-                 "first names, rough plans, non-public but low-risk details.\n:arrow_right: *Remove names and "
-                 "details, or use a placeholder*"),
-        DIVIDER,
-        _section(":red_circle:  *RED · STOP*\n_Confidential or private_\nPasswords, customer lists, source code, "
-                 "pricing, salaries, anything under NDA.\n:arrow_right: *Never paste it. Ask IT for an approved route*"),
-        DIVIDER,
+    return card("Card 2 of 3: Traffic Light Check. Before you paste anything into an AI, check the lights.",
+                "*Card 2 of 3 · :vertical_traffic_light: Traffic Light Check* · Before you paste anything",
+                COLOR["green"], [
+        _card_image("traffic_light", org),
         _done("Card 2 complete") if done else _actions("aidl_flow_tl", _button(
             "Got it. Next: The Highway Code →", "aidl_flow_tl", "next", "primary")),
     ])
 
 
 def highway(member: AIDLUser, org: Organization, done: bool = False) -> dict:
-    return card("Card 3 of 3: The Highway Code. Five rules for every AI trip.", "*Card 3 of 3*", COLOR["blue"], [
-        _header(":book: The Highway Code"),
-        _context("Five rules for every AI trip. Learn them once and they'll stick."),
-        DIVIDER,
-        _section(":octagonal_sign:  *Keep private things private*\nPasswords, customer data and code *never go into "
-                 "a prompt*."),
-        DIVIDER,
-        _section(":mag:  *Check before you trust*\nAI can sound sure and still be wrong. *Verify facts, dates and "
-                 "numbers.*"),
-        DIVIDER,
-        _section(":red_car:  *You're still the driver*\nAI drafts, you decide. *Read and edit everything* before you "
-                 "send it."),
-        DIVIDER,
-        _section(":speech_balloon:  *Better prompt, better answer*\nSay *who it should be, what you want and how it "
-                 "should look*."),
-        DIVIDER,
-        _section(f":motorway:  *Stick to approved roads*\nUse *{org.name}'s approved AI tools*. New tool? Ask IT first."),
-        DIVIDER,
+    return card("Card 3 of 3: The Highway Code. The everyday rules for using AI safely and confidently.",
+                "*Card 3 of 3 · :book: Highway Code* · Section A · Learner Rules", COLOR["blue"], [
+        _card_image("highway_code", org),
         _done("Card 3 complete") if done else _actions("aidl_flow_hc", _button(
             "Got it. Get my license →", "aidl_flow_hc", "next", "primary")),
     ])

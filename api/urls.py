@@ -42,6 +42,7 @@ urlpatterns = [
     path("auth/logout/", auth_views.logout, name="auth-logout"),
     # Signup form dropdowns — Country -> State -> City
     path("licenses/<str:number>.png", licence_views.licence_png, name="licence-png"),
+    path("cards/<str:kind>/<str:org_id>.png", licence_views.card_png, name="card-png"),
     path("billing/plans/", billing_views.plans_view, name="billing-plans"),
     path("billing/preview/", billing_views.preview_view, name="billing-preview"),
     path("billing/checkout/", billing_views.checkout_view, name="billing-checkout"),

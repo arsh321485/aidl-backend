@@ -1,7 +1,7 @@
 """The AI Driving License as a PNG (the design in E:\\slack-userflow,
 "Trial Flow C"), drawn with Pillow so Slack can show it in an image block.
 
-The organization's logo (Organization.logo_data) sits in the header circle
+On Basic and Enterprise the organization's logo (Organization.logo_data) sits in the header circle
 and as a large, faint watermark — the licence carries the company's mark,
 so it can't be passed off as anyone else's.
 
@@ -67,6 +67,14 @@ def _logo(org) -> Image.Image | None:
         return None
 
 
+def brand_logo(org) -> Image.Image | None:
+    """The company logo on licences and cards — Basic and Enterprise only
+    (Trial shows the AIDL mark)."""
+    if org is None or getattr(org, "plan", "trial") not in ("basic", "enterprise"):
+        return None
+    return _logo(org)
+
+
 def _avatar(url: str) -> Image.Image | None:
     if not url:
         return None
@@ -110,7 +118,7 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, or
         for x in range(0 if (y // 18) % 2 == 0 else 9, W, 18):
             d.ellipse(_xy(x - 7, y - 7, x + 7, y + 7), outline=TEXTURE, width=S)
 
-    logo = _logo(org)
+    logo = brand_logo(org)
     if logo is not None:  # large faint watermark, bottom right
         size = 290 * S
         wm = _contain(logo, size, size)
