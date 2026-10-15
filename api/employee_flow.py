@@ -114,7 +114,7 @@ def aup_card(member: AIDLUser, org: Organization) -> dict:
         return card(f"Card 1 of 3: {org.name} Acceptable Use Policy — agreed.", "*Card 1 of 3 · Sign-off*",
                     COLOR["green"], [
             _header(title),
-            _context(f"All {aup_store.POINTS} points agreed · `AGREED` · `{aup['version']}`"),
+            _context(f"All {aup_store.POINTS} points agreed · `AGREED`"),
             _section(f"*I, <@{_slack_id(member)}>, agreed to all {aup_store.POINTS} points of {org.name}'s AI "
                      "Acceptable Use Policy.*"),
             _done("Agreed"),

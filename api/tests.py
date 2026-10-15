@@ -1840,8 +1840,8 @@ class PlanLimitTests(TestCase):
         self.org.save()
         with patch("api.slack_client.slack_api", side_effect=self._fake):
             sync_organization(self.org)
-        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk)).count(), 24)
-        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="scheduled").count(), 23)
+        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk)).count(), 104)
+        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="scheduled").count(), 103)
 
     def test_post_times_two_a_week_at_ten_local(self):
         import datetime as dt
@@ -2053,6 +2053,28 @@ class SetupStepsTests(TestCase):
         resp = self._submit("aidl_add_people", too_many).json()
         self.assertEqual(resp["response_action"], "errors")
         self.assertIn("seats left", resp["errors"]["people"])
+
+    def test_add_people_select_all(self):
+        from .slack_modals import workspace_people
+
+        def fake(method, token, *, json=None, params=None):
+            if method == "conversations.members":
+                return {"ok": True, "members": ["U1", "U5"]}
+            if method == "users.list":
+                return {"ok": True, "members": [
+                    {"id": "U1"}, {"id": "U5"}, {"id": "U6"}, {"id": "U7", "deleted": True},
+                    {"id": "UB", "is_bot": True}, {"id": "USLACKBOT"}, {"id": "UG", "is_restricted": True}, {"id": "U8"}]}
+            return {"ok": True}
+
+        with patch("api.slack_client.slack_api", side_effect=fake):
+            self.assertEqual(workspace_people(self.org), ["U6", "U8"])
+        with patch("api.slack_modals.workspace_people", return_value=["U6", "U8"]), \
+                patch("api.slack_modals.in_background", side_effect=lambda fn, *a: fn(*a)):
+            everyone = {"everyone": {"v": {"type": "checkboxes", "selected_options": [{"value": "all"}]}}}
+            self.assertEqual(self._submit("aidl_add_people", everyone).json(), {"response_action": "clear"})
+        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U6", "slack:T9:U8"]).count(), 2)
+        resp = self._submit("aidl_add_people", {}).json()
+        self.assertIn("select all", resp["errors"]["people"])
 
     def test_old_home_button_points_to_live_message(self):
         from urllib.parse import urlencode
@@ -2605,13 +2627,21 @@ class PlanUpgradeTests(TestCase):
 
         self.assertEqual(len(package_cards(self.org)), 12)                       # Trial: Default
         basic = cards_for_plan(self.org, "basic", {"basic": ["C13", "C14"]})
-        self.assertEqual(len(basic), 24)
-        self.assertEqual({c["code"] for c in basic[12:]}, {"C13", "C14"})        # extra 12 from picked topics
-        ent = cards_for_plan(self.org, "enterprise", {"basic": ["C13"], "enterprise": ["C12"]})
-        self.assertEqual(len(ent), 36)
-        self.assertEqual({c["code"] for c in ent[24:]}, {"C12"})
-        self.assertEqual(len({c["no"] for c in ent}), 36)                         # no duplicates
-        self.assertEqual(len(cards_for_plan(self.org, "basic")), 24)              # no picks → manager's Basic 24
+        self.assertEqual(len(basic), 104)                                         # 2 a week × 52 weeks
+        self.assertEqual({c["code"] for c in basic[12:]}, {"C13", "C14"})        # the rest from picked topics
+        small = cards_for_plan(self.org, "basic", {"basic": ["C11"]})             # C11 has only 7 cards
+        self.assertEqual(len(small), 104)                                         # topped up from all topics
+        self.assertEqual(len({c["no"] for c in small}), 104)                      # no duplicates
+        ent = cards_for_plan(self.org, "enterprise", {"enterprise": ["C12"]})    # picks are ignored
+        self.assertEqual(len(ent), 208)                                           # 4 a week × 52 weeks
+        self.assertEqual(len({c["code"] for c in ent[12:]}), 15)                  # every topic
+        self.assertEqual(len({c["no"] for c in ent}), 208)
+        no_picks = cards_for_plan(self.org, "basic")                              # manager's Basic 24 first
+        self.assertEqual(len(no_picks), 104)
+        from .plans import _packages
+
+        manager = {c["no"] for c in _packages()["default"] + _packages()["basic"]}
+        self.assertEqual({c["no"] for c in no_picks[:len(manager)]}, manager)
 
     def test_schedules(self):
         import datetime as dt
@@ -2633,9 +2663,10 @@ class PlanUpgradeTests(TestCase):
         self.assertTrue(data["can_upgrade"])
         self.assertEqual([p["key"] for p in data["plans"]], ["trial", "basic", "enterprise"])
         self.assertEqual(len(data["categories"]), 15)
-        cards = self.client.post("/api/billing/preview/", {"plan": "basic", "topics": ["C10"]}, format="json").json()["cards"]
-        self.assertEqual(len(cards), 12)
-        self.assertNotIn("message", cards[0])                                     # card text stays on the server
+        self.assertEqual([p["cards"] for p in data["plans"]], [12, 104, 208])
+        prev = self.client.post("/api/billing/preview/", {"plan": "basic", "topics": ["C10"]}, format="json").json()
+        self.assertEqual((len(prev["cards"]), prev["total"]), (12, 92))
+        self.assertNotIn("message", prev["cards"][0])                             # card text stays on the server
 
     @override_settings(BILLING_TEST_MODE=True, BILLING_PROVIDER="")
     def test_test_mode_upgrade_activates(self):
@@ -2647,9 +2678,15 @@ class PlanUpgradeTests(TestCase):
         self.org.refresh_from_db()
         self.assertEqual((self.org.plan, self.org.seats_purchased), ("basic", 50))
         self.assertEqual({c["code"] for c in package_cards(self.org)[12:]}, {"C10", "C13"})
-        bad = self.client.post("/api/billing/checkout/", {"plan": "enterprise", "topics": ["C12"],
+        bad = self.client.post("/api/billing/checkout/", {"plan": "enterprise",
                                                           "schedule": {"days": [0, 1], "hour": 10}}, format="json")
         self.assertIn("schedule", bad.json())
+        self.assertNotIn("topics", bad.json())                                    # Enterprise covers all topics
+        ok = self.client.post("/api/billing/checkout/", {"plan": "enterprise",
+                                                         "schedule": {"days": [0, 1, 3, 4], "hour": 10}}, format="json")
+        self.assertEqual(ok.json()["status"], "activated", ok.content)
+        self.org.refresh_from_db()
+        self.assertEqual(len(json.loads(self.org.billing)["topics"]["enterprise"]), 15)
 
     @override_settings(BILLING_TEST_MODE=False, BILLING_PROVIDER="")
     def test_without_payment_provider_request_is_pending(self):

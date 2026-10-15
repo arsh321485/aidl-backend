@@ -100,7 +100,7 @@ def _step_aup(d: dict, st: dict) -> list:
         return blocks
     apps = f"{d['approved_apps']} of {d['total_apps']} apps approved"
     return [
-        _section(f"✅  *1 · AI policy (AUP)*  ·  `{d['team'].get('aup_version', '')}`  ·  {apps}"),
+        _section(f"✅  *1 · AI policy (AUP)*  ·  {apps}"),
         _actions("aidl_step_aup",
                  _button("📄 View AUP", "aidl_aup_view", value="view"),
                  _button("✏️ Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
@@ -165,7 +165,7 @@ def _step_send(d: dict, st: dict) -> list:
                        f"*{st.get('licensed', 0)}* of {members} licensed")]
     if d["can_send"]:
         if aup.get("changed"):  # the AUP was changed after it was sent
-            blocks.append(_section(f"⚠️ *The AUP has changed* (`{aup['sent_version']}` → `{aup['version']}`) — your "
+            blocks.append(_section("⚠️ *The AUP has changed* — your "
                                    "team still has the old version.",
                                    accessory=_button("📤 Send new version", "aidl_send_item", value="aup",
                                                      style="primary")))
