@@ -200,20 +200,60 @@ def submit_add_people(caller: AIDLUser, org: Organization, view: dict) -> dict:
                       "they'll get their welcome and cards in a moment."}
 
 
+def _perm_options(keys: list[str]) -> list[dict]:
+    from .admin_perms import PERMS
+
+    return [_option(f"{label} — {desc}", key) for key, _f, label, desc in PERMS if key in keys]
+
+
 def add_admin_view(d: dict, meta: dict) -> dict:
-    perms = [
-        _option("Approve Apps — change the AI / IT registry", "approve_apps"),
-        _option("Access Cards — view and send reference cards", "access_cards"),
-        _option("Create Card — request new cards", "create_card"),
-    ]
+    perms = _perm_options(d.get("grantable") or [])
+    perm_input = ([_input("perms", "Permissions", {"type": "checkboxes", "action_id": "v", "options": perms,
+                                                   "initial_options": [perms[0]]}, optional=True)] if perms else [])
     return _modal("aidl_add_admin", "Add another admin", [
         {"type": "section", "text": _md("Give a colleague access to your Admin Center — choose exactly what they can see and do.")},
         _input("person", "Pick them in Slack", {"type": "users_select", "action_id": "v", "placeholder": _text("Choose a person")}, optional=True),
         _input("email", "…or their email", {"type": "plain_text_input", "action_id": "v", "placeholder": _text("name@company.com")}, optional=True),
-        _input("perms", "Permissions", {"type": "checkboxes", "action_id": "v", "options": perms, "initial_options": [perms[0]]}, optional=True),
+        *perm_input,
+        {"type": "context", "elements": [_md("You can only give the permissions you have yourself.")]},
         {"type": "context", "elements": [_md(f"{d['admin_count']} of {d['admin_seat_limit']} admin seats used")]},
         *_admin_list_blocks(d),
     ], submit="Send Admin Invite", meta=meta)
+
+
+def edit_admin_view(d: dict, target: dict, meta: dict) -> dict:
+    """Change another admin's permissions (only the ones you have)."""
+    perms = _perm_options(d.get("grantable") or [])
+    chosen = [o for o in perms if o["value"] in target.get("keys", [])]
+    element = {"type": "checkboxes", "action_id": "v", "options": perms}
+    if chosen:
+        element["initial_options"] = chosen
+    blocks = [{"type": "section", "text": _md(f"*{target['name']}*  {target['email']}")}]
+    if perms:
+        blocks.append(_input("perms", "Permissions", element, optional=True))
+    blocks.append({"type": "context", "elements": [_md("You can only change the permissions you have yourself. "
+                                                       "The master admin is told about every change.")]})
+    return _modal("aidl_admin_perms", "Edit permissions", blocks, submit="Save",
+                  meta={**meta, "user_id": target["id"]})
+
+
+def submit_edit_admin(caller: AIDLUser, org: Organization, view: dict) -> dict:
+    from .admin_perms import FIELDS, apply, grantable, is_master, labels, notify_master
+
+    meta = json.loads(view.get("private_metadata") or "{}")
+    target = AIDLUser.objects.filter(pk=meta.get("user_id"), organization_id=str(org.pk),
+                                     role=AIDLUser.Role.ADMIN).first()
+    if target is None:
+        return errors(perms="This person isn't an admin any more.")
+    if is_master(org, target):
+        return errors(perms="The master admin's permissions can't be changed.")
+    apply(target, _value(_values(view), "perms") or [], grantable(org, caller))
+    target.save(update_fields=[*FIELDS, "updated_at"])
+    now = ", ".join(labels(target)) or "no permissions"
+    in_background(notify_master, org, caller,
+                  f"✏️ *{caller.full_name or caller.email}* changed *{target.full_name or target.email}*'s "
+                  f"admin permissions: {now}.")
+    return {"notice": f"✓ Saved — {target.full_name or target.email}: {now}."}
 
 
 def _confirm(title: str, text: str, ok: str) -> dict:
@@ -221,23 +261,27 @@ def _confirm(title: str, text: str, ok: str) -> dict:
 
 
 def _admin_list_blocks(d: dict) -> list:
-    """Current admins; the first admin can remove the others."""
+    """Current admins. The master admin can't be changed; admins with
+    "Manage admins" can edit or remove the others."""
+    from .admin_perms import MASTER_LABEL
+
     admins = d.get("admins") or []
     if not admins:
         return []
     blocks = [{"type": "divider"}, {"type": "section", "text": _md("*Current admins*")}]
     for a in admins:
-        role = "👑 Set up AIDL · all permissions" if a["primary"] else (" · ".join(a["perms"]) or "No permissions")
-        block = {"type": "section", "text": _md(f"*{a['name']}*  {a['email']}\n_{role}_")}
-        if d.get("is_primary") and not a["primary"]:
-            block["accessory"] = {
-                "type": "button", "text": _text("Remove"), "style": "danger",
-                "action_id": "aidl_admin_remove", "value": a["id"],
-                "confirm": _confirm("Remove admin?", f"*{a['name']}* will lose Admin Center access. If they're in the "
-                                    "AIDL channel they become a team member (or are removed if your plan is full).",
-                                    "Remove admin"),
-            }
-        blocks.append(block)
+        role = f"{MASTER_LABEL} · all permissions · can't be removed" if a["primary"] else (
+            " · ".join(a["perms"]) or "No permissions")
+        blocks.append({"type": "section", "text": _md(f"*{a['name']}*  {a['email']}\n_{role}_")})
+        if d.get("can_admins") and not a["primary"]:
+            blocks.append({"type": "actions", "block_id": f"aidl_admin_{a['id']}", "elements": [
+                {"type": "button", "text": _text("✏️ Edit permissions"), "action_id": "aidl_admin_edit", "value": a["id"]},
+                {"type": "button", "text": _text("Remove"), "style": "danger", "action_id": "aidl_admin_remove",
+                 "value": a["id"],
+                 "confirm": _confirm("Remove admin?", f"*{a['name']}* will lose Admin Center access. If they're in the "
+                                     "AIDL channel they become a team member (or are removed if your plan is full).",
+                                     "Remove admin")},
+            ]})
     if d.get("notice"):
         blocks.append({"type": "context", "elements": [_md(d["notice"])]})
     return blocks
@@ -537,13 +581,17 @@ def submit_add_admin(caller: AIDLUser, org: Organization, team_id: str, view: di
     admin = _upsert_member(org, team_id, slack_user_id, profile)
     if admin is None:
         return errors(email="This person already belongs to another AIDL organization.")
+    from .admin_perms import FIELDS, PERMS, apply, grantable, labels, notify_master
+
     perms = _value(values, "perms") or []
     admin.role = AIDLUser.Role.ADMIN
-    admin.perm_approve_apps = "approve_apps" in perms
-    admin.perm_access_cards = "access_cards" in perms
-    admin.perm_create_card = "create_card" in perms
-    admin.save(update_fields=["role", "perm_approve_apps", "perm_access_cards", "perm_create_card", "updated_at"])
+    apply(admin, [], [k for k, *_ in PERMS])        # a new admin starts with nothing…
+    apply(admin, perms, grantable(org, caller))   # …and gets what the caller may give
+    admin.save(update_fields=["role", *FIELDS, "updated_at"])
     in_background(_onboard_admin, token, org, caller, admin, slack_user_id)
+    in_background(notify_master, org, caller,
+                  f"👥 *{caller.full_name or caller.email}* added *{admin.full_name or admin.email}* as an admin "
+                  f"({', '.join(labels(admin)) or 'no permissions'}).")
     return {"notice": f"✓ {d['admin_count'] + 1} of {d['admin_seat_limit']} admin seats used · invited {admin.email or admin.full_name}"}
 
 
