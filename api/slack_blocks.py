@@ -233,11 +233,15 @@ def _plan_line(d: dict) -> list:
     block = _section(f"📦  *{p['label']} plan*  ·  {p['cards']} awareness cards, {p['cadence']}  ·  "
                      f"{p['used']} of {p['limit']} users")
     if d.get("can_billing"):
-        block["accessory"] = _button("⬆️ Upgrade plan" if p.get("can_upgrade", True) else "⚙️ Change topics",
+        block["accessory"] = _button("⬆️ Upgrade plan" if p.get("can_upgrade", True) else "⚙️ Change schedule",
                                      "aidl_upgrade", value="upgrade", style="primary" if p.get("can_upgrade") else "")
+    if d.get("can_admins") and p.get("plan") == "trial":
+        return [block, _section("🖼️  *Company logo on cards & licences:* _available on the Basic and Enterprise "
+                                "plans_")]
     if d.get("can_admins"):
-        logo = _section("🖼️  *Company logo on licences:* " + ("✅ set" if d.get("has_logo") else
-                                                                  "_not set — add it so licences carry your mark_"),
+        logo = _section("🖼️  *Company logo on cards & licences:* " + ("✅ set" if d.get("has_logo") else
+                                                                  "_not set — add it so cards and licences carry "
+                                                                  "your mark_"),
                         accessory=_button("Change logo" if d.get("has_logo") else "Add logo", "aidl_logo_open",
                                           value="logo"))
         return [block, logo]

@@ -643,6 +643,11 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                         push=bool((payload.get("view") or {}).get("id")))
         return HttpResponse(status=200)
 
+    if org is not None and action_id == "aidl_logo_open" and d["can_admins"] and org.plan == "trial":
+        _reply(response_url, text="🖼️ The company logo on cards and licences comes with the Basic and Enterprise "
+                                  "plans — use ⬆️ Upgrade plan.")
+        return HttpResponse(status=200)
+
     if org is not None and action_id == "aidl_logo_open" and d["can_admins"]:
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
         _open_modal(org, payload.get("trigger_id", ""), slack_modals.logo_view(org, meta))

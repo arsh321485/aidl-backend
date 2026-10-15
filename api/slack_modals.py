@@ -85,11 +85,12 @@ def errors(**fields) -> dict:
 
 
 def logo_view(org: Organization, meta: dict) -> dict:
-    """Company logo for the licence image (header + faint watermark)."""
+    """Company logo for the licence and card images (header + faint watermark)."""
     blocks = [
-        {"type": "section", "text": _md("Your logo appears on every AI Driving License issued for "
-                                        f"*{org.name}*: in the header and as a faint watermark, so licences carry "
-                                        "your company's mark and can't be passed off as anyone else's.")},
+        {"type": "section", "text": _md("Your logo appears on every AI Driving License and on the Highway Code "
+                                        f"and Traffic Light cards for *{org.name}*: in the header and as a faint "
+                                        "watermark, so they carry your company's mark and can't be passed off as "
+                                        "anyone else's.")},
         _input("logo", "Logo (PNG or JPG, square works best)",
                {"type": "file_input", "action_id": "v", "filetypes": ["png", "jpg", "jpeg"], "max_files": 1},
                optional=bool(org.logo_data)),
@@ -143,7 +144,7 @@ def _save_logo(org_pk, file_obj: dict | None, remove: bool, channel_id: str) -> 
             _tell_owner(org, "⚠️ AIDL couldn't read that logo file. Please upload a PNG or JPG image.")
             return
         org.save(update_fields=["logo_data", "updated_at"])
-        _tell_owner(org, "✅ Your company logo is saved — it now appears on every AI Driving License for "
+        _tell_owner(org, "✅ Your company logo is saved — it now appears on every AI Driving License and card for "
                          f"*{org.name}*.")
     admin = primary_admin(org)
     if admin is not None:

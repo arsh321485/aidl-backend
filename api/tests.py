@@ -2870,6 +2870,38 @@ class EmployeeFlowTests(TestCase):
         dl = self.client.get(path + "&download=1")
         self.assertIn("attachment", dl["Content-Disposition"])
 
+    def test_card_images_with_logo_on_paid_plans(self):
+        import io
+
+        from PIL import Image
+
+        from . import card_image, employee_flow
+        from .licence_image import brand_logo, save_logo
+
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 40), "#336699").save(buf, "PNG")
+        self.org.logo_data = save_logo(buf.getvalue())
+        self.org.plan = "trial"
+        self.org.save()
+        self.assertIsNone(brand_logo(self.org))                                   # Trial: no company logo
+        trial_url = card_image.image_url("highway_code", self.org)
+        self.assertTrue(trial_url.endswith("&v=aidl"))
+        self.org.plan = "basic"
+        self.org.save()
+        self.assertIsNotNone(brand_logo(self.org))
+        for kind in card_image.KINDS:
+            path = card_image.image_url(kind, self.org).split("onrender.com", 1)[-1]
+            resp = self.client.get(path)
+            self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"), kind)
+        self.assertNotEqual(card_image.image_url("highway_code", self.org), trial_url)  # Slack refetches
+        bad = f"/api/cards/highway_code/{self.org.pk}.png?s=wrong"
+        self.assertEqual(self.client.get(bad).status_code, 404)
+        for build, kind in ((employee_flow.traffic, "traffic_light"), (employee_flow.highway, "highway_code")):
+            blocks = build(self.member, self.org)["attachments"][0]["blocks"]
+            image = next(b for b in blocks if b["type"] == "image")
+            self.assertIn(f"/api/cards/{kind}/", image["image_url"])
+            self.assertTrue(image["alt_text"])                                    # screen readers get the text
+
     def test_logo_upload_saved(self):
         import io
 
@@ -2894,8 +2926,14 @@ class EmployeeFlowTests(TestCase):
         from .slack_blocks import admin_card_blocks
         from .slack_cards import build_admin_cards_context
 
-        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-        self.assertIn("aidl_logo_open", home)
+        def home():
+            return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+
+        self.assertNotIn("aidl_logo_open", home())                                # Trial: no company logo
+        self.assertIn("available on the Basic and Enterprise plans", home())
+        self.org.plan = "basic"
+        self.org.save()
+        self.assertIn("aidl_logo_open", home())
 
 
 class AdminPermissionTests(TestCase):
