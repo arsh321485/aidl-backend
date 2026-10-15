@@ -5,11 +5,15 @@ api/data/awareness_packages.json (`python manage.py import_awareness_packages`):
 the Default package (12), the Basic package (24) and the full library
 (655 cards in 15 topics / categories).
 
-    Trial       Default 12 cards                         1 card a month
-    Basic       Default 12 + 12 from topics the admin    2 a week (Mon, Thu)
-                picks (no picks: the manager's Basic 24)
-    Enterprise  Basic 24 + 12 more from picked topics    4 a week, on days and
-                                                         at a time the admin picks
+    Trial       Default 12 cards                         1 card a month (a year)
+    Basic       2 a week for a year = 104 cards:         2 a week (Mon, Thu)
+                Default 12 + 92 from topics the admin
+                picks (no picks: the manager's Basic 24
+                first)
+    Enterprise  4 a week for a year = 208 cards:         4 a week, on days and
+                Default 12 + 196 from all 15 topics      at a time the admin picks
+
+When the picked topics run out of cards, the rest come from all topics.
 
 Topic picks and the Enterprise schedule live in Organization.billing
 (billing.py), set when the admin upgrades on the website.
@@ -35,15 +39,16 @@ from django.db.models import Q
 from .models import AIDLUser, Organization
 
 ORDER = ("trial", "basic", "enterprise")
-TOPIC_CARDS = 12  # cards a plan adds from the topics the admin picks
+WEEKS_A_YEAR = 52
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 PLANS = {
     "trial": {"label": "Trial", "max_users": 5, "schedule": {"monthly": True, "hour": 10},
-              "cadence": "1 card a month", "picks_topics": False},
+              "cadence": "1 card a month", "picks_topics": False, "all_topics": False},
     "basic": {"label": "Basic", "max_users": None, "schedule": {"days": (0, 3), "hour": 10},
-              "cadence": "2 cards a week (Mon, Thu)", "picks_topics": True},
+              "cadence": "2 cards a week (Mon, Thu)", "picks_topics": True, "all_topics": False},
     "enterprise": {"label": "Enterprise", "max_users": None, "schedule": {"days": (0, 1, 3, 4), "hour": 10},
-                   "cadence": "4 cards a week, on your schedule", "picks_topics": True, "custom_schedule": True},
+                   "cadence": "4 cards a week, on your schedule", "picks_topics": False, "all_topics": True,
+                   "custom_schedule": True},
 }
 PACKAGE_LABELS = {"trial": "Default package", "basic": "Basic package", "enterprise": "Enterprise package"}
 _PACKAGES_FILE = Path(__file__).resolve().parent / "data" / "awareness_packages.json"
@@ -81,7 +86,19 @@ def rank(plan: str) -> int:
 
 # ---------- cards ----------
 
-def pick_cards(topic_codes: list[str], exclude: set[str], n: int = TOPIC_CARDS) -> list[dict]:
+def total_cards(plan: str) -> int:
+    """Cards a plan delivers: the Default 12 on Trial, a year of cards on
+    the weekly plans."""
+    if plan == "trial":
+        return len(_packages()["default"])
+    return len(PLANS[plan]["schedule"]["days"]) * WEEKS_A_YEAR
+
+
+def all_topic_codes() -> list[str]:
+    return [c["code"] for c in categories()]
+
+
+def pick_cards(topic_codes: list[str], exclude: set[str], n: int) -> list[dict]:
     """n library cards from the chosen topics, taken in turn from each topic
     (library order), skipping cards already in the package."""
     pools = {code: [c for c in library() if c["code"] == code and c["no"] not in exclude] for code in topic_codes}
@@ -110,20 +127,22 @@ def cards_for_plan(org: Organization, plan: str, topics: dict[str, list[str]] | 
     def picks(p):
         return topics[p] if topics and p in topics else topics_for(org, p)
 
-    default = list(_packages()["default"])
+    cards = list(_packages()["default"])
     if plan == "trial":
-        return default
-    have = {c["no"] for c in default}
-    chosen = picks("basic")
-    if chosen:
-        basic_extra = pick_cards(chosen, have)
-    else:  # no topics picked: the manager's Basic package
-        basic_extra = [c for c in _packages()["basic"] if c["no"] not in have]
-    cards = default + basic_extra
-    if plan == "basic":
         return cards
-    have |= {c["no"] for c in basic_extra}
-    return cards + pick_cards(picks("enterprise"), have)
+    total = total_cards(plan)
+    if plan == "enterprise":
+        chosen = all_topic_codes()
+    else:
+        chosen = picks("basic")
+        if not chosen:  # no topics picked: the manager's Basic package first
+            cards += [c for c in _packages()["basic"] if c["no"] not in {d["no"] for d in cards}]
+            chosen = all_topic_codes()
+    have = {c["no"] for c in cards}
+    cards += pick_cards(chosen, have, total - len(cards))
+    if len(cards) < total:  # the picked topics ran out of cards
+        cards += pick_cards(all_topic_codes(), {c["no"] for c in cards}, total - len(cards))
+    return cards[:total]
 
 
 def package_cards(org: Organization) -> list[dict]:

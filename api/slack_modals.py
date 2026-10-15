@@ -168,11 +168,33 @@ def add_people_view(meta: dict, d: dict) -> dict:
         {"type": "section", "text": _md("Pick the people who should earn an AI licence. AIDL adds them to the AIDL "
                                         "channel and sends each one their welcome and learning cards.")},
         _input("people", "People", {"type": "multi_users_select", "action_id": "v",
-                                    "placeholder": _text("Choose people")}),
+                                    "placeholder": _text("Choose people")}, optional=True),
+        _input("everyone", "…or select all", {"type": "checkboxes", "action_id": "v", "options": [
+            _option("Everyone in the workspace who isn't in the AIDL channel yet", "all")]}, optional=True),
         *([{"type": "context", "elements": [_md(f"*{free}* seat{'s' if free != 1 else ''} left on your "
                                                  f"{p.get('label', '')} plan ({p.get('used')} of {p.get('limit')} used)")]}]
           if free is not None else []),
     ], submit="Add people", meta=meta)
+
+
+def workspace_people(org: Organization) -> list[str]:
+    """Slack ids of the workspace's real people (no bots, guests or
+    deactivated accounts) who aren't in the AIDL channel yet."""
+    token = slack_client.bot_token(org)
+
+    def pages(method: str, key: str, params: dict) -> list:
+        items, cursor = [], ""
+        while True:
+            data = slack_client.slack_api(method, token, params={**params, "limit": 200, "cursor": cursor})
+            items += data.get(key) or []
+            cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
+            if not cursor or not data.get("ok"):
+                return items
+
+    in_channel = set(pages("conversations.members", "members", {"channel": org.slack_channel_id}))
+    return [u["id"] for u in pages("users.list", "members", {})
+            if not (u.get("deleted") or u.get("is_bot") or u.get("is_app_user") or u.get("is_restricted")
+                    or u.get("id") == "USLACKBOT" or u.get("id") in in_channel)]
 
 
 def submit_add_people(caller: AIDLUser, org: Organization, view: dict) -> dict:
@@ -181,9 +203,14 @@ def submit_add_people(caller: AIDLUser, org: Organization, view: dict) -> dict:
 
     if not light_admin_context(caller)["can_team"]:
         return errors(people="Only the admin who set up AIDL can add people.")
-    picked = (_values(view).get("people", {}).get("v", {}) or {}).get("selected_users") or []
+    values = _values(view)
+    picked = (values.get("people", {}).get("v", {}) or {}).get("selected_users") or []
+    if (values.get("everyone", {}).get("v", {}) or {}).get("selected_options"):
+        picked = list(dict.fromkeys(picked + workspace_people(org)))
+        if not picked:
+            return errors(everyone="Everyone in the workspace is already in the AIDL channel.")
     if not picked:
-        return errors(people="Pick at least one person.")
+        return errors(people="Pick at least one person, or tick select all.")
     u = usage(org)
     if len(picked) > u["free"]:
         return errors(people=f"Only {u['free']} seat{'s' if u['free'] != 1 else ''} left on your {u['label']} plan "
@@ -396,7 +423,7 @@ def team_progress_view(org: Organization, notice: str = "") -> dict:
             f"🪪  *Licensed*\n{_bar(t['licensed'], n)}\n\n"
             f"📖  *Highway Code accepted*\n{_bar(t['highway_code'], n)}\n\n"
             f"🚦  *Traffic Light accepted*\n{_bar(t['traffic_light'], n)}\n\n"
-            f"📄  *AUP — all 14 points accepted* (`{t['aup_version'] or 'not created'}`)\n{_bar(t['aup'], n)}")},
+            f"📄  *AUP — all 14 points accepted*{'' if t['aup_version'] else ' (not created)'}\n{_bar(t['aup'], n)}")},
     ]
     if t["legacy"]:
         blocks.append({"type": "context", "elements": [_md(

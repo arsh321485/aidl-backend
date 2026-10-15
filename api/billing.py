@@ -1,9 +1,9 @@
 """Plan upgrades from the website (plans.py has the plans themselves).
 
 The admin opens the plans page from Slack (Admin Center → Upgrade plan),
-picks the next plan, the topics its extra 12 cards come from, and — for
-Enterprise — the delivery days and time, previews those cards (blurred) and
-goes to checkout.
+picks the next plan, the topics its cards come from (Basic; Enterprise
+covers all topics) and — for Enterprise — the delivery days and time,
+previews the first cards (blurred) and goes to checkout.
 
 Checkout:
 - admins listed in BILLING_UNLIMITED_ADMIN_EMAILS upgrade without paying
@@ -62,10 +62,10 @@ def catalog(org: Organization) -> dict:
         p = plans.PLANS[key]
         items.append({
             "key": key, "label": p["label"], "price": _price(key),
-            "cards": len(plans.cards_for_plan(org, key)) if key == current else
-            len(plans._packages()["default"]) + plans.TOPIC_CARDS * plans.ORDER.index(key),
+            "cards": plans.total_cards(key),
             "cadence": p["cadence"], "users": p["max_users"] or "As many as you buy",
-            "picks_topics": p["picks_topics"], "custom_schedule": bool(p.get("custom_schedule")),
+            "picks_topics": p["picks_topics"], "all_topics": p["all_topics"],
+            "custom_schedule": bool(p.get("custom_schedule")),
             "current": key == current, "available": plans.rank(key) >= plans.rank(current),
         })
     return {
@@ -82,20 +82,25 @@ def catalog(org: Organization) -> dict:
         "provider": settings.BILLING_PROVIDER,
         "payment_ready": {k: _stripe_ready(k) for k in ("basic", "enterprise")},
         "sales_email": settings.BILLING_SALES_EMAIL,
-        "topic_cards": plans.TOPIC_CARDS,
+        "preview_cards": PREVIEW_CARDS,
         "weekdays": list(plans.WEEKDAYS),
     }
 
 
-def preview(org: Organization, plan: str, topics: list[str]) -> list[dict]:
-    """The 12 cards `plan` adds for these topics — titles only (the page
-    shows them blurred; the card text stays on the server)."""
+PREVIEW_CARDS = 12
+
+
+def preview(org: Organization, plan: str, topics: list[str]) -> dict:
+    """The first cards `plan` adds beyond the Default 12 for these topics —
+    titles only (the page shows them blurred; the card text stays on the
+    server) — and how many it adds in all."""
     if plan not in plans.ORDER or plan == "trial":
-        return []
-    picks = {plan: topics}
-    below = plans.cards_for_plan(org, plans.ORDER[plans.ORDER.index(plan) - 1], picks)
-    cards = plans.cards_for_plan(org, plan, picks)[len(below):]
-    return [{"no": c["no"], "title": c["title"], "type": c["type"], "category": c["category"]} for c in cards]
+        return {"cards": [], "total": 0}
+    default = {c["no"] for c in plans._packages()["default"]}
+    cards = [c for c in plans.cards_for_plan(org, plan, {plan: topics}) if c["no"] not in default]
+    return {"cards": [{"no": c["no"], "title": c["title"], "type": c["type"], "category": c["category"]}
+                      for c in cards[:PREVIEW_CARDS]],
+            "total": len(cards)}
 
 
 # ---------- upgrade ----------
@@ -109,7 +114,7 @@ def validate(org: Organization, plan: str, topics: list[str], schedule: dict | N
     elif plan == "trial":
         errors["plan"] = "You're already on the Trial plan."
     codes = {c["code"] for c in plans.categories()}
-    if plan in ("basic", "enterprise"):
+    if plan in plans.PLANS and plans.PLANS[plan]["picks_topics"]:
         if not topics:
             errors["topics"] = "Pick at least one topic."
         elif any(t not in codes for t in topics):
@@ -132,6 +137,8 @@ def activate(org: Organization, plan: str, topics: list[str], schedule: dict | N
     data = _load(org)
     if stripe:
         data["stripe"] = {k: v for k, v in stripe.items() if v}
+    if plans.PLANS[plan]["all_topics"]:
+        topics = plans.all_topic_codes()
     data.setdefault("topics", {})[plan] = topics
     if plan == "enterprise" and schedule:
         data["schedule"] = {"days": sorted({int(d) for d in schedule["days"]}), "hour": int(schedule["hour"])}

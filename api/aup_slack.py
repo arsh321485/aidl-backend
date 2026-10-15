@@ -245,7 +245,7 @@ def _clip(text: str, n: int = 2900) -> str:
 def aup_blocks(aup: dict) -> list:
     org = aup["organization"]
     blocks = [{"type": "header", "text": _text("📄 AI Acceptable Use Policy")},
-              {"type": "context", "elements": [_md(f"*{org['name']}*  ·  `{aup['version']}`  ·  14 points")]}]
+              {"type": "context", "elements": [_md(f"*{org['name']}*  ·  14 points")]}]
     for p in aup["points"]:
         blocks += [{"type": "divider"},
                    {"type": "section", "text": _md(_clip(f"*{p['no']} · {p['title']}*\n{_point_text(p)}"))}]
@@ -260,8 +260,8 @@ def report_view(org: Organization, aup: dict | None = None, notice: str = "") ->
     aup = aup or aup_store.current(org)
     change = aup_change(org)
     if change.get("changed"):
-        intro = (f"✅ *Your AUP has been updated* (`{change['version']}`). Your team still has the previous version "
-                 f"(`{change['sent_version']}`) — send them this one so they can accept it.")
+        intro = ("✅ *Your AUP has been updated.* Your team still has the previous version "
+                 "— send them this one so they can accept it.")
     else:
         intro = "✅ *Your AUP is ready.* Employees will receive it one point at a time and accept each point."
     blocks = [
@@ -301,7 +301,7 @@ def employee_blocks(member: AIDLUser, org: Organization) -> list:
         return [{"type": "header", "text": _text("📄 AI Acceptable Use Policy")},
                 {"type": "section", "text": _md(f"✅ *You've accepted all {aup_store.POINTS} points* of "
                                                 f"{org.name}'s AI Acceptable Use Policy.")},
-                {"type": "context", "elements": [_md(f"{bar}  `{aup['version']}`")]}]
+                {"type": "context", "elements": [_md(bar)]}]
     point = aup["points"][n - 1]
     return [
         {"type": "header", "text": _text(f"📄 AI Acceptable Use Policy — point {n} of {aup_store.POINTS}")},

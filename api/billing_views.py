@@ -2,7 +2,7 @@
 from the Slack "Upgrade plan" link.
 
     GET  /api/billing/plans/      current plan, the plans, topics, schedule
-    POST /api/billing/preview/    {plan, topics} → the 12 cards it adds (titles only)
+    POST /api/billing/preview/    {plan, topics} → {cards: first 12 it adds (titles only), total}
     POST /api/billing/checkout/   {plan, topics, schedule?, seats?} →
                                   {status: redirect|activated|pending, url?, message}
 """
@@ -70,8 +70,7 @@ def preview_view(request):
     org, error = _org_for_admin(request)
     if error:
         return error
-    cards = billing.preview(org, str(request.data.get("plan") or ""), _topics(request.data.get("topics")))
-    return Response({"cards": cards})
+    return Response(billing.preview(org, str(request.data.get("plan") or ""), _topics(request.data.get("topics"))))
 
 
 @extend_schema(summary="Upgrade: go to payment (or activate in test mode)", request=OpenApiTypes.OBJECT,
