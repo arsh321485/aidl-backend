@@ -6,7 +6,10 @@
                          message moves to the next point); turns green when done
     Card 2 of 3 · Traffic Light Check → "Got it. Next →"
     Card 3 of 3 · The Highway Code    → "Got it. Get my license →"
-    License issued     → the licence image (licence_image.py), download, share
+    Avatar             → only if they haven't picked one: create it on the
+                         website (avatar.py) or use their Slack photo
+    License issued     → the licence image (licence_image.py) with the avatar
+                         and the valid-till date (1 year), download, share
 
 The admin starts the flow once (Admin Center step 4); people who join the
 channel later get the Welcome card automatically.
@@ -163,8 +166,25 @@ def highway(member: AIDLUser, org: Organization, done: bool = False) -> dict:
     ])
 
 
+def avatar_card(member: AIDLUser, org: Organization, notice: str = "") -> dict:
+    """Licence earned, no avatar yet: pick one before the licence is shown."""
+    from . import avatar
+
+    return card("Your AI Driving License is ready — pick the avatar for it.", "*License · your photo*",
+                COLOR["yellow"], [
+        _header(":art: One last step: your licence avatar"),
+        _section(f"You've earned your *AI Driving License*, {_first(member)}! Choose the avatar that goes on it — "
+                 "build your own, or use your Slack profile photo."),
+        _actions("aidl_flow_avatar",
+                 _button(":art: Create my avatar", "aidl_link_avatar", "create", "primary", url=avatar.start_url(member)),
+                 _button(":camera: Use my Slack photo", "aidl_flow_avatar", "slack")),
+        *([_context(notice)] if notice else []),
+        _context("Your licence arrives here as soon as your avatar is saved."),
+    ])
+
+
 def licence(member: AIDLUser, org: Organization) -> dict:
-    from . import licence_image
+    from . import avatar, licence_image
 
     if not member.licence_issued:
         return card("All cards done — your license is waiting for a free seat.", "*License*", COLOR["yellow"], [
@@ -172,7 +192,12 @@ def licence(member: AIDLUser, org: Organization) -> dict:
             _section(f"You've finished every card. All license seats on {org.name}'s plan are in use, so your license "
                      "will be issued as soon as one is free. Your AIDL admin has been told."),
         ])
+    if not member.avatar_data:
+        return avatar_card(member, org)
     number = member.licence_number
+    version = licence_image.avatar_version(member)
+    valid = (f" · valid till *{member.licence_expires_at.strftime('%d %B %Y')}*"
+             if member.licence_expires_at else "")
     issued = member.licence_issued_at or timezone.now()
     nxt = (PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
                                           post_at__gt=timezone.now()).order_by("post_at").first())
@@ -182,8 +207,9 @@ def licence(member: AIDLUser, org: Organization) -> dict:
                 COLOR["green"], [
         _header(f":tada: You're road-ready, {_first(member)}!"),
         _context("All three cards done and the policy agreed. · `ISSUED`"),
-        _section("Here's your *AI Driving License*."),
-        {"type": "image", "image_url": licence_image.image_url(number), "title": _t(f"AI Driving License · {number}"),
+        _section(f"Here's your *AI Driving License*{valid}."),
+        {"type": "image", "image_url": licence_image.image_url(number, version=version),
+         "title": _t(f"AI Driving License · {number}"),
          "alt_text": f"AI Driving License for {member.full_name or member.email}, {number}, issued for {org.name} "
                      f"on {issued.strftime('%d %B %Y')}."},
         DIVIDER,
@@ -193,7 +219,8 @@ def licence(member: AIDLUser, org: Organization) -> dict:
                  "cards handy."),
         _actions("aidl_flow_licence",
                  _button(":inbox_tray: Download license", "aidl_link_download", "download",
-                         url=licence_image.image_url(number, download=True)),
+                         url=licence_image.image_url(number, download=True, version=version)),
+                 _button(":art: Change avatar", "aidl_link_avatar", "change", url=avatar.start_url(member)),
                  _button(":link: Share on LinkedIn", "aidl_link_share", "linkedin",
                          url="https://www.linkedin.com/sharing/share-offsite/?url=" + quote(verify, safe=""))),
     ])
@@ -233,6 +260,17 @@ def update(org: Organization, channel: str, ts: str, payload: dict) -> None:
         "attachments": payload.get("attachments") or []})
 
 
+def post_licence(member: AIDLUser) -> dict:
+    """The avatar was saved: post the licence card (with it)."""
+    from .org_service import get_organization_for_user
+
+    org = get_organization_for_user(member)
+    if org is None or not org.slack_bot_token:
+        return {}
+    member.refresh_from_db()
+    return post(org, member, licence(member, org))
+
+
 def start(org: Organization, member: AIDLUser) -> dict:
     """Send the Welcome card (once the AUP exists)."""
     return post(org, member, welcome(member, org))
@@ -247,6 +285,17 @@ def advance(org: Organization, member: AIDLUser, action_id: str, value: str, cha
     """A button on a flow card was pressed."""
     from .licensing import acknowledge, issue_learner_if_ready
 
+    if action_id == "aidl_flow_avatar":
+        from . import avatar
+
+        if avatar.use_slack_photo(member, org):
+            update(org, channel, ts, card("Avatar saved.", "*License · your photo*", COLOR["green"], [
+                _header(":camera: Your Slack photo is on your licence"), _done("Avatar saved")]))
+            post_licence(member)
+        else:
+            update(org, channel, ts, avatar_card(member, org, notice=":warning: You don't have a Slack profile "
+                                                                     "photo — create an avatar instead."))
+        return
     if action_id == "aidl_flow_start":
         update(org, channel, ts, welcome(member, org, done=True))
         post(org, member, BUILDERS[stage(member, org)](member, org))

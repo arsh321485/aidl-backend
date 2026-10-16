@@ -127,6 +127,10 @@ class AIDLUser(models.Model):
     organization_name = models.CharField(max_length=255, blank=True, default="")
     provider = models.CharField(max_length=32, default="teams")
     avatar_url = models.URLField(blank=True, default="")
+    # The avatar picked for the licence (website avatar builder or the Slack
+    # photo): PNG, base64; avatar_config is the builder's JSON so it can be edited.
+    avatar_data = models.TextField(blank=True, default="")
+    avatar_config = models.TextField(blank=True, default="")
     teams_team_id = models.CharField(max_length=128, blank=True, default="")
     teams_channel_id = models.CharField(max_length=255, blank=True, default="")
     teams_channel_name = models.CharField(max_length=128, blank=True, default="")

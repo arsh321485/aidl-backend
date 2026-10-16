@@ -2838,9 +2838,62 @@ class EmployeeFlowTests(TestCase):
         self._press("aidl_flow_hc", "next")
         self.member.refresh_from_db()
         self.assertTrue(self.member.licence_issued)
-        licence = self._posted()[-1]
+        self.assertEqual((self.member.licence_expires_at - self.member.licence_issued_at).days, 365)
+        ask = json.dumps(self._posted()[-1])                                      # no avatar yet → pick one
+        self.assertIn("/api/avatar/start/?u=", ask)
+        self.assertIn("aidl_flow_avatar", ask)
+
+        import base64
+        import io
+        from urllib.parse import parse_qs, urlparse
+
+        from PIL import Image
+
+        from .avatar import start_url
+
+        start = urlparse(start_url(self.member))
+        resp = self.client.get(f"{start.path}?{start.query}")
+        token = parse_qs(urlparse(resp["Location"]).query)["token"][0]           # → website avatar builder
+        self.assertEqual(self.client.get(f"/api/avatar/?token={token}").json()["has_avatar"], False)
+        buf = io.BytesIO()
+        Image.new("RGB", (200, 220), "#BFE3F0").save(buf, "PNG")
+        png = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            saved = self.client.post("/api/avatar/", json.dumps({"token": token, "png": png, "config": {"gender": "girl"}}),
+                                     content_type="application/json")
+        self.assertTrue(saved.json().get("ok"), saved.content)
+        licence = self._posted()[-1]                                              # licence card, with the avatar
         image = next(b for b in licence["attachments"][0]["blocks"] if b["type"] == "image")
         self.assertIn(f"/api/licenses/{self.member.licence_number}.png?s=", image["image_url"])
+        self.assertIn("&v=", image["image_url"])
+        self.assertIn("valid till", json.dumps(licence))
+        self.assertEqual(self.client.post("/api/avatar/", json.dumps({"token": "bad", "png": png}), content_type="application/json").status_code, 401)
+
+    def test_use_slack_photo_for_avatar(self):
+        import io
+
+        from PIL import Image
+
+        from . import employee_flow
+
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 64), "#884422").save(buf, "PNG")
+        self.member.licence_issued, self.member.licence_number = True, "AIDL-L-1111-2222"
+        self.member.save()
+
+        def fake(method, token, *, json=None, params=None):
+            self.calls.append((method, json or params))
+            if method == "users.info":
+                return {"ok": True, "user": {"profile": {"image_512": "https://img.example/p.png",
+                                                         "is_custom_image": True}}}
+            return {"ok": True, "ts": "1.1"}
+
+        photo = type("R", (), {"content": buf.getvalue(), "raise_for_status": lambda self: None})()
+        with patch("api.slack_client.slack_api", side_effect=fake), patch("api.avatar.requests.get", return_value=photo):
+            employee_flow.advance(self.org, self.member, "aidl_flow_avatar", "slack", "D5", "1.1")
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.avatar_data)
+        self.assertIn("AIDL-L-1111-2222.png", json.dumps(self._posted()[-1]))
 
     def test_points_must_be_in_order(self):
         from . import aup_store
