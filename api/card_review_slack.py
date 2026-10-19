@@ -1,6 +1,6 @@
 """Slack popup: Admin Center step 4 "Review & approve cards" (card_approval.py).
 
-    Onboarding cards   🚦 Traffic Light · 📖 Highway Code · 📄 AUP  [👁 Preview] [✅ Approve]
+    Onboarding cards   📄 AUP · 🚦 Traffic Light · 📖 Highway Code  [👁 Preview] [✅ Approve]
     Awareness cards    counts · [✅ Approve all waiting]
       Month n of N     [← Month n-1] [Month n+1 →] [✅ Approve month n]
         one line per card with a ⋯ menu: Preview · Approve · Skip · Swap

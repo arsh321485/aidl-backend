@@ -2,11 +2,11 @@
 ("AIDL Trial Flow C"): one card at a time, each a coloured attachment.
 
     Welcome            → "Let's go →"
-    Card 1 of 3 · Traffic Light Check → "Got it. Next →"   (image)
-    Card 2 of 3 · The Highway Code    → "Got it. Next →"   (image)
-    Card 3 of 3 · AUP  → the 14 points as image cards, accepted one at a time
+    Card 1 of 3 · AUP  → the 14 points as image cards, accepted one at a time
                          (the same message moves to the next point); turns
                          green when done
+    Card 2 of 3 · Traffic Light Check → "Got it. Next →"   (image)
+    Card 3 of 3 · The Highway Code    → "Got it. Get my license →"   (image)
     Avatar             → only if they haven't picked one: create it on the
                          website (avatar.py) or use their Slack photo
     License issued     → the licence image (licence_image.py) with the avatar
@@ -101,9 +101,9 @@ def welcome(member: AIDLUser, org: Organization, done: bool = False) -> dict:
         {"type": "section", "fields": [_m("*Takes*\nAbout 10 min"), _m("*You get*\nAI Driving License"),
                                        _m(f"*After that*\n{cadence(org).capitalize()}")]},
         DIVIDER,
-        _section(f"*Your route today*\n\n:one:  *Traffic Light Check* · what's safe to paste\n"
-                 ":two:  *The Highway Code* · 5 everyday rules\n"
-                 f":three:  *{org.name} AUP* · {aup_store.POINTS} short points to agree"),
+        _section(f"*Your route today*\n\n:one:  *{org.name} AUP* · {aup_store.POINTS} short points to agree\n"
+                 ":two:  *Traffic Light Check* · what's safe to paste\n"
+                 ":three:  *The Highway Code* · 5 everyday rules"),
         _done("Started onboarding") if done else _actions("aidl_flow_welcome", _button("Let's go →", "aidl_flow_start",
                                                                                          "start", "primary")),
         _context(":lock: Your progress is private to you and your AIDL admin."),
@@ -164,11 +164,11 @@ def _approved(org: Organization, item: str) -> bool:
 def traffic(member: AIDLUser, org: Organization, done: bool = False) -> dict:
     if not done and not _approved(org, "traffic_light"):
         return waiting(member, org, "traffic_light")
-    return card("Card 1 of 3: Traffic Light Check. Before you paste anything into an AI, check the lights.",
-                "*Card 1 of 3 · :vertical_traffic_light: Traffic Light Check* · Before you paste anything",
+    return card("Card 2 of 3: Traffic Light Check. Before you paste anything into an AI, check the lights.",
+                "*Card 2 of 3 · :vertical_traffic_light: Traffic Light Check* · Before you paste anything",
                 COLOR["green"], [
         _card_image("traffic_light", org),
-        _done("Card 1 complete") if done else _actions("aidl_flow_tl", _button(
+        _done("Card 2 complete") if done else _actions("aidl_flow_tl", _button(
             "Got it. Next: The Highway Code →", "aidl_flow_tl", "next", "primary")),
     ])
 
@@ -176,22 +176,22 @@ def traffic(member: AIDLUser, org: Organization, done: bool = False) -> dict:
 def highway(member: AIDLUser, org: Organization, done: bool = False) -> dict:
     if not done and not _approved(org, "highway_code"):
         return waiting(member, org, "highway_code")
-    return card("Card 2 of 3: The Highway Code. The everyday rules for using AI safely and confidently.",
-                "*Card 2 of 3 · :book: Highway Code* · Section A · Learner Rules", COLOR["blue"], [
+    return card("Card 3 of 3: The Highway Code. The everyday rules for using AI safely and confidently.",
+                "*Card 3 of 3 · :book: Highway Code* · Section A · Learner Rules", COLOR["blue"], [
         _card_image("highway_code", org),
-        _done("Card 2 complete") if done else _actions("aidl_flow_hc", _button(
-            f"Got it. Next: {org.name} AUP →", "aidl_flow_hc", "next", "primary")),
+        _done("Card 3 complete") if done else _actions("aidl_flow_hc", _button(
+            "Got it. Get my license →", "aidl_flow_hc", "next", "primary")),
     ])
 
 
 def aup_card(member: AIDLUser, org: Organization) -> dict:
-    """Card 3: the AUP, one point (image) at a time in the same message."""
+    """Card 1: the AUP, one point (image) at a time in the same message."""
     aup = aup_store.current(org)
-    label = "*Card 3 of 3 · :scroll: Acceptable Use Policy* · Sign-off"
+    label = "*Card 1 of 3 · :scroll: Acceptable Use Policy* · Sign-off"
     done = aup_store.points_accepted(member, org) if aup is not None else set()
     n = aup_store.next_point(member, org) if aup is not None else None
     if aup is not None and n is None:
-        return card(f"Card 3 of 3: {org.name} Acceptable Use Policy — agreed.", label, COLOR["green"], [
+        return card(f"Card 1 of 3: {org.name} Acceptable Use Policy — agreed.", label, COLOR["green"], [
             _header(f":scroll: {org.name} Acceptable Use Policy"),
             _context(f"All {aup_store.POINTS} points agreed · `AGREED`"),
             _section(f"*I, <@{_slack_id(member)}>, agreed to all {aup_store.POINTS} points of {org.name}'s AI "
@@ -202,9 +202,9 @@ def aup_card(member: AIDLUser, org: Organization) -> dict:
     if aup is None or not _approved(org, "aup"):
         return waiting(member, org, "aup")
     bar = "▰" * len(done) + "▱" * (aup_store.POINTS - len(done))
-    return card(f"Card 3 of 3: {org.name} AUP — point {n} of {aup_store.POINTS}.", label, COLOR["asphalt"], [
-        _context(f"{bar}  *Point {n} of {aup_store.POINTS}* · agree to each point and your AI Driving License is "
-                 "issued · `REQUIRED`"),
+    return card(f"Card 1 of 3: {org.name} AUP — point {n} of {aup_store.POINTS}.", label, COLOR["asphalt"], [
+        _context(f"{bar}  *Point {n} of {aup_store.POINTS}* · first stop: agree to each point, then two short "
+                 "cards and your AI Driving License is issued · `REQUIRED`"),
         _card_image(f"aup-{n}", org),
         _actions("aidl_flow_aup", _button(f"I agree to point {n} →", "aidl_flow_aup", aup_store.point_item(n),
                                           "primary")),
@@ -259,8 +259,8 @@ def licence(member: AIDLUser, org: Organization) -> dict:
          "alt_text": f"AI Driving License for {member.full_name or member.email}, {number}, issued for {org.name} "
                      f"on {issued.strftime('%d %B %Y')}."},
         DIVIDER,
-        _section(f":white_check_mark: Traffic Light Check\n:white_check_mark: The Highway Code\n"
-                 f":white_check_mark: {org.name} AUP agreed"),
+        _section(f":white_check_mark: {org.name} AUP agreed\n:white_check_mark: Traffic Light Check\n"
+                 ":white_check_mark: The Highway Code"),
         _section(f":spiral_calendar_pad: Your next card arrives {when}. Keep the Traffic Light and Highway Code "
                  "cards handy."),
         _actions("aidl_flow_licence",
@@ -284,13 +284,13 @@ def stage(member: AIDLUser, org: Organization) -> str:
     """The card the employee is on."""
     from .licensing import acknowledged_items
 
+    if not aup_store.all_points_accepted(member, org):
+        return "aup"
     done = acknowledged_items(member)
     if "traffic_light" not in done:
         return "traffic_light"
     if "highway_code" not in done:
         return "highway_code"
-    if not aup_store.all_points_accepted(member, org):
-        return "aup"
     return "licence"
 
 
