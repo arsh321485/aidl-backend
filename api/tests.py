@@ -2036,11 +2036,11 @@ class SetupStepsTests(TestCase):
         self._event("U5")                                         # someone joins
         home = self._home()
         self.assertIn("✅  *3 · Team*  ·  1 member", home)
-        self.assertIn("*4 · Approve your cards*", home)
+        self.assertIn("*4 · Card approval*\\nNothing reaches your team", home)
         self.assertEqual(home.count("aidl_send_item"), 0)         # can't start before the cards are approved
         _approve_all(self.org)
         home = self._home()
-        self.assertIn("✅  *4 · Cards approved*", home)
+        self.assertIn("✅  *4 · Card approval*  ·  onboarding cards approved", home)
         self.assertEqual(home.count("aidl_send_item"), 1)         # Start the programme
         update(self.org, flow_started="2026-10-09")
         self.assertIn("*6 · Licences & awareness cards*", self._home())
@@ -2856,19 +2856,20 @@ class EmployeeFlowTests(TestCase):
         self.calls.clear()
         self._press("aidl_flow_start", "start")
         card = self._posted()[-1]
-        self.assertIn("Card 1 of 3", json.dumps(card))                           # Traffic Light first
-        self.assertIn("Traffic Light Check", json.dumps(card))
-        self.assertEqual(card["attachments"][0]["color"], "#2EC866")               # design's coloured bar
-        self._press("aidl_flow_tl", "next")
-        self.assertIn("Card 2 of 3", json.dumps(self._posted()[-1]))             # then the Highway Code
-        self._press("aidl_flow_hc", "next")
-        aup = json.dumps(self._posted()[-1])                                     # then the AUP, as image cards
-        self.assertIn("Card 3 of 3", aup)
+        aup = json.dumps(card)                                                   # the AUP first, as image cards
+        self.assertIn("Card 1 of 3", aup)
         self.assertIn("/api/cards/aup-1/", aup)
+        self.assertEqual(card["attachments"][0]["color"], "#14140F")               # design's coloured bar
         for n in range(1, 15):
             self._press("aidl_flow_aup", f"aup_{n}")
         update = [b for m, b in self.calls if m == "chat.update"][-1]
         self.assertIn("AGREED", json.dumps(update))
+        tl = json.dumps(self._posted()[-1])                                      # then the Traffic Light
+        self.assertIn("Card 2 of 3", tl)
+        self.assertIn("Traffic Light Check", tl)
+        self._press("aidl_flow_tl", "next")
+        self.assertIn("Card 3 of 3", json.dumps(self._posted()[-1]))             # then the Highway Code
+        self._press("aidl_flow_hc", "next")
         self.member.refresh_from_db()
         self.assertTrue(self.member.licence_issued)
         self.assertEqual((self.member.licence_expires_at - self.member.licence_issued_at).days, 365)
@@ -3204,9 +3205,9 @@ class CardApprovalTests(TestCase):
             employee_flow.advance(self.org, member, "aidl_flow_start", "start", "D5", "1.1")
         self.assertIn("waiting for approval", json.dumps(self.calls[-1]))
         self.calls.clear()
-        self._review("aidl_crv_approve_onb", "traffic_light")
+        self._review("aidl_crv_approve_onb", "aup")
         posted = [b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U5"]
-        self.assertIn("/api/cards/traffic_light/", json.dumps(posted))           # sent once approved
+        self.assertIn("/api/cards/aup-1/", json.dumps(posted))                   # sent once approved
 
     def test_card_images_render(self):
         from . import card_image

@@ -1,9 +1,10 @@
 """The AI Driving License as a PNG (the design in E:\\slack-userflow,
 "Trial Flow C"), drawn with Pillow so Slack can show it in an image block.
 
-On Basic and Enterprise the organization's logo (Organization.logo_data) sits in the header circle
-and as a large, faint watermark — the licence carries the company's mark,
-so it can't be passed off as anyone else's.
+On Basic and Enterprise the organization's logo (Organization.logo_data) sits
+in the header circle and the company name is a large, faint watermark — the
+licence carries the company's mark, so it can't be passed off as anyone
+else's. Trial licences carry the AIDL logo and no watermark.
 
 Served at GET /api/licenses/<number>.png?s=<signature>  (licence_views.py)
 """
@@ -55,8 +56,50 @@ def avatar_version(member) -> str:
     return hashlib.sha256((member.avatar_data or "").encode()).hexdigest()[:8] if member.avatar_data else ""
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.load_default(size=size * S)
+def _font(size: int, weight: str = "Bold") -> ImageFont.FreeTypeFont:
+    return _lato(weight, size * S)
+
+
+def _lato(weight: str, px: int) -> ImageFont.FreeTypeFont:
+    from pathlib import Path
+
+    return ImageFont.truetype(str(Path(__file__).resolve().parent / "data" / "fonts" / f"Lato-{weight}.ttf"), px)
+
+
+def text_watermark(img: Image.Image, text: str, *, angle: float = 0, color: str = "#14140F",
+                   opacity: float = 0.08, width_ratio: float = 0.8, spacing: float = 0.12) -> None:
+    """A large, faint company-name watermark across the middle of `img`
+    (rotated by `angle` degrees — slanted on the Highway Code / AUP cards)."""
+    text = (text or "").upper().strip()
+    if not text:
+        return
+    font = _lato("Black", 200)
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    gap = 200 * spacing
+    widths = [probe.textlength(ch, font=font) for ch in text]
+    layer = Image.new("L", (int(sum(widths) + gap * len(text)) + 40, 260), 0)
+    ld = ImageDraw.Draw(layer)
+    x = 20
+    for ch, w in zip(text, widths):
+        ld.text((x, 130), ch, font=font, fill=255, anchor="lm")
+        x += w + gap
+    layer = layer.crop(layer.getbbox() or (0, 0, layer.width, layer.height))
+    if angle:
+        layer = layer.rotate(angle, expand=True, resample=Image.BICUBIC)
+    scale = min(img.width * width_ratio / layer.width, img.height * 0.85 / layer.height)
+    layer = layer.resize((max(1, int(layer.width * scale)), max(1, int(layer.height * scale))), Image.LANCZOS)
+    tint = Image.new("RGBA", layer.size, color)
+    tint.putalpha(layer.point(lambda a: int(a * opacity)))
+    img.alpha_composite(tint, ((img.width - layer.width) // 2, (img.height - layer.height) // 2))
+
+
+def _aidl_logo() -> Image.Image | None:
+    from pathlib import Path
+
+    try:
+        return Image.open(Path(__file__).resolve().parent / "static" / "aidl" / "logo.png").convert("RGBA")
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _xy(*v):
@@ -129,32 +172,29 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, ex
             d.ellipse(_xy(x - 7, y - 7, x + 7, y + 7), outline=TEXTURE, width=S)
 
     logo = brand_logo(org)
-    if logo is not None:  # large faint watermark, bottom right
-        size = 290 * S
-        wm = _contain(logo, size, size)
-        alpha = wm.getchannel("A").point(lambda a: int(a * 0.10))
-        wm.putalpha(alpha)
-        mask = _circle_mask(size)
-        wm.putalpha(Image.composite(wm.getchannel("A"), Image.new("L", wm.size, 0), mask))
-        img.alpha_composite(wm, _xy(515, 118))
 
     # header band + hazard stripe
     d.rectangle(_xy(0, 0, W, 112), fill=INK)
     for x in range(-30, W + 30, 22):
         d.polygon([_xy(x, 124), _xy(x + 11, 124), _xy(x + 23, 112), _xy(x + 12, 112)], fill=INK)
     d.ellipse(_xy(24, 16, 104, 96), fill=YELLOW)
-    if logo is not None:
+    badge_src = logo if logo is not None else _aidl_logo()
+    if badge_src is not None:
         size = 72 * S
-        badge = _contain(logo, size, size)
+        badge = _contain(badge_src, size, size)
         clip = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         clip.paste(badge, (0, 0), _circle_mask(size))
         img.alpha_composite(clip, _xy(28, 20))
-    else:
-        d.text(_xy(64, 56), "AI", font=_font(24), fill=INK, anchor="mm")
-    d.text(_xy(122, 54), "AI DRIVING LICENSE", font=_font(32), fill=YELLOW, anchor="ls")
-    d.text(_xy(124, 84), f"ISSUED FOR {org_name.upper()}"[:46], font=_font(15), fill=CREAM, anchor="ls")
+    d.text(_xy(122, 56), "AI DRIVING LICENSE", font=_font(34, "Black"), fill=YELLOW, anchor="ls")
+    spaced = " ".join(f"ISSUED FOR {org_name.upper()}"[:40])
+    d.text(_xy(124, 84), spaced, font=_font(12, "Black"), fill=CREAM, anchor="ls")
 
-    # photo (Slack profile picture, else a silhouette) + signature
+    if logo is not None:  # company name, large and faint, behind the details
+        body = img.crop(_xy(200, 132, W, 404))
+        text_watermark(body, org_name, opacity=0.10, width_ratio=0.9)
+        img.paste(body, _xy(200, 132))
+
+    # photo (chosen avatar / Slack photo, else a silhouette) + signature
     box = (40, 148, 190, 336)
     avatar = _avatar(avatar_url, avatar_data)
     if avatar is not None:
@@ -167,28 +207,29 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, ex
         d.ellipse(_xy(77, 184, 153, 260), fill="#8A8468")
         d.pieslice(_xy(50, 268, 180, 404), 180, 360, fill="#8A8468")
     d.rounded_rectangle(_xy(*box), radius=10 * S, outline=INK, width=4 * S)
-    d.text(_xy(44, 372), name.title()[:22], font=_font(20), fill=INK, anchor="ls")
-    d.rectangle(_xy(40, 380, 190, 381), fill=LINE)
-    d.text(_xy(40, 396), "HOLDER'S SIGNATURE", font=_font(11), fill=MUTED, anchor="ls")
+    d.text(_xy(115, 368), name.upper()[:20], font=_font(17, "BlackItalic"), fill=INK, anchor="ms")
+    d.rectangle(_xy(40, 378, 190, 379), fill=LINE)
+    d.text(_xy(115, 394), "HOLDER'S SIGNATURE", font=_font(10, "Bold"), fill=MUTED, anchor="ms")
 
     def label(x, y, t):
-        d.text(_xy(x, y), t, font=_font(13), fill=MUTED, anchor="ls")
+        d.text(_xy(x, y), t, font=_font(11, "Bold"), fill=MUTED, anchor="ls")
 
     label(220, 168, "1. NAME")
-    d.text(_xy(220, 208), name.upper()[:24], font=_font(34), fill=INK, anchor="ls")
+    d.text(_xy(220, 210), name.upper()[:22], font=_font(36, "Black"), fill=INK, anchor="ls")
     label(220, 252, "2. ISSUED")
-    d.text(_xy(220, 280), issued.strftime("%d/%m/%Y") if issued else "—", font=_font(22), fill=INK, anchor="ls")
-    label(450, 252, "3. VALID TILL")
-    if expires is not None:
-        expired = expires < datetime.now(expires.tzinfo)
-        d.text(_xy(450, 280), expires.strftime("%d/%m/%Y"), font=_font(22), fill=RED if expired else GREEN,
-               anchor="ls")
-        if expired:
-            d.text(_xy(590, 280), "EXPIRED", font=_font(14), fill=RED, anchor="ls")
-    else:
-        d.text(_xy(450, 280), "—", font=_font(22), fill=INK, anchor="ls")
-    label(220, 326, "4. LICENSE NO.")
-    d.text(_xy(220, 356), number, font=_font(26), fill=RED, anchor="ls")
+    d.text(_xy(220, 280), issued.strftime("%d/%m/%Y") if issued else "—", font=_font(22, "Black"), fill=INK,
+           anchor="ls")
+    label(385, 252, "3. VALID UNTIL")
+    d.text(_xy(385, 280), expires.strftime("%d/%m/%Y") if expires else "—", font=_font(22, "Black"), fill=INK,
+           anchor="ls")
+    expired = expires is not None and expires < datetime.now(expires.tzinfo)
+    label(560, 252, "4. STATUS")
+    pill, word = (RED, "EXPIRED") if expired else (GREEN, "ACTIVE")
+    d.rounded_rectangle(_xy(560, 262, 668, 290), radius=14 * S, fill=pill)
+    d.ellipse(_xy(572, 272, 580, 280), fill="#FFFFFF")
+    d.text(_xy(588, 282), word, font=_font(15, "Black"), fill="#FFFFFF", anchor="ls")
+    label(220, 326, "5. LICENSE NO.")
+    d.text(_xy(220, 358), number, font=_font(26, "Bold"), fill=RED, anchor="ls")
 
     # road footer: centre line + machine-readable line
     d.rectangle(_xy(0, 410, W, H), fill=INK)

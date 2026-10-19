@@ -3,11 +3,11 @@
   1. Create the AI policy (AUP)
   2. Add admins (optional)
   3. Add your team
-  4. Approve cards — the onboarding cards (Traffic Light, Highway Code, AUP)
+  4. Card approval — the onboarding cards (AUP, Traffic Light, Highway Code)
      and the plan's awareness cards (card_approval.py); nothing is sent
      without approval
   5. Start the programme — every employee gets the Welcome card and moves
-     through the Traffic Light Check, the Highway Code and the AUP to their
+     through the AUP, the Traffic Light Check and the Highway Code to their
      licence (employee_flow.py); people who join later start automatically
   6. Licences & awareness cards
 

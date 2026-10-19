@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from .models import AIDLUser, CardApproval, Organization
 
-ONBOARDING = ("traffic_light", "highway_code", "aup")
+ONBOARDING = ("aup", "traffic_light", "highway_code")
 ONBOARDING_LABEL = {"traffic_light": "🚦 Traffic Light Check", "highway_code": "📖 The Highway Code",
                     "aup": "📄 AI Acceptable Use Policy"}
 APPROVED, SKIPPED, WAITING = "approved", "skipped", "waiting"

@@ -3,7 +3,8 @@ blocks — the Highway Code and Traffic Light Check (design: E:\\image.png),
 each AUP point ("aup-<n>") and each awareness card ("pkg-<card no>").
 
 On Basic and Enterprise the organization's logo (Organization.logo_data)
-is the badge in the card's brand line and a faint watermark across the card;
+is the badge in the card's brand line; the watermark is the company name,
+slanted, on the Highway Code and AUP cards, and the faint logo on the others;
 Trial cards carry the AIDL logo and no watermark (licence_image.brand_logo).
 
 Served at GET /api/cards/<kind>/<org id>.png?s=<signature>&v=<version>
@@ -346,7 +347,11 @@ def render(kind: str, org) -> bytes:
     img = img.crop((0, 0, img.width, int(bottom * S)))
 
     logo = brand_logo(org)
-    if logo is not None:  # faint company watermark across the card
+    if logo is not None and (kind == "highway_code" or kind.startswith("aup-")):
+        from .licence_image import text_watermark
+
+        text_watermark(img, org.name, angle=28, opacity=0.07, width_ratio=0.9)  # slanted company name
+    elif logo is not None:  # faint company logo across the card
         size = int(min(img.width * 0.62, img.height * 0.8))
         wm = _contain(logo, size, size)
         wm.putalpha(wm.getchannel("A").point(lambda a: int(a * 0.07)))

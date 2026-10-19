@@ -332,8 +332,8 @@ def _send_or_remind(org, admin, item: str, *, remind: bool, response_url: str, v
     """Setup step 4: send a learning card to the team (once — later joiners
     get it automatically) or remind the people who haven't accepted it."""
     if not remind and not card_approval.onboarding_ready(org):
-        text = ("⏳ Approve the onboarding cards first (Traffic Light Check, Highway Code and the AUP) — "
-                "*📋 Review & approve cards* in the Admin Center.")
+        text = ("⏳ Approve the onboarding cards first (the AUP, the Traffic Light Check and the Highway Code) in "
+                "*4 · Card approval* in the Admin Center.")
         if response_url:
             _reply(response_url, text=text)
         return

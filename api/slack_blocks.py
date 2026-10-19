@@ -152,17 +152,17 @@ def _step_team(d: dict, st: dict) -> list:
 def _step_approve(d: dict, st: dict) -> list:
     """Step 4 — approve the cards before anyone gets them (card_approval.py)."""
     if not st["aup_done"]:
-        return [_locked(4, "Approve your cards", "step 1")]
+        return [_locked(4, "Card approval", "step 1")]
     a = st["approvals"]
     onboarding = "  ·  ".join(f"{'✅' if r['status'] == 'approved' else '⏳'} {r['label']}" for r in st["onboarding"])
     awareness = (f"📘 Awareness cards: *{a['approved']}* of {a['total']} approved"
                  + (f"  ·  ⏳ {a['waiting']} waiting" if a["waiting"] else "")
                  + (f"  ·  ⏭ {a['skipped']} skipped" if a["skipped"] else ""))
     if not st["approved_ready"]:
-        head = ("*4 · Approve your cards*\nNothing reaches your team until you approve it — preview every card "
+        head = ("*4 · Card approval*\nNothing reaches your team until you approve it. Preview every card "
                 "exactly as your team will see it.")
     else:
-        head = "✅  *4 · Cards approved*"
+        head = "✅  *4 · Card approval*  ·  onboarding cards approved"
     blocks = [_section(f"{head}\n{onboarding}\n{awareness}")]
     if st["approved_ready"] and a["waiting"] and st["cards_done"]:
         blocks.append(_context(f"⚠️ {a['waiting']} awareness card{'s are' if a['waiting'] != 1 else ' is'} waiting — "
@@ -184,8 +184,7 @@ def _step_send(d: dict, st: dict) -> list:
     aup = st["sends"]["aup"]
     if not st["cards_done"]:
         block = _section("*5 · Start the programme*\nEveryone gets a Welcome card in Slack and moves through the "
-                         "Traffic Light Check, the Highway Code and the AUP "
-                         f"({aup_points_label()}) at their own pace — their AI Driving License is issued at the end. "
+                         f"AUP ({aup_points_label()}), the Traffic Light Check and the Highway Code at their own pace — their AI Driving License is issued at the end. "
                          "People who join later start automatically.")
         if d["can_send"]:
             block["accessory"] = _button(f"📤 Start for {members}", "aidl_send_item", value="flow", style="primary")
