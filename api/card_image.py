@@ -1,13 +1,14 @@
-"""The Highway Code and Traffic Light Check cards as PNGs (design: E:\\image.png),
-drawn with Pillow so Slack can show them in image blocks.
+"""AIDL cards as PNGs, drawn with Pillow so Slack can show them in image
+blocks — the Highway Code and Traffic Light Check (design: E:\\image.png),
+each AUP point ("aup-<n>") and each awareness card ("pkg-<card no>").
 
 On Basic and Enterprise the organization's logo (Organization.logo_data)
 is the badge in the card's brand line and a faint watermark across the card;
 Trial cards carry the AIDL logo and no watermark (licence_image.brand_logo).
 
-Served at GET /api/cards/<kind>/<org id>.png?s=<signature>&v=<logo version>
-(licence_views.card_png). `v` changes with the logo, so Slack fetches the
-new image after the logo changes.
+Served at GET /api/cards/<kind>/<org id>.png?s=<signature>&v=<version>
+(licence_views.card_png). `v` changes with the logo (and the AUP version), so
+Slack fetches the new image after either changes.
 """
 
 from __future__ import annotations
@@ -23,7 +24,19 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .licence_image import _circle_mask, _contain, brand_logo
 
-KINDS = ("highway_code", "traffic_light")
+KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
+
+
+def valid_kind(kind: str) -> bool:
+    if kind in KINDS:
+        return True
+    if kind.startswith("aup-"):
+        return kind[4:].isdigit() and 1 <= int(kind[4:]) <= 14
+    if kind.startswith("pkg-"):
+        from .plans import card_by_no
+
+        return card_by_no(kind[4:]) is not None
+    return False
 S = 2  # draw at 2x for a crisp image
 W, PAD = 720, 30
 COL = PAD + 58  # content column, right of the brand badge
@@ -91,7 +104,12 @@ def signature(kind: str, org_id: str) -> str:
 
 def image_url(kind: str, org) -> str:
     oid = str(org.pk)
-    return f"{settings.BACKEND_URL}/api/cards/{kind}/{oid}.png?s={signature(kind, oid)}&v={logo_version(org)}"
+    version = logo_version(org)
+    if kind.startswith("aup-"):
+        from .aup_store import version as aup_version
+
+        version += "-" + (aup_version(org) or "none")
+    return f"{settings.BACKEND_URL}/api/cards/{kind}/{oid}.png?s={signature(kind, oid)}&v={version}"
 
 
 # ---------- drawing helpers ----------
@@ -253,10 +271,78 @@ def _traffic(img, d, org) -> float:
     return y
 
 
+def _doc_icon(d, x, y) -> None:
+    d.rectangle(_xy(x + 2, y, x + 20, y + 23), fill="#FFFFFF", outline=INK, width=S)
+    for k in range(4):
+        d.line([_xy(x + 6, y + 6 + k * 4), _xy(x + 16, y + 6 + k * 4)], fill=GREY, width=S)
+
+
+def _tag(d, x, y, text: str, fill: str = "#FFCC00", color: str = INK) -> float:
+    font = _font("Black", 11)
+    w = d.textlength(text, font=font) / S + 16
+    d.rounded_rectangle(_xy(x, y, x + w, y + 20), radius=3 * S, fill=fill)
+    d.text(_xy(x + 8, y + 10), text, font=font, fill=color, anchor="lm")
+    return y + 30
+
+
+def _plain(text: str) -> str:
+    return " ".join((text or "").replace("*", "").split())
+
+
+def _aup_point(img, d, org, n: int) -> float:
+    from .aup_store import POINTS, current
+
+    aup = current(org)
+    y = _header(img, d, org, "AI Acceptable Use Policy", _doc_icon)
+    width = W - PAD - COL
+    if aup is None or not 1 <= n <= len(aup["points"]):
+        return _rich(d, COL, y + 4, width, "The AI policy is still being set up.", size=16) + 10
+    point = aup["points"][n - 1]
+    y = _tag(d, COL, y + 2, f"POINT {n} OF {POINTS}")
+    y = _rich(d, COL, y, width, f"**{_plain(point['title'])}**", size=20, line=28) + 2
+    if point.get("intro"):
+        y = _rich(d, COL, y, width, _plain(point["intro"]), size=15, line=22, color=GREY) + 6
+    clauses = [_plain(c["text"]) for c in point.get("clauses") or []] or ["Nothing for this point."]
+    for text in clauses:
+        _dashes(d, y)
+        d.ellipse(_xy(COL + 4, y + 17, COL + 10, y + 23), fill="#FFCC00", outline=INK)
+        y = _rich(d, COL + 22, y + 10, width - 22, text, size=15, line=22) + 8
+    return y
+
+
+def _awareness(img, d, org, no: str) -> float:
+    from .plans import card_by_no
+
+    card = card_by_no(no) or {}
+    y = _header(img, d, org, "Awareness card", _book_icon)
+    width = W - PAD - COL
+    y = _tag(d, COL, y + 2, f"{card.get('category', '')} · {card.get('type', '')}".upper()[:70])
+    y = _rich(d, COL, y, width, f"**{_plain(card.get('title', ''))}**", size=22, line=30) + 4
+    y = _rich(d, COL, y, width, f"**{_plain(card.get('hook', ''))}**", size=17, line=25) + 6
+    y = _rich(d, COL, y, width, _plain(card.get("message", "")), size=16, line=24) + 12
+    action = _plain(card.get("action", ""))
+    if action:
+        top = y
+        # measure on a scratch canvas, then draw the box behind the text
+        scratch = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+        bottom = _rich(scratch, COL + 18, top + 12, width - 30, f"**{action}**", size=15, line=22)
+        d.rectangle(_xy(COL, top, W - PAD, bottom + 10), fill="#FFF6CC")
+        d.rectangle(_xy(COL, top, COL + 4, bottom + 10), fill="#FFCC00")
+        _rich(d, COL + 18, top + 12, width - 30, f"**{action}**", size=15, line=22)
+        y = bottom + 20
+    return y
+
+
 def render(kind: str, org) -> bytes:
-    img = Image.new("RGBA", _xy(W, 1400), "#FFFFFF")
+    img = Image.new("RGBA", _xy(W, 3000), "#FFFFFF")
     d = ImageDraw.Draw(img)
-    bottom = (_highway if kind == "highway_code" else _traffic)(img, d, org) + PAD - 10
+    if kind.startswith("aup-"):
+        bottom = _aup_point(img, d, org, int(kind[4:]))
+    elif kind.startswith("pkg-"):
+        bottom = _awareness(img, d, org, kind[4:])
+    else:
+        bottom = (_highway if kind == "highway_code" else _traffic)(img, d, org)
+    bottom += PAD - 10
     img = img.crop((0, 0, img.width, int(bottom * S)))
 
     logo = brand_logo(org)
@@ -275,8 +361,23 @@ def render(kind: str, org) -> bytes:
     return buf.getvalue()
 
 
-def alt_text(kind: str) -> str:
+def alt_text(kind: str, org=None) -> str:
     """What screen readers (and Slack notifications) get instead of the image."""
+    if kind.startswith("aup-") and org is not None:
+        from .aup_store import current
+
+        aup = current(org)
+        n = int(kind[4:])
+        if aup is None or n > len(aup["points"]):
+            return "AI Acceptable Use Policy."
+        point = aup["points"][n - 1]
+        text = f"AUP point {n}: {_plain(point['title'])}. " + " ".join(_plain(c["text"]) for c in point.get("clauses") or [])
+        return text[:1990]
+    if kind.startswith("pkg-"):
+        from .plans import card_by_no
+
+        c = card_by_no(kind[4:]) or {}
+        return _plain(f"{c.get('title', '')}. {c.get('hook', '')} {c.get('message', '')} {c.get('action', '')}")[:1990]
     if kind == "highway_code":
         return "The Highway Code. " + " ".join(f"{t}: {b.replace('**', '')}" for _k, t, b in HIGHWAY["rules"])
     return "Traffic Light Check. " + " ".join(

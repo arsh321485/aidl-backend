@@ -8,11 +8,17 @@ time zone. Slack posts them. Slack only accepts messages up to 120 days
 ahead, so later cards are saved and handed to Slack by schedule_due() —
 run `python manage.py schedule_package_cards` daily.
 
-sync_package() is the one entry point: it keeps what was already sent,
-cancels what is still scheduled, and re-schedules the cards the learner
-hasn't had yet. Call it on licence issue, when a member is added back, and
-when the organization's plan changes. pause_package() cancels the future
-cards when a member leaves the channel.
+Only cards an admin approved are sent (card_approval.py). A card still
+waiting at its slot is postponed: the slot goes to the next approved card,
+and the waiting one is added after the learner's last scheduled card once
+it's approved.
+
+sync_package() is the one entry point. Incremental (default): keeps what is
+sent or scheduled and adds the approved cards the learner hasn't got yet —
+on licence issue, after approvals, when a member is added back. full=True:
+cancels everything scheduled and schedules again from now — when the plan
+changes. pause_package() cancels the future cards when a member leaves the
+channel.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ from django.utils import timezone
 
 from . import slack_client
 from .models import AIDLUser, Organization, PackageDelivery
-from .plans import package_cards, plan_key, plan_of, schedule_of
+from .plans import plan_key, plan_of, schedule_of
 
 logger = logging.getLogger(__name__)
 
@@ -84,17 +90,25 @@ def _local_line(org: Organization, card: dict) -> str:
 
 
 def card_blocks(org: Organization, card: dict, position: int, total: int) -> list:
+    """The awareness card as an image (card_image.py — what the admin
+    approved), plus the company-specific line and Request an app."""
+    from . import card_image
+
+    kind = f"pkg-{card['no']}"
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"📘 {card['title']}", "emoji": True}},
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
-            f"Card {position} of {total}  ·  {card['category']}  ·  {card['type']}"}]},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*{card['hook']}*\n\n{card['message']}"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"👉 {card['action']}"}},
+            f"📘 *Card {position} of {total}*  ·  {card['category']}  ·  {card['type']}"}]},
+        {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": card_image.alt_text(kind)},
     ]
     if card.get("local_link"):
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": _local_line(org, card)}})
-    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text":
-        f"AIDL · {org.name} · {plan_of(org)['label']} plan"}]})
+    blocks += [
+        {"type": "actions", "block_id": "aidl_card_footer", "elements": [
+            {"type": "button", "text": {"type": "plain_text", "text": "🛣 Request an app", "emoji": True},
+             "action_id": "aidl_app_request_open", "value": "card"}]},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text":
+            f"AIDL · {org.name} · {plan_of(org)['label']} plan"}]},
+    ]
     return blocks
 
 
@@ -119,9 +133,11 @@ def pause_package(org: Organization, member: AIDLUser) -> int:
     return len(rows)
 
 
-def sync_package(org: Organization, member: AIDLUser) -> dict:
-    """Make the learner's scheduled cards match their plan. Returns
-    {'sent_now': n, 'scheduled': n} (or {'skipped': reason})."""
+def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dict:
+    """Schedule the learner's approved cards. Returns {'sent_now': n,
+    'scheduled': n} (or {'skipped': reason})."""
+    from .card_approval import deliverable, sequence
+
     if not member.licence_issued:
         return {"skipped": "no_licence"}
     if member.slack_left_at:
@@ -131,13 +147,25 @@ def sync_package(org: Organization, member: AIDLUser) -> dict:
     if not slack_user or not token:
         return {"skipped": "not_slack"}
 
-    pause_package(org, member)
+    if full:
+        pause_package(org, member)
+    else:
+        _mark_sent(member)
     PackageDelivery.objects.filter(user_id=str(member.pk), status__in=[
         PackageDelivery.Status.CANCELLED, PackageDelivery.Status.FAILED]).delete()
-    sent = set(PackageDelivery.objects.filter(user_id=str(member.pk)).values_list("card_no", flat=True))
-    cards = package_cards(org)
-    total = len(cards)
-    todo = [(i, c) for i, c in enumerate(cards, 1) if c["no"] not in sent]
+    total = len(sequence(org))
+    cards = deliverable(org)
+    approved = {c["no"] for c in cards}
+    # a card that was skipped after it was scheduled
+    for row in PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED):
+        if row.card_no not in approved:
+            if row.scheduled_message_id and token:
+                slack_client.slack_api("chat.deleteScheduledMessage", token, json={
+                    "channel": row.slack_channel_id, "scheduled_message_id": row.scheduled_message_id})
+            row.delete()
+    rows = list(PackageDelivery.objects.filter(user_id=str(member.pk)))
+    sent = {r.card_no for r in rows}
+    todo = [(c["position"], c) for c in cards if c["no"] not in sent]
     if not todo:
         return {"sent_now": 0, "scheduled": 0}
 
@@ -151,7 +179,7 @@ def sync_package(org: Organization, member: AIDLUser) -> dict:
               "slack_channel_id": channel}
     result = {"sent_now": 0, "scheduled": 0}
 
-    if not sent:  # first card right after the licence
+    if not rows:  # first card right after the licence
         position, card = todo.pop(0)
         res = slack_client.slack_api("chat.postMessage", token, json={
             "channel": channel, "text": f"AIDL card: {card['title']}", "blocks": card_blocks(org, card, position, total)})
@@ -160,7 +188,9 @@ def sync_package(org: Organization, member: AIDLUser) -> dict:
                                        error=res.get("error", "") or "")
         result["sent_now"] = 1
 
-    for (position, card), when in zip(todo, post_times(now, len(todo), schedule_of(org), tz_offset)):
+    # Postponed cards follow the learner's last scheduled card.
+    start = max([now] + [r.post_at for r in rows if r.status == PackageDelivery.Status.SCHEDULED])
+    for (position, card), when in zip(todo, post_times(start, len(todo), schedule_of(org), tz_offset)):
         row = PackageDelivery(**common, card_no=card["no"], post_order=position, post_at=when)
         if when - now <= _MAX_AHEAD:
             res = slack_client.slack_api("chat.scheduleMessage", token, json={
@@ -182,8 +212,11 @@ def schedule_due(org: Organization) -> int:
     token = slack_client.bot_token(org)
     if not token:
         return 0
-    cards = {c["no"]: c for c in package_cards(org)}
-    total = len(cards)
+    from .card_approval import sequence
+
+    seq = sequence(org)
+    cards = {c["no"]: c for c in seq if c["approval"] == "approved"}
+    total = len(seq)
     limit = timezone.now() + _MAX_AHEAD
     done = 0
     for row in PackageDelivery.objects.filter(organization_id=str(org.pk), status=PackageDelivery.Status.SCHEDULED,
@@ -206,13 +239,14 @@ def schedule_due(org: Organization) -> int:
     return done
 
 
-def sync_organization(org: Organization) -> dict:
-    """After a plan change: re-schedule every licensed learner's cards."""
+def sync_organization(org: Organization, full: bool = True) -> dict:
+    """Every licensed learner: after a plan change (full: re-schedule from
+    now) or after approvals (incremental: add the newly approved cards)."""
     from .licensing import learners
 
     out = {}
     for member in learners(org).filter(licence_issued=True):
-        out[member.email or str(member.pk)] = sync_package(org, member)
+        out[member.email or str(member.pk)] = sync_package(org, member, full=full)
     return out
 
 

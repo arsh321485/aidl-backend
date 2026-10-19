@@ -153,6 +153,8 @@ class AIDLUser(models.Model):
     # and upgrade the plan.
     perm_manage_admins = models.BooleanField(default=False)
     perm_billing = models.BooleanField(default=False)
+    # Approve the cards AIDL sends to the team (card_approval.py).
+    perm_approve_cards = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
     # Microsoft OAuth refresh token (requires the "offline_access" scope), so
@@ -376,6 +378,59 @@ class Acknowledgement(models.Model):
 
     def __str__(self):
         return f"{self.user_id} acknowledged {self.item} {self.version}"
+
+
+class CardApproval(models.Model):
+    """An admin's decision on one card before the team gets it
+    (card_approval.py). No row = waiting for approval. Keys:
+    "traffic_light", "highway_code", "aup:<version>", "pkg:<card no>"."""
+
+    class Status(models.TextChoices):
+        APPROVED = "approved", "Approved"
+        SKIPPED = "skipped", "Skipped"
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    card_key = models.CharField(max_length=64)
+    status = models.CharField(max_length=16, choices=Status.choices)
+    replacement_no = models.CharField(max_length=8, blank=True, default="")  # swapped for this card
+    decided_by_id = models.CharField(max_length=64, blank=True, default="")
+    decided_by_name = models.CharField(max_length=255, blank=True, default="")
+    decided_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("organization_id", "card_key")
+
+    def __str__(self):
+        return f"{self.organization_id} {self.card_key} {self.status}"
+
+
+class AppRequest(models.Model):
+    """An employee asked for an app to be approved (app_requests.py)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    name = models.CharField(max_length=255)
+    name_key = models.CharField(max_length=255, db_index=True)  # lower-case name, to spot repeats
+    website = models.CharField(max_length=500, blank=True, default="")
+    purpose = models.TextField(blank=True, default="")
+    data_class = models.CharField(max_length=8, default="green")  # green / amber / red
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    requester_ids = models.TextField(default="[]")  # JSON list of AIDLUser ids
+    admin_messages = models.TextField(default="[]")  # JSON [{channel, ts}] to update after the decision
+    decided_by_name = models.CharField(max_length=255, blank=True, default="")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.status})"
 
 
 class AuthChallenge(models.Model):

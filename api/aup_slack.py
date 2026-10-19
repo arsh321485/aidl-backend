@@ -255,22 +255,30 @@ def aup_blocks(aup: dict) -> list:
 def report_view(org: Organization, aup: dict | None = None, notice: str = "") -> dict:
     """Shown right after the AUP is generated (or changed): Send / View and
     the full text."""
-    from .admin_setup import aup_change
+    from .admin_setup import aup_change, started
+    from .card_approval import is_approved
 
     aup = aup or aup_store.current(org)
     change = aup_change(org)
-    if change.get("changed"):
-        intro = ("✅ *Your AUP has been updated.* Your team still has the previous version "
+    approved = is_approved(org, "aup")
+    view_button = {"type": "button", "text": _text("📄 View AUP"), "action_id": "aidl_aup_view", "value": "view"}
+    if not approved:
+        intro = ("✅ *Your AUP is ready.* Review it, then approve it — nothing reaches your team until it's approved. "
+                 "Employees get it one point at a time, each as a card.")
+        buttons = [{"type": "button", "text": _text("✅ Approve AUP"), "action_id": "aidl_crv_approve_onb",
+                    "value": "aup", "style": "primary"}, view_button]
+    elif change.get("changed") and started(org):
+        intro = ("✅ *Your updated AUP is approved.* Your team still has the previous version "
                  "— send them this one so they can accept it.")
+        buttons = [{"type": "button", "text": _text("📤 Send new version"), "action_id": "aidl_send_item",
+                    "value": "aup", "style": "primary"}, view_button]
     else:
-        intro = "✅ *Your AUP is ready.* Employees will receive it one point at a time and accept each point."
+        intro = ("✅ *Your AUP is approved.* Approve the other cards and start the programme from the Admin Center "
+                 "(steps 4 and 5).")
+        buttons = [view_button]
     blocks = [
         {"type": "section", "text": _md(intro)},
-        {"type": "actions", "block_id": "aidl_aup_next", "elements": [
-            {"type": "button", "text": _text("📤 Send AUP to team"), "action_id": "aidl_send_item", "value": "aup",
-             "style": "primary"},
-            {"type": "button", "text": _text("📄 View AUP"), "action_id": "aidl_aup_view", "value": "view"},
-        ]},
+        {"type": "actions", "block_id": "aidl_aup_next", "elements": buttons},
     ]
     if notice:
         blocks.append({"type": "context", "elements": [_md(notice)]})

@@ -39,7 +39,7 @@ def licence_png(request, number: str):
 
 @require_GET
 def card_png(request, kind: str, org_id: str):
-    if kind not in card_image.KINDS or not hmac.compare_digest(request.GET.get("s", ""),
+    if not card_image.valid_kind(kind) or not hmac.compare_digest(request.GET.get("s", ""),
                                                                card_image.signature(kind, org_id)):
         raise Http404
     org = Organization.objects.filter(pk=org_id).first()

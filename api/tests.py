@@ -61,6 +61,15 @@ def _answer_policy(org: Organization, **changes) -> dict:
     return aup_store.publish(org)
 
 
+def _approve_all(org: Organization) -> None:
+    """An admin approved every card (onboarding + the plan's package)."""
+    from . import card_approval
+
+    for item in card_approval.ONBOARDING:
+        card_approval.approve_onboarding(org, item, None)
+    card_approval.approve_waiting(org, None)
+
+
 def _accept_aup(member: AIDLUser, org: Organization) -> None:
     """The employee accepts all 14 points (publishes an AUP if needed)."""
     from . import aup_store
@@ -1415,7 +1424,7 @@ class SlackHomeVisualTests(TestCase):
         self.assertEqual(blocks[0]["text"]["text"], "🚦 AIDL Admin Center")
         self.assertFalse(any(b.get("block_id") == "aidl_tabs" for b in blocks))
         text = json.dumps(blocks, ensure_ascii=False)
-        for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 4 setup steps done",
+        for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 5 setup steps done",
                       "✅  *1 · AI policy (AUP)*", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
                       "*2 · Add admins (optional)*", "aidl_open_add-admin", "aidl_setup_skip",
                       "3 · Add your team*  —  _after step 2_"):
@@ -1716,6 +1725,7 @@ class PlanLimitTests(TestCase):
                             slack_bot_token=encrypt_token("xoxb-t"), plan="trial", seats_purchased=50)
         self.admin = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
         self.calls = []
+        _approve_all(self.org)
 
     def _fake(self, method, token, *, json=None, params=None):
         self.calls.append((method, json or params))
@@ -1838,6 +1848,7 @@ class PlanLimitTests(TestCase):
         u2 = self._licence("U2")
         self.org.plan = "basic"
         self.org.save()
+        _approve_all(self.org)                                    # the Basic cards were approved
         with patch("api.slack_client.slack_api", side_effect=self._fake):
             sync_organization(self.org)
         self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk)).count(), 104)
@@ -2025,9 +2036,14 @@ class SetupStepsTests(TestCase):
         self._event("U5")                                         # someone joins
         home = self._home()
         self.assertIn("✅  *3 · Team*  ·  1 member", home)
+        self.assertIn("*4 · Approve your cards*", home)
+        self.assertEqual(home.count("aidl_send_item"), 0)         # can't start before the cards are approved
+        _approve_all(self.org)
+        home = self._home()
+        self.assertIn("✅  *4 · Cards approved*", home)
         self.assertEqual(home.count("aidl_send_item"), 1)         # Start the programme
         update(self.org, flow_started="2026-10-09")
-        self.assertIn("*5 · Licences & awareness cards*", self._home())
+        self.assertIn("*6 · Licences & awareness cards*", self._home())
 
     def test_start_programme_sends_welcome_and_remind(self):
         from .admin_setup import started
@@ -2035,6 +2051,9 @@ class SetupStepsTests(TestCase):
         _answer_policy(self.org)
         self._event("U5")
         self.calls.clear()
+        self._press("aidl_send_item", "flow")                     # not approved yet → nothing sent
+        self.assertFalse(any(m == "chat.postMessage" and b["channel"] == "U5" for m, b in self.calls))
+        _approve_all(self.org)
         self._press("aidl_send_item", "flow")
         dm = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U5")
         self.assertIn("aidl_flow_start", json.dumps(dm))
@@ -2346,7 +2365,7 @@ class AupQuestionnaireSlackTests(TestCase):
         resp = self._submit(view, self._values(view))
         self.assertEqual(resp["response_action"], "update")
         text = json.dumps(resp["view"], ensure_ascii=False)
-        for label in ("Your AUP is ready", "aidl_send_item", "aidl_aup_view", "1 · Scope & Applicability",
+        for label in ("Your AUP is ready", "aidl_crv_approve_onb", "aidl_aup_view", "1 · Scope & Applicability",
                       "14 · Acknowledgment & Review"):
             self.assertIn(label, text)
         self.org.refresh_from_db()
@@ -2416,15 +2435,25 @@ class AupQuestionnaireSlackTests(TestCase):
         from .admin_setup import update
 
         update(self.org, admins_step="skipped")
+        _approve_all(self.org)
         with patch("api.slack_client.slack_api", return_value={"ok": True}):
             send_item(self.org, "aup")
         self.assertFalse(aup_change(self.org)["changed"])
         _answer_policy(self.org, **{"2.1": "2.1.c"})               # Change AUP
         self.org.refresh_from_db()
         self.assertTrue(aup_change(self.org)["changed"])
-        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-        self.assertIn("Send new version", home)
-        self.assertIn("Your AUP has been updated", json.dumps(report_view(self.org)))
+
+        def home():
+            return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+
+        self.assertIn("approve the new version in step 4", home())    # the new version needs approval first
+        self.assertNotIn("Send new version", home())
+        self.assertIn("aidl_crv_approve_onb", json.dumps(report_view(self.org)))
+        from . import card_approval
+
+        card_approval.approve_onboarding(self.org, "aup", self.owner)
+        self.assertIn("Send new version", home())
+        self.assertIn("Your updated AUP is approved", json.dumps(report_view(self.org)))
 
     def test_fresh_reset_clears_acceptances_and_licences(self):
         from django.core.management import call_command
@@ -2804,6 +2833,7 @@ class EmployeeFlowTests(TestCase):
         self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
         self.calls = []
         _answer_policy(self.org)
+        _approve_all(self.org)
         from .admin_setup import update
 
         update(self.org, flow_started="2026-10-14")
@@ -2826,16 +2856,19 @@ class EmployeeFlowTests(TestCase):
         self.calls.clear()
         self._press("aidl_flow_start", "start")
         card = self._posted()[-1]
-        self.assertIn("Card 1 of 3", json.dumps(card))
-        self.assertEqual(card["attachments"][0]["color"], "#14140F")               # design's coloured bar
+        self.assertIn("Card 1 of 3", json.dumps(card))                           # Traffic Light first
+        self.assertIn("Traffic Light Check", json.dumps(card))
+        self.assertEqual(card["attachments"][0]["color"], "#2EC866")               # design's coloured bar
+        self._press("aidl_flow_tl", "next")
+        self.assertIn("Card 2 of 3", json.dumps(self._posted()[-1]))             # then the Highway Code
+        self._press("aidl_flow_hc", "next")
+        aup = json.dumps(self._posted()[-1])                                     # then the AUP, as image cards
+        self.assertIn("Card 3 of 3", aup)
+        self.assertIn("/api/cards/aup-1/", aup)
         for n in range(1, 15):
             self._press("aidl_flow_aup", f"aup_{n}")
         update = [b for m, b in self.calls if m == "chat.update"][-1]
         self.assertIn("AGREED", json.dumps(update))
-        self.assertIn("Traffic Light Check", json.dumps(self._posted()[-1]))
-        self._press("aidl_flow_tl", "next")
-        self.assertIn("The Highway Code", json.dumps(self._posted()[-1]))
-        self._press("aidl_flow_hc", "next")
         self.member.refresh_from_db()
         self.assertTrue(self.member.licence_issued)
         self.assertEqual((self.member.licence_expires_at - self.member.licence_issued_at).days, 365)
@@ -3064,3 +3097,226 @@ class AdminPermissionTests(TestCase):
         with self.settings(BILLING_TEST_MODE=True, BILLING_PROVIDER=""):
             resp = client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]}, format="json")
         self.assertEqual(resp.json()["status"], "activated")
+
+
+class CardApprovalTests(TestCase):
+    """Admins approve every card before the team gets it (card_approval.py);
+    waiting cards are postponed, not dropped."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+    _event = PlanLimitTests._event
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(name="SpinifexIT", slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), plan="trial")
+        self.master = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Master")
+        self.calls = []
+        _answer_policy(self.org)
+
+    def _post(self, user, payload):
+        from urllib.parse import urlencode
+
+        payload = {"team": {"id": "T9"}, "user": {"id": user, "team_id": "T9"}, "trigger_id": "TR", **payload}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def _review(self, action_id, value, view=None, overflow=False):
+        action = {"action_id": action_id}
+        action.update({"selected_option": {"value": value}} if overflow else {"value": value})
+        payload = {"type": "block_actions", "actions": [action]}
+        if view is not None:
+            payload["view"] = view
+        return self._post("U1", payload)
+
+    def test_onboarding_must_be_approved_before_start(self):
+        from . import card_approval
+        from .models import CardApproval
+
+        self.assertFalse(card_approval.onboarding_ready(self.org))
+        for item in card_approval.ONBOARDING:
+            self._review("aidl_crv_approve_onb", item)
+        self.assertTrue(card_approval.onboarding_ready(self.org))
+        row = CardApproval.objects.get(organization_id=str(self.org.pk), card_key="traffic_light")
+        self.assertEqual(row.decided_by_name, "Priya Master")                    # audit trail
+        _answer_policy(self.org, **{"2.1": "2.1.c"})                              # a new AUP version
+        self.assertFalse(card_approval.is_approved(self.org, "aup"))             # needs approving again
+
+    def test_review_popup_months_approve_skip_swap(self):
+        from . import card_approval
+        from .card_review_slack import review_view
+
+        self.org.plan = "basic"
+        self.org.save()
+        view = review_view(self.org, 1)
+        text = json.dumps(view, ensure_ascii=False)
+        for label in ("Onboarding cards", "Month 1 of 12", "Month 2 →", "aidl_crv_card", "Extra reference cards"):
+            self.assertIn(label, text)
+        live = {"id": "V1", "callback_id": "aidl_cards_review", "private_metadata": json.dumps({"month": 1})}
+        self._review("aidl_crv_approve_month", "1", view=live)
+        self.assertEqual(card_approval.counts(self.org)["approved"], card_approval.per_month(self.org))
+        self.assertTrue(any(m == "views.update" and b.get("view_id") == "V1" for m, b in self.calls))
+        second = card_approval.month_cards(self.org, 2)
+        self._review("aidl_crv_card", f"skip|{second[0]['no']}", view=live, overflow=True)
+        self._review("aidl_crv_card", f"swap|{second[1]['no']}", view=live, overflow=True)
+        seq = {c["position"]: c for c in card_approval.sequence(self.org)}
+        self.assertEqual(seq[second[0]["position"]]["approval"], "skipped")
+        swapped = seq[second[1]["position"]]
+        self.assertEqual(swapped["swapped_from"], second[1]["no"])               # replaced in the same slot
+        self.assertEqual(swapped["category"], second[1]["category"])             # same topic
+        self.assertEqual(swapped["approval"], "waiting")                         # the new card needs approving
+
+    def test_waiting_cards_are_postponed_not_sent(self):
+        from . import card_approval
+        from .models import PackageDelivery
+        from .package_delivery import sync_package
+
+        member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", full_name="Jordan",
+                           licence_issued=True, licence_number="AIDL-L-1-2")
+        seq = card_approval.sequence(self.org)
+        card_approval.approve(self.org, [seq[0]["no"], seq[2]["no"]], self.master)   # card 2 not approved
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            sync_package(self.org, member)
+        nos = list(PackageDelivery.objects.filter(user_id=str(member.pk)).order_by("post_at")
+                   .values_list("card_no", flat=True))
+        self.assertEqual(nos, [seq[0]["no"], seq[2]["no"]])                      # card 2 waits, card 3 takes its slot
+        last = PackageDelivery.objects.get(user_id=str(member.pk), card_no=seq[2]["no"]).post_at
+        card_approval.approve(self.org, [seq[1]["no"]], self.master)              # approved later →
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            sync_package(self.org, member)
+        late = PackageDelivery.objects.get(user_id=str(member.pk), card_no=seq[1]["no"])
+        self.assertGreater(late.post_at, last)                                   # … follows the last scheduled card
+        sent = [b for m, b in self.calls if m in ("chat.postMessage", "chat.scheduleMessage")]
+        self.assertIn("/api/cards/pkg-", json.dumps(sent))                       # awareness cards are images
+        self.assertIn("aidl_app_request_open", json.dumps(sent))                 # … with Request an app
+
+    def test_employee_waits_for_unapproved_card_then_gets_it(self):
+        from . import employee_flow
+        from .admin_setup import update
+
+        update(self.org, flow_started="2026-10-14")
+        self._event("U5")
+        member = AIDLUser.objects.get(microsoft_id="slack:T9:U5")
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            employee_flow.advance(self.org, member, "aidl_flow_start", "start", "D5", "1.1")
+        self.assertIn("waiting for approval", json.dumps(self.calls[-1]))
+        self.calls.clear()
+        self._review("aidl_crv_approve_onb", "traffic_light")
+        posted = [b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U5"]
+        self.assertIn("/api/cards/traffic_light/", json.dumps(posted))           # sent once approved
+
+    def test_card_images_render(self):
+        from . import card_image
+        from .plans import package_cards
+
+        for kind in ("aup-1", "aup-14", f"pkg-{package_cards(self.org)[0]['no']}"):
+            path = card_image.image_url(kind, self.org).split("onrender.com", 1)[-1]
+            resp = self.client.get(path)
+            self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"), kind)
+        self.assertEqual(self.client.get(f"/api/cards/pkg-zzz/{self.org.pk}.png?s=x").status_code, 404)
+
+    def test_needs_permission_and_reminds_approvers(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import card_approval
+
+        helper = make_user(self.org, microsoft_id="slack:T9:U2", full_name="Mo Helper", perm_approve_cards=False)
+        self._post("U2", {"type": "block_actions", "actions": [{"action_id": "aidl_crv_approve_all", "value": "1"}],
+                          "response_url": "https://hooks.example/r"})
+        self.assertEqual(card_approval.counts(self.org)["approved"], 0)          # no permission → nothing changes
+        helper.perm_approve_cards = True
+        helper.save()
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            told = card_approval.remind(self.org)
+        self.assertEqual(told, 2)                                                # master + helper
+        dms = [b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") in ("U1", "U2")]
+        self.assertIn("aidl_crv_approve_list", json.dumps(dms))
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            self.assertEqual(card_approval.remind(self.org), 0)                  # not again the same week
+            self.assertEqual(card_approval.remind(self.org, now=timezone.now() + timedelta(days=8)), 2)
+
+
+class AppRequestTests(TestCase):
+    """Employees ask for an app; admins with Approve Apps decide in Slack."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"))
+        self.master = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Master")
+        self.emp = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", full_name="Jordan")
+        self.emp2 = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U6", full_name="Sam")
+        self.calls = []
+
+    def _post(self, user, payload):
+        from urllib.parse import urlencode
+
+        payload = {"team": {"id": "T9"}, "user": {"id": user, "team_id": "T9"}, "trigger_id": "TR", **payload}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def _request(self, user, name="Perplexity", data="amber"):
+        values = {"name": {"v": {"value": name}}, "website": {"v": {"value": "https://perplexity.ai"}},
+                  "purpose": {"v": {"value": "Research summaries"}},
+                  "data": {"v": {"selected_option": {"value": data}}}}
+        return self._post(user, {"type": "view_submission", "view": {
+            "callback_id": "aidl_app_request", "private_metadata": "{}", "state": {"values": values}}})
+
+    def test_request_approve_flow(self):
+        from .models import AppRequest, RegisteredApp
+
+        self._post("U5", {"type": "block_actions", "actions": [{"action_id": "aidl_app_request_open", "value": "x"}]})
+        self.assertTrue(any(m == "views.open" for m, _b in self.calls))           # employees can open the popup
+        self.assertEqual(self._request("U5").json(), {"response_action": "clear"})
+        req = AppRequest.objects.get(organization_id=str(self.org.pk))
+        to_admin = [b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U1"]
+        self.assertIn("aidl_appreq_approve", json.dumps(to_admin))               # the approver got the request
+        self._request("U6", name="perplexity")                                   # same app again
+        self.assertEqual(AppRequest.objects.count(), 1)
+        self.assertEqual(len(json.loads(AppRequest.objects.get().requester_ids)), 2)
+        self.calls.clear()
+        self._post("U1", {"type": "block_actions", "actions": [{"action_id": "aidl_appreq_approve",
+                                                                "value": str(req.pk)}]})
+        app = RegisteredApp.objects.get(organization_id=str(self.org.pk), name="Perplexity")
+        self.assertEqual((app.status, app.data_allowed), ("approved", "internal"))
+        told = {b.get("channel") for m, b in self.calls if m == "chat.postMessage"}
+        self.assertTrue({"U5", "U6"} <= told)                                    # both requesters told
+        self.calls.clear()
+        self._request("U5", name="PERPLEXITY")                                   # already approved
+        self.assertEqual(AppRequest.objects.count(), 1)
+        self.assertIn("already approved", json.dumps(self.calls))
+
+    def test_reject_with_reason(self):
+        from .models import AppRequest
+
+        self._request("U5", name="SketchyAI", data="red")
+        req = AppRequest.objects.get()
+        self._post("U1", {"type": "view_submission", "view": {
+            "callback_id": "aidl_app_reject", "private_metadata": json.dumps({"request": str(req.pk)}),
+            "blocks": [{"type": "input", "block_id": "text"}],
+            "state": {"values": {"text": {"v": {"value": "Stores prompts for training"}}}}}})
+        req.refresh_from_db()
+        self.assertEqual((req.status, req.reason), ("rejected", "Stores prompts for training"))
+        self.assertIn("Stores prompts for training",
+                      json.dumps([b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U5"]))
+
+    def test_only_app_approvers_decide(self):
+        from .models import AppRequest
+
+        make_user(self.org, microsoft_id="slack:T9:U2", full_name="No Apps", perm_approve_apps=False)
+        self._request("U5")
+        req = AppRequest.objects.get()
+        self._post("U2", {"type": "block_actions", "response_url": "https://hooks.example/r",
+                          "actions": [{"action_id": "aidl_appreq_approve", "value": str(req.pk)}]})
+        req.refresh_from_db()
+        self.assertEqual(req.status, "pending")

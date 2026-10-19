@@ -72,6 +72,18 @@ def library() -> list[dict]:
     return _data().get("library", [])
 
 
+@lru_cache(maxsize=1)
+def _by_no() -> dict:
+    cards = {}
+    for c in library() + _packages()["default"] + _packages()["basic"]:
+        cards.setdefault(c["no"], c)
+    return cards
+
+
+def card_by_no(no: str) -> dict | None:
+    return _by_no().get(no)
+
+
 def plan_key(org: Organization) -> str:
     return org.plan if org.plan in PLANS else "trial"
 
