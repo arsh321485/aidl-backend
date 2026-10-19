@@ -1,10 +1,17 @@
-"""AIDL cards as PNGs, drawn with Pillow so Slack can show them in image
-blocks — the Highway Code and Traffic Light Check (design: E:\\image.png),
-each AUP point ("aup-<n>") and each awareness card ("pkg-<card no>").
+"""AIDL cards as PNGs for Slack image blocks.
 
-On Basic and Enterprise the organization's logo (Organization.logo_data)
-is the badge in the card's brand line; the watermark is the company name,
-slanted, on the Highway Code and AUP cards, and the faint logo on the others;
+The Highway Code and Traffic Light Check are the designer's cards
+(E:\\highway-traffic-cards.html), rendered once with headless Chrome into
+api/static/cards/*.png (tools/split_card_design.py — re-run it when the
+design changes). AUP points ("aup-<n>") and awareness cards
+("pkg-<card no>") are drawn here with Pillow.
+
+On Basic and Enterprise the company logo replaces the AIDL logo in the
+header circle, and the Highway Code and AUP cards carry the design's
+watermark: the company logo, slanted (-55°) and faint, across the card.
+The Traffic Light Check has no watermark (as designed); awareness cards
+keep a faint upright logo.
+
 Trial cards carry the AIDL logo and no watermark (licence_image.brand_logo).
 
 Served at GET /api/cards/<kind>/<org id>.png?s=<signature>&v=<version>
@@ -72,23 +79,17 @@ TRAFFIC = {
     "title": "Traffic Light Check",
     "intro": "Before you paste anything into an AI, check the lights.",
     "lights": [
-        ("green", "GREEN · GO", "Public, non-personal.",
-         ["General questions & explanations", "Public articles to summarise", "Story, recipe, and idea prompts"],
-         "→ Any tool you like — then check facts."),
-        ("amber", "AMBER · CAUTION", "A little personal.",
-         ["Your first name or city", "Your rough plans or preferences", "Non-sensitive everyday details"],
-         "→ Use a placeholder or remove it first."),
         ("red", "RED · STOP", "Private, keep it out.",
          ["Passwords, PINs, verification codes", "Bank/card numbers, national ID",
           "Home address, other people's data"],
          "→ Never paste. Anonymise, then retry."),
+        ("amber", "AMBER · CAUTION", "A little personal.",
+         ["Your first name or city", "Your rough plans or preferences", "Non-sensitive everyday details"],
+         "→ Use a placeholder or remove it first."),
+        ("green", "GREEN · GO", "Public, non-personal.",
+         ["General questions & explanations", "Public articles to summarise", "Story, recipe, and idea prompts"],
+         "→ Any tool you like — then check facts."),
     ],
-}
-
-LIGHT = {  # tint, bar, pill, lit lamp
-    "green": ("#EEF7F0", "#2E9E4F", "#1E7F3B", "#3DD16A"),
-    "amber": ("#FDF6E8", "#F0B400", "#A36A00", "#F7C21B"),
-    "red": ("#FCEEEC", "#D9443A", "#C2352B", "#F0453A"),
 }
 
 
@@ -152,51 +153,9 @@ def _rich(d: ImageDraw.ImageDraw, x: float, y: float, width: float, text: str, s
     return y
 
 
-def _spaced(d, x, y, text, font, fill, spacing=1.6):
-    for ch in text:
-        d.text(_xy(x, y), ch, font=font, fill=fill, anchor="ls")
-        x += d.textlength(ch, font=font) / S + spacing
-    return x
-
-
 def _dashes(d, y):
     for x in range(COL, W - PAD, 7):
         d.line([_xy(x, y), _xy(min(x + 3, W - PAD), y)], fill=RULE, width=S)
-
-
-def _sign(d: ImageDraw.ImageDraw, kind: str, cx: float, cy: float) -> None:
-    small = _font("Black", 11)
-    if kind == "stop":
-        import math
-        r = 25
-        pts = [_xy(cx + r * math.cos(math.radians(22.5 + 45 * i)), cy + r * math.sin(math.radians(22.5 + 45 * i)))
-               for i in range(8)]
-        d.polygon(pts, fill="#E03A2F", outline="#FFFFFF")
-        d.text(_xy(cx, cy), "STOP", font=small, fill="#FFFFFF", anchor="mm")
-    elif kind == "check":
-        r = 27
-        pts = [_xy(cx, cy - r), _xy(cx + r, cy), _xy(cx, cy + r), _xy(cx - r, cy)]
-        d.polygon(pts, fill="#F5C400")
-        d.line(pts + [pts[0]], fill=INK, width=2 * S, joint="curve")
-        d.text(_xy(cx, cy), "CHECK", font=_font("Black", 10), fill=INK, anchor="mm")
-    elif kind == "you":
-        d.polygon([_xy(cx, cy - 25), _xy(cx + 25, cy + 21), _xy(cx - 25, cy + 21)], fill="#F59E0B")
-        d.text(_xy(cx, cy + 12), "YOU", font=small, fill="#FFFFFF", anchor="mm")
-    elif kind == "ask":
-        d.ellipse(_xy(cx - 23, cy - 23, cx + 23, cy + 23), fill="#6FB3E0", outline=INK, width=2 * S)
-        d.text(_xy(cx, cy), "ASK", font=small, fill="#FFFFFF", anchor="mm")
-    elif kind == "oneway":
-        d.rectangle(_xy(cx - 23, cy - 23, cx + 23, cy + 23), fill="#14140F")
-        d.text(_xy(cx, cy - 6), "ONE", font=small, fill="#FFFFFF", anchor="mm")
-        d.text(_xy(cx, cy + 7), "WAY →", font=_font("Black", 10), fill="#FFFFFF", anchor="mm")
-
-
-def _traffic_icon(d, x, y, lit: str) -> None:
-    """A small traffic light, the `lit` lamp on (x, y = top-left)."""
-    d.rounded_rectangle(_xy(x, y, x + 15, y + 34), radius=4 * S, fill="#1D1C1D")
-    for i, name in enumerate(("red", "amber", "green")):
-        on = name == lit
-        d.ellipse(_xy(x + 3.5, y + 3 + i * 10, x + 11.5, y + 11 + i * 10), fill=LIGHT[name][3] if on else "#4A4A4A")
 
 
 def _book_icon(d, x, y) -> None:
@@ -223,54 +182,13 @@ def _badge(org) -> Image.Image:
 def _header(img, d, org, title: str, icon) -> float:
     img.alpha_composite(_badge(org), _xy(PAD, PAD))
     x = PAD + 58
-    d.text(_xy(x, PAD + 19), "AIDL", font=_font("Black", 17), fill=INK, anchor="ls")
-    d.text(_xy(x + d.textlength("AIDL", font=_font("Black", 17)) / S + 8, PAD + 19), f"for {org.name}",
-           font=_font("Regular", 14), fill=GREY, anchor="ls")
+    d.text(_xy(x, PAD + 22), "aidrivinglicense.com", font=_font("Bold", 16), fill=INK, anchor="lm")  # as designed
     icon(d, x, PAD + 28)
     d.text(_xy(x + 30, PAD + 47), title, font=_font("Black", 22), fill=INK, anchor="ls")
     return PAD + 62
 
 
 # ---------- the cards ----------
-
-def _highway(img, d, org) -> float:
-    y = _header(img, d, org, HIGHWAY["title"], _book_icon)
-    y = _rich(d, PAD + 58, y, W - PAD * 2 - 58, HIGHWAY["intro"], size=16, line=25) + 8
-    for kind, title, body in HIGHWAY["rules"]:
-        _dashes(d, y)
-        top = y + 16
-        d.text(_xy(TEXT_X, top), title, font=_font("Bold", 17), fill=INK, anchor="la")
-        bottom = _rich(d, TEXT_X, top + 26, W - PAD - TEXT_X, body, size=15, line=22)
-        _sign(d, kind, COL + 26, (top + bottom) / 2 - 4)
-        y = max(bottom, top + 56) + 10
-    return y
-
-
-def _traffic(img, d, org) -> float:
-    y = _header(img, d, org, TRAFFIC["title"], lambda dd, x, yy: _traffic_icon(dd, x + 3, yy - 3, "green"))
-    y = _rich(d, PAD + 58, y, W - PAD * 2 - 58, TRAFFIC["intro"], size=16, line=25) + 10
-    left, right = PAD + 58, W - PAD
-    for name, title, sub, items, action in TRAFFIC["lights"]:
-        tint, bar, pill, _lamp = LIGHT[name]
-        top = y
-        height = 52 + len(items) * 24 + 52
-        d.rectangle(_xy(left, top, right, top + height), fill=tint)
-        d.rectangle(_xy(left, top, left + 4, top + height), fill=bar)
-        _traffic_icon(d, left + 18, top + 14, name)
-        end = _spaced(d, left + 44, top + 38, title, _font("Black", 18), INK)
-        d.text(_xy(end + 6, top + 38), f"— {sub}", font=_font("Regular", 14), fill=GREY, anchor="ls")
-        iy = top + 56
-        for item in items:
-            d.ellipse(_xy(left + 26, iy + 8, left + 31, iy + 13), fill=INK)
-            d.text(_xy(left + 42, iy), item, font=_font("Regular", 15), fill=INK, anchor="la")
-            iy += 24
-        font = _font("Black", 14)
-        pw = d.textlength(action, font=font) / S + 22
-        d.rounded_rectangle(_xy(left + 18, iy + 8, left + 18 + pw, iy + 36), radius=4 * S, fill=pill)
-        d.text(_xy(left + 29, iy + 22), action, font=font, fill="#FFFFFF", anchor="lm")
-        y = top + height + 12
-    return y
-
 
 def _doc_icon(d, x, y) -> None:
     d.rectangle(_xy(x + 2, y, x + 20, y + 23), fill="#FFFFFF", outline=INK, width=S)
@@ -334,7 +252,49 @@ def _awareness(img, d, org, no: str) -> float:
     return y
 
 
+# Where the designed cards have their logo circle (2x pixels): x, y, size.
+_DESIGN_BADGE = (32, 28, 104)
+
+
+def logo_watermark(img: Image.Image, logo: Image.Image, *, angle: float = 55, width_ratio: float = 1.25,
+                   opacity: float = 0.12) -> None:
+    """The design's watermark: the logo at 125% of the card's width, turned
+    55° (CSS rotate(-55deg)), 12% opacity, centred on top of the card."""
+    w = int(img.width * width_ratio)
+    mark = logo.copy()
+    mark = mark.resize((w, max(1, int(mark.height * w / mark.width))), Image.LANCZOS)
+    mark = mark.rotate(angle, expand=True, resample=Image.BICUBIC)
+    mark.putalpha(mark.getchannel("A").point(lambda a: int(a * opacity)))
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    layer.paste(mark, ((img.width - mark.width) // 2, (img.height - mark.height) // 2), mark)
+    # keep the card's transparent rounded corners transparent
+    layer.putalpha(Image.composite(layer.getchannel("A"), Image.new("L", img.size, 0), img.getchannel("A")))
+    img.alpha_composite(layer)
+
+
+def _designed(kind: str, org) -> Image.Image:
+    img = Image.open(_DIR / "static" / "cards" / f"{kind}.png").convert("RGBA")
+    logo = brand_logo(org)
+    if logo is not None:
+        x, y, size = _DESIGN_BADGE
+        d = ImageDraw.Draw(img)
+        d.ellipse((x - 2, y - 2, x + size + 2, y + size + 2), fill="#FFFFFF")
+        pic = _contain(logo, size - 8, size - 8)
+        img.alpha_composite(pic, (x + 4, y + 4))
+        if kind == "highway_code":
+            logo_watermark(img, logo)
+    return img
+
+
+def _png(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
 def render(kind: str, org) -> bytes:
+    if kind in KINDS:
+        return _png(_designed(kind, org))
     img = Image.new("RGBA", _xy(W, 3000), "#FFFFFF")
     d = ImageDraw.Draw(img)
     if kind.startswith("aup-"):
@@ -342,15 +302,13 @@ def render(kind: str, org) -> bytes:
     elif kind.startswith("pkg-"):
         bottom = _awareness(img, d, org, kind[4:])
     else:
-        bottom = (_highway if kind == "highway_code" else _traffic)(img, d, org)
+        raise ValueError(kind)
     bottom += PAD - 10
     img = img.crop((0, 0, img.width, int(bottom * S)))
 
     logo = brand_logo(org)
-    if logo is not None and (kind == "highway_code" or kind.startswith("aup-")):
-        from .licence_image import text_watermark
-
-        text_watermark(img, org.name, angle=28, opacity=0.07, width_ratio=0.9)  # slanted company name
+    if logo is not None and kind.startswith("aup-"):
+        pass  # slanted, after the rounded corners (below)
     elif logo is not None:  # faint company logo across the card
         size = int(min(img.width * 0.62, img.height * 0.8))
         wm = _contain(logo, size, size)
@@ -361,9 +319,9 @@ def render(kind: str, org) -> bytes:
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, img.width - 1, img.height - 1), radius=8 * S, fill=255)
     out = Image.new("RGBA", img.size, (0, 0, 0, 0))
     out.paste(img, (0, 0), mask)
-    buf = io.BytesIO()
-    out.save(buf, "PNG", optimize=True)
-    return buf.getvalue()
+    if logo is not None and kind.startswith("aup-"):
+        logo_watermark(out, logo)
+    return _png(out)
 
 
 def alt_text(kind: str, org=None) -> str:

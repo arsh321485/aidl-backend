@@ -23,13 +23,15 @@ def licence_png(request, number: str):
     if not hmac.compare_digest(request.GET.get("s", ""), licence_image.signature(number)):
         raise Http404
     member = AIDLUser.objects.filter(licence_number=number, licence_issued=True).first()
-    if member is None:
-        raise Http404
+    if member is None:  # revoked / reset: old Slack messages still show something sensible
+        resp = HttpResponse(licence_image.render_void(number), content_type="image/png")
+        resp["Cache-Control"] = "no-cache"
+        return resp
     org = get_organization_for_user(member)
     png = licence_image.render(name=member.full_name or member.email, org_name=org.name if org else "",
                                number=number, issued=member.licence_issued_at,
                                expires=member.licence_expires_at, org=org,
-                               avatar_url=member.avatar_url or "", avatar_data=member.avatar_data or "")
+                               avatar_data=member.avatar_data or "")  # the chosen avatar only
     resp = HttpResponse(png, content_type="image/png")
     resp["Cache-Control"] = "public, max-age=3600"
     if request.GET.get("download"):

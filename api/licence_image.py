@@ -194,7 +194,7 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, ex
         text_watermark(body, org_name, opacity=0.10, width_ratio=0.9)
         img.paste(body, _xy(200, 132))
 
-    # photo (chosen avatar / Slack photo, else a silhouette) + signature
+    # photo (the avatar the holder created, else a silhouette) + signature
     box = (40, 148, 190, 336)
     avatar = _avatar(avatar_url, avatar_data)
     if avatar is not None:
@@ -248,6 +248,21 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, ex
                                           outline=INK, width=6 * S)
     buf = io.BytesIO()
     out.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def render_void(number: str) -> bytes:
+    """For a licence number that was revoked or reset."""
+    img = Image.new("RGBA", _xy(W, 220), "#E9E2C6")
+    d = ImageDraw.Draw(img)
+    d.rectangle(_xy(0, 0, W, 64), fill=INK)
+    d.text(_xy(28, 42), "AI DRIVING LICENSE", font=_font(24, "Black"), fill=YELLOW, anchor="ls")
+    d.text(_xy(28, 118), "This licence is no longer valid", font=_font(26, "Black"), fill=INK, anchor="ls")
+    d.text(_xy(28, 156), f"{number} was withdrawn or reset. Check your latest AIDL messages for your",
+           font=_font(15, "Regular"), fill=MUTED, anchor="ls")
+    d.text(_xy(28, 180), "current licence.", font=_font(15, "Regular"), fill=MUTED, anchor="ls")
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
     return buf.getvalue()
 
 
