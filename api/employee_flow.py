@@ -8,7 +8,7 @@
     Card 2 of 3 · Traffic Light Check → "Got it. Next →"   (image)
     Card 3 of 3 · The Highway Code    → "Got it. Get my license →"   (image)
     Avatar             → only if they haven't picked one: create it on the
-                         website (avatar.py) or use their Slack photo
+                         website (avatar.py); the Slack photo is never used
     License issued     → the licence image (licence_image.py) with the avatar
                          and the valid-till date (1 year), download, share
 
@@ -106,6 +106,10 @@ def welcome(member: AIDLUser, org: Organization, done: bool = False) -> dict:
                  ":three:  *The Highway Code* · 5 everyday rules"),
         _done("Started onboarding") if done else _actions("aidl_flow_welcome", _button("Let's go →", "aidl_flow_start",
                                                                                          "start", "primary")),
+        *([] if member.avatar_data else [_section(
+            ":art: *Your licence needs an avatar.* Create it now or after the cards — it goes on your AI Driving "
+            "License.", accessory=_button("🎨 Create my avatar", "aidl_link_avatar", "create",
+                                          url=_avatar_url(member)))]),
         _context(":lock: Your progress is private to you and your AIDL admin."),
     ]
     return card(f"Hi {_first(member)}, welcome to your AI Driving License.", "*Welcome*", COLOR["yellow"], blocks)
@@ -153,6 +157,12 @@ def post_waiting_cards(org: Organization, item: str) -> int:
             post(org, member, BUILDERS[item](member, org))
             sent += 1
     return sent
+
+
+def _avatar_url(member: AIDLUser) -> str:
+    from .avatar import start_url
+
+    return start_url(member)
 
 
 def _approved(org: Organization, item: str) -> bool:
@@ -219,11 +229,10 @@ def avatar_card(member: AIDLUser, org: Organization, notice: str = "") -> dict:
     return card("Your AI Driving License is ready — pick the avatar for it.", "*License · your photo*",
                 COLOR["yellow"], [
         _header(":art: One last step: your licence avatar"),
-        _section(f"You've earned your *AI Driving License*, {_first(member)}! Choose the avatar that goes on it — "
-                 "build your own, or use your Slack profile photo."),
+        _section(f"You've earned your *AI Driving License*, {_first(member)}! Create the avatar that goes on it — "
+                 "pick a ready-made one or build your own."),
         _actions("aidl_flow_avatar",
-                 _button(":art: Create my avatar", "aidl_link_avatar", "create", "primary", url=avatar.start_url(member)),
-                 _button(":camera: Use my Slack photo", "aidl_flow_avatar", "slack")),
+                 _button(":art: Create my avatar", "aidl_link_avatar", "create", "primary", url=avatar.start_url(member))),
         *([_context(notice)] if notice else []),
         _context("Your licence arrives here as soon as your avatar is saved."),
     ])
@@ -333,16 +342,8 @@ def advance(org: Organization, member: AIDLUser, action_id: str, value: str, cha
     """A button on a flow card was pressed."""
     from .licensing import acknowledge, issue_learner_if_ready
 
-    if action_id == "aidl_flow_avatar":
-        from . import avatar
-
-        if avatar.use_slack_photo(member, org):
-            update(org, channel, ts, card("Avatar saved.", "*License · your photo*", COLOR["green"], [
-                _header(":camera: Your Slack photo is on your licence"), _done("Avatar saved")]))
-            post_licence(member)
-        else:
-            update(org, channel, ts, avatar_card(member, org, notice=":warning: You don't have a Slack profile "
-                                                                     "photo — create an avatar instead."))
+    if action_id == "aidl_flow_avatar":  # an older card's "Use my Slack photo" — no longer offered
+        update(org, channel, ts, avatar_card(member, org))
         return
     if action_id == "aidl_flow_start":
         update(org, channel, ts, welcome(member, org, done=True))
@@ -407,11 +408,13 @@ def start_everyone(org: Organization) -> tuple[int, int]:
 
 
 def remind_everyone(org: Organization) -> tuple[int, int]:
-    """Post each unfinished employee's current card again."""
+    """Post each unfinished employee's current card again — and ask licensed
+    people who haven't created their avatar yet (their licence card follows
+    once they do)."""
     from .licensing import learners
 
     pending = [m for m in learners(org).filter(microsoft_id__startswith=f"slack:{org.slack_team_id}:")
-               if not m.licence_issued]
+               if not m.licence_issued or not m.avatar_data]
     sent = 0
     for m in pending:
         r = resend_current(org, m)

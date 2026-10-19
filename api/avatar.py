@@ -5,7 +5,6 @@ Slack asks them to (employee_flow.avatar_card):
 - "Create my avatar" opens GET /api/avatar/start/?u=<user id>&s=<signature>,
   which sends them to the website's avatar builder (frontend /avatar) with a
   short-lived avatar-only token; the page posts the PNG to /api/avatar/.
-- "Use my Slack photo" saves their Slack profile picture instead.
 Once saved, the licence card (with the avatar) is posted to their Slack DM.
 
 AIDLUser.avatar_data holds the PNG (base64), avatar_config the builder's
@@ -24,7 +23,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import jwt
-import requests
 from django.conf import settings
 from django.shortcuts import redirect
 from drf_spectacular.types import OpenApiTypes
@@ -87,26 +85,6 @@ def save(member: AIDLUser, png_b64: str, config: dict | None = None) -> None:
     member.avatar_data = png_b64
     member.avatar_config = json.dumps(config) if config else ""
     member.save(update_fields=["avatar_data", "avatar_config", "updated_at"])
-
-
-def use_slack_photo(member: AIDLUser, org) -> bool:
-    """Save the employee's Slack profile picture as their avatar."""
-    from . import slack_client
-
-    uid = member.microsoft_id.split(":")[-1]
-    info = slack_client.slack_api("users.info", slack_client.bot_token(org), params={"user": uid})
-    profile = (info.get("user") or {}).get("profile") or {}
-    url = profile.get("image_512") or profile.get("image_192") or member.avatar_url
-    if not url or profile.get("is_custom_image") is False:
-        return False
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        save(member, normalise(resp.content))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("slack photo for %s failed: %s", member.pk, exc)
-        return False
-    return True
 
 
 def _after_save(member: AIDLUser) -> None:

@@ -2903,31 +2903,31 @@ class EmployeeFlowTests(TestCase):
         self.assertIn("valid till", json.dumps(licence))
         self.assertEqual(self.client.post("/api/avatar/", json.dumps({"token": "bad", "png": png}), content_type="application/json").status_code, 401)
 
-    def test_use_slack_photo_for_avatar(self):
-        import io
+    def test_avatar_is_always_created_never_the_slack_photo(self):
+        from . import employee_flow, licence_image
 
-        from PIL import Image
-
-        from . import employee_flow
-
-        buf = io.BytesIO()
-        Image.new("RGB", (64, 64), "#884422").save(buf, "PNG")
         self.member.licence_issued, self.member.licence_number = True, "AIDL-L-1111-2222"
+        self.member.avatar_url = "https://img.example/slack.png"
         self.member.save()
+        from .licensing import acknowledge
 
-        def fake(method, token, *, json=None, params=None):
-            self.calls.append((method, json or params))
-            if method == "users.info":
-                return {"ok": True, "user": {"profile": {"image_512": "https://img.example/p.png",
-                                                         "is_custom_image": True}}}
-            return {"ok": True, "ts": "1.1"}
-
-        photo = type("R", (), {"content": buf.getvalue(), "raise_for_status": lambda self: None})()
-        with patch("api.slack_client.slack_api", side_effect=fake), patch("api.avatar.requests.get", return_value=photo):
-            employee_flow.advance(self.org, self.member, "aidl_flow_avatar", "slack", "D5", "1.1")
+        _accept_aup(self.member, self.org)                                       # finished every card
+        acknowledge(self.member, "traffic_light")
+        acknowledge(self.member, "highway_code")
+        card = json.dumps(employee_flow.licence(self.member, self.org))
+        self.assertIn("/api/avatar/start/?u=", card)                             # asked to create an avatar
+        self.assertNotIn("Slack photo", card)
+        self.assertIn("Create my avatar", json.dumps(employee_flow.welcome(self.member, self.org)))
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            employee_flow.advance(self.org, self.member, "aidl_flow_avatar", "slack", "D5", "1.1")  # old button
         self.member.refresh_from_db()
-        self.assertTrue(self.member.avatar_data)
-        self.assertIn("AIDL-L-1111-2222.png", json.dumps(self._posted()[-1]))
+        self.assertFalse(self.member.avatar_data)                                # nothing taken from Slack
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            employee_flow.remind_everyone(self.org)                              # licensed, no avatar → asked
+        self.assertIn("/api/avatar/start/?u=", json.dumps(self._posted()[-1]))
+        gone = licence_image.image_url("AIDL-L-0000-0000").split("onrender.com", 1)[-1]
+        resp = self.client.get(gone)                                              # revoked / reset licence
+        self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
 
     def test_points_must_be_in_order(self):
         from . import aup_store
