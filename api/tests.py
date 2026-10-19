@@ -2972,7 +2972,7 @@ class EmployeeFlowTests(TestCase):
         self.org.save()
         self.assertIsNone(brand_logo(self.org))                                   # Trial: no company logo
         trial_url = card_image.image_url("highway_code", self.org)
-        self.assertTrue(trial_url.endswith("&v=aidl"))
+        self.assertIn("-aidl", trial_url)                                         # no company logo in the link
         self.org.plan = "basic"
         self.org.save()
         self.assertIsNotNone(brand_logo(self.org))
@@ -3218,6 +3218,16 @@ class CardApprovalTests(TestCase):
             resp = self.client.get(path)
             self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"), kind)
         self.assertEqual(self.client.get(f"/api/cards/pkg-zzz/{self.org.pk}.png?s=x").status_code, 404)
+        from . import image_cache
+        from .models import CardImage
+
+        self.assertTrue(CardImage.objects.filter(key__contains=":aup-1:").exists())  # kept in the database
+        image_cache._MEMORY.clear()
+        path = card_image.image_url("aup-1", self.org).split("onrender.com", 1)[-1]
+        with patch("api.card_image.render", side_effect=AssertionError("drawn again")):
+            resp = self.client.get(path)                                         # served without drawing
+        self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
+        self.assertIn("immutable", resp["Cache-Control"])
 
     def test_needs_permission_and_reminds_approvers(self):
         from datetime import timedelta

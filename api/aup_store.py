@@ -96,6 +96,9 @@ def publish(org: Organization, by: AIDLUser | None = None) -> dict:
                          "published_at": timezone.now().isoformat(), "published_by": str(by.pk) if by else ""}
     data.pop("draft", None)
     _save(org, data)
+    from .card_image import onboarding_kinds, warm
+
+    warm(org, onboarding_kinds(org, "aup"))  # the 14 point cards, ready for the admin's preview
     return aup
 
 

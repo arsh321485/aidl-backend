@@ -145,10 +145,13 @@ def _decide(org: Organization, key: str, decision: str, by: AIDLUser | None, rep
 
 
 def approve_onboarding(org: Organization, item: str, by: AIDLUser | None) -> bool:
+    from .card_image import onboarding_kinds, warm
+
     key = onboarding_key(org, item)
     if not key:
         return False
     _decide(org, key, APPROVED, by)
+    warm(org, onboarding_kinds(org, item))
     return True
 
 
@@ -163,6 +166,9 @@ def approve(org: Organization, nos: list[str], by: AIDLUser | None) -> int:
             continue
         _decide(org, f"pkg:{no}", APPROVED, by)
         changed += 1
+    from .card_image import warm
+
+    warm(org, [f"pkg-{no}" for no in nos])
     return changed
 
 

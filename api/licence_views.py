@@ -28,11 +28,7 @@ def licence_png(request, number: str):
         resp["Cache-Control"] = "no-cache"
         return resp
     org = get_organization_for_user(member)
-    png = licence_image.render(name=member.full_name or member.email, org_name=org.name if org else "",
-                               number=number, issued=member.licence_issued_at,
-                               expires=member.licence_expires_at, org=org,
-                               avatar_data=member.avatar_data or "")  # the chosen avatar only
-    resp = HttpResponse(png, content_type="image/png")
+    resp = HttpResponse(licence_image.png_for(member, org), content_type="image/png")  # the chosen avatar only
     resp["Cache-Control"] = "public, max-age=3600"
     if request.GET.get("download"):
         resp["Content-Disposition"] = f'attachment; filename="{number}.png"'
@@ -47,6 +43,6 @@ def card_png(request, kind: str, org_id: str):
     org = Organization.objects.filter(pk=org_id).first()
     if org is None:
         raise Http404
-    resp = HttpResponse(card_image.render(kind, org), content_type="image/png")
-    resp["Cache-Control"] = "public, max-age=86400"  # the URL changes with the logo
+    resp = HttpResponse(card_image.png_for(kind, org), content_type="image/png")
+    resp["Cache-Control"] = "public, max-age=31536000, immutable"  # the URL changes with the picture
     return resp

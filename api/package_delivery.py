@@ -179,8 +179,12 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
               "slack_channel_id": channel}
     result = {"sent_now": 0, "scheduled": 0}
 
+    from .card_image import png_for, warm
+    from .image_cache import predraw
+
     if not rows:  # first card right after the licence
         position, card = todo.pop(0)
+        predraw(png_for, f"pkg-{card['no']}", org)  # drawn before Slack asks for it
         res = slack_client.slack_api("chat.postMessage", token, json={
             "channel": channel, "text": f"AIDL card: {card['title']}", "blocks": card_blocks(org, card, position, total)})
         PackageDelivery.objects.create(**common, card_no=card["no"], post_order=position, post_at=now,
@@ -203,6 +207,7 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
                 row.status = PackageDelivery.Status.FAILED
                 row.error = res.get("error", "") or "schedule failed"
         row.save()
+    warm(org, [f"pkg-{c['no']}" for _p, c in todo])  # ready long before Slack posts them
     return result
 
 

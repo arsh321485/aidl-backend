@@ -580,6 +580,9 @@ def _card_review_action(org, user, payload: dict, action: dict, action_id: str) 
                 "view_id": target, "view": card_review_slack.review_view(org, at_month or month, notice)})
 
     if action_id == "aidl_cards_review":
+        from .card_image import onboarding_kinds, warm
+
+        warm(org, [k for item in card_approval.ONBOARDING for k in onboarding_kinds(org, item)])  # fast previews
         _open_modal(org, payload.get("trigger_id", ""),
                     card_review_slack.review_view(org, int(value) if str(value).isdigit() else 1),
                     push=bool(view.get("id")))

@@ -6,9 +6,9 @@ api/static/cards/*.png (tools/split_card_design.py — re-run it when the
 design changes). AUP points ("aup-<n>") and awareness cards
 ("pkg-<card no>") are drawn here with Pillow.
 
-On Basic and Enterprise the company logo replaces the AIDL logo in the
-header circle, and the Highway Code and AUP cards carry the design's
-watermark: the company logo, slanted (-55°) and faint, across the card.
+The header circle always shows the AIDL logo (as designed). On Basic and
+Enterprise the Highway Code and AUP cards carry the design's watermark: the
+company logo, slanted (-55°) and faint, across the card.
 The Traffic Light Check has no watermark (as designed); awareness cards
 keep a faint upright logo.
 
@@ -33,6 +33,9 @@ from PIL import Image, ImageDraw, ImageFont
 from .licence_image import _circle_mask, _contain, brand_logo
 
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
+# Bump when a card's look changes: the image links change, so Slack fetches
+# the new pictures instead of showing the copies it already has.
+DESIGN_VERSION = "3"
 
 
 def valid_kind(kind: str) -> bool:
@@ -104,14 +107,47 @@ def signature(kind: str, org_id: str) -> str:
     return hmac.new(settings.SECRET_KEY.encode(), f"card:{kind}:{org_id}".encode(), hashlib.sha256).hexdigest()[:20]
 
 
-def image_url(kind: str, org) -> str:
-    oid = str(org.pk)
-    version = logo_version(org)
+def version_for(kind: str, org) -> str:
+    """Everything that changes this picture: design, logo, AUP version."""
+    version = f"d{DESIGN_VERSION}-{logo_version(org)}"
     if kind.startswith("aup-"):
         from .aup_store import version as aup_version
 
         version += "-" + (aup_version(org) or "none")
-    return f"{settings.BACKEND_URL}/api/cards/{kind}/{oid}.png?s={signature(kind, oid)}&v={version}"
+    return version
+
+
+def image_url(kind: str, org) -> str:
+    oid = str(org.pk)
+    return f"{settings.BACKEND_URL}/api/cards/{kind}/{oid}.png?s={signature(kind, oid)}&v={version_for(kind, org)}"
+
+
+def png_for(kind: str, org) -> bytes:
+    """The card's PNG — drawn once, then served from the cache (image_cache)."""
+    from .image_cache import png
+
+    return png(f"card:{org.pk}:{kind}:{version_for(kind, org)}", lambda: render(kind, org))
+
+
+def onboarding_kinds(org, item: str) -> list[str]:
+    if item == "aup":
+        from .aup_store import current
+
+        aup = current(org)
+        return [f"aup-{n}" for n in range(1, len(aup["points"]) + 1)] if aup else []
+    return [item]
+
+
+def warm(org, kinds: list[str]) -> None:
+    """Draw these cards now (in the background) so Slack gets them at once."""
+    from .image_cache import warm_in_background
+
+    def run(org_, kinds_):
+        for kind in kinds_:
+            png_for(kind, org_)
+
+    if kinds:
+        warm_in_background(run, org, list(kinds))
 
 
 # ---------- drawing helpers ----------
@@ -167,9 +203,9 @@ def _book_icon(d, x, y) -> None:
 
 
 def _badge(org) -> Image.Image:
-    logo = brand_logo(org)
-    if logo is None:
-        logo = Image.open(_AIDL_LOGO).convert("RGBA")
+    """The AIDL logo in the header circle (as designed — the company shows
+    as the watermark)."""
+    logo = Image.open(_AIDL_LOGO).convert("RGBA")
     size = 44 * S
     pic = _contain(logo, size, size)
     bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
@@ -208,24 +244,66 @@ def _plain(text: str) -> str:
     return " ".join((text or "").replace("*", "").split())
 
 
+def _box(img, d, y: float, bg: str, bar: str, content) -> float:
+    """A tinted box with a coloured bar on the left; `content(d, top)` draws
+    the inside and returns its bottom (measured first, then drawn)."""
+    left, right = PAD, W - PAD
+    scratch = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+    bottom = content(scratch, y + 16) + 12
+    d.rounded_rectangle(_xy(left, y, right, bottom), radius=6 * S, fill=bg)
+    d.rectangle(_xy(left, y, left + 4, bottom), fill=bar)
+    content(d, y + 16)
+    return bottom
+
+
 def _aup_point(img, d, org, n: int) -> float:
+    """AUP card (design E:\\aup-card-user.png): the policy point in a yellow
+    box, an AI-awareness tip (Default package card n) in a blue box, then
+    what comes next."""
     from .aup_store import POINTS, current
+    from .plans import _packages
 
     aup = current(org)
-    y = _header(img, d, org, "AI Acceptable Use Policy", _doc_icon)
-    width = W - PAD - COL
+    img.alpha_composite(_badge(org), _xy(PAD, PAD))
+    d.text(_xy(PAD + 56, PAD + 22), f"Acceptable Use · Card {n}", font=_font("Black", 22), fill=INK, anchor="lm")
+    d.line([_xy(PAD, PAD + 58), _xy(W - PAD, PAD + 58)], fill=RULE, width=S)
+    y = PAD + 76
+    inner = W - 2 * PAD - 34
+    x = PAD + 20
     if aup is None or not 1 <= n <= len(aup["points"]):
-        return _rich(d, COL, y + 4, width, "The AI policy is still being set up.", size=16) + 10
+        return _rich(d, x, y, inner, "The AI policy is still being set up.", size=16) + 10
     point = aup["points"][n - 1]
-    y = _tag(d, COL, y + 2, f"POINT {n} OF {POINTS}")
-    y = _rich(d, COL, y, width, f"**{_plain(point['title'])}**", size=20, line=28) + 2
-    if point.get("intro"):
-        y = _rich(d, COL, y, width, _plain(point["intro"]), size=15, line=22, color=GREY) + 6
-    clauses = [_plain(c["text"]) for c in point.get("clauses") or []] or ["Nothing for this point."]
-    for text in clauses:
-        _dashes(d, y)
-        d.ellipse(_xy(COL + 4, y + 17, COL + 10, y + 23), fill="#FFCC00", outline=INK)
-        y = _rich(d, COL + 22, y + 10, width - 22, text, size=15, line=22) + 8
+
+    def policy(dd, top):
+        yy = _rich(dd, x, top, inner, f"**{_plain(point['title'])}**", size=18, line=26) + 2
+        if point.get("intro"):
+            yy = _rich(dd, x, yy, inner, _plain(point["intro"]), size=15, line=23) + 4
+        for c in point.get("clauses") or []:
+            dd.ellipse(_xy(x + 3, yy + 9, x + 8, yy + 14), fill=INK)
+            yy = _rich(dd, x + 18, yy, inner - 18, _plain(c["text"]), size=15, line=23) + 2
+        return yy
+
+    y = _box(img, d, y, "#FFF8E1", "#F5C400", policy) + 14
+    tips = _packages()["default"]
+    if n <= len(tips):
+        tip = tips[n - 1]
+
+        def awareness(dd, top):
+            label = f"AI AWARENESS · {_plain(tip['title']).upper()}"
+            dd.text(_xy(x, top + 6), label[:70], font=_font("Bold", 12), fill=GREY, anchor="lm")
+            yy = _rich(dd, x, top + 20, inner, f"**{_plain(tip['hook'])}**", size=16, line=24) + 2
+            yy = _rich(dd, x, yy, inner, _plain(tip["message"]), size=15, line=23) + 4
+            action = _plain(tip["action"])
+            return _rich(dd, x, yy, inner, f"**→ {action}**", size=15, line=23)
+
+        y = _box(img, d, y, "#EEF4FC", "#2B6CD6", awareness) + 14
+    if n < len(aup["points"]):
+        nxt = aup["points"][n]
+        y = _rich(d, PAD, y, W - 2 * PAD, f"Next card: **Point {n + 1} · {_plain(nxt['title'])}**", size=13,
+                  line=20, color=GREY)
+    else:
+        y = _rich(d, PAD, y, W - 2 * PAD, f"**Last of {POINTS} points** — agree to move on to the Traffic Light "
+                  "Check.", size=13, line=20, color=GREY)
     return y
 
 
@@ -252,14 +330,11 @@ def _awareness(img, d, org, no: str) -> float:
     return y
 
 
-# Where the designed cards have their logo circle (2x pixels): x, y, size.
-_DESIGN_BADGE = (32, 28, 104)
-
-
 def logo_watermark(img: Image.Image, logo: Image.Image, *, angle: float = 55, width_ratio: float = 1.25,
-                   opacity: float = 0.12) -> None:
+                   opacity: float = 0.18) -> None:
     """The design's watermark: the logo at 125% of the card's width, turned
-    55° (CSS rotate(-55deg)), 12% opacity, centred on top of the card."""
+    55° (CSS rotate(-55deg)) — rising from bottom left to top right — faint,
+    centred on top of the card."""
     w = int(img.width * width_ratio)
     mark = logo.copy()
     mark = mark.resize((w, max(1, int(mark.height * w / mark.width))), Image.LANCZOS)
@@ -275,20 +350,14 @@ def logo_watermark(img: Image.Image, logo: Image.Image, *, angle: float = 55, wi
 def _designed(kind: str, org) -> Image.Image:
     img = Image.open(_DIR / "static" / "cards" / f"{kind}.png").convert("RGBA")
     logo = brand_logo(org)
-    if logo is not None:
-        x, y, size = _DESIGN_BADGE
-        d = ImageDraw.Draw(img)
-        d.ellipse((x - 2, y - 2, x + size + 2, y + size + 2), fill="#FFFFFF")
-        pic = _contain(logo, size - 8, size - 8)
-        img.alpha_composite(pic, (x + 4, y + 4))
-        if kind == "highway_code":
-            logo_watermark(img, logo)
+    if logo is not None and kind == "highway_code":
+        logo_watermark(img, logo)  # traffic_light: none, as designed
     return img
 
 
 def _png(img: Image.Image) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, "PNG", optimize=True)
+    img.save(buf, "PNG", compress_level=6)  # optimize=True takes seconds on the server
     return buf.getvalue()
 
 
