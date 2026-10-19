@@ -52,8 +52,32 @@ def image_url(number: str, *, download: bool = False, version: str = "") -> str:
     return url + (f"&v={version}" if version else "") + ("&download=1" if download else "")
 
 
+LICENCE_DESIGN = "3"  # bump when the licence's look changes (new image links → Slack refetches)
+
+
 def avatar_version(member) -> str:
     return hashlib.sha256((member.avatar_data or "").encode()).hexdigest()[:8] if member.avatar_data else ""
+
+
+def url_version(member, org=None) -> str:
+    """Everything that changes the licence picture (for its link and cache)."""
+    from .card_image import logo_version
+
+    parts = [LICENCE_DESIGN, avatar_version(member) or "noavatar",
+             logo_version(org) if org is not None else "aidl",
+             hashlib.sha256(f"{member.full_name}|{org.name if org else ''}|{member.licence_issued_at}|"
+                            f"{member.licence_expires_at}".encode()).hexdigest()[:6]]
+    return "-".join(parts)
+
+
+def png_for(member, org) -> bytes:
+    """The holder's licence PNG — drawn once, then served from the cache."""
+    from .image_cache import png
+
+    return png(f"lic:{member.licence_number}:{url_version(member, org)}", lambda: render(
+        name=member.full_name or member.email, org_name=org.name if org else "", number=member.licence_number,
+        issued=member.licence_issued_at, expires=member.licence_expires_at, org=org,
+        avatar_data=member.avatar_data or ""))
 
 
 def _font(size: int, weight: str = "Bold") -> ImageFont.FreeTypeFont:
@@ -178,7 +202,7 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, ex
     for x in range(-30, W + 30, 22):
         d.polygon([_xy(x, 124), _xy(x + 11, 124), _xy(x + 23, 112), _xy(x + 12, 112)], fill=INK)
     d.ellipse(_xy(24, 16, 104, 96), fill=YELLOW)
-    badge_src = logo if logo is not None else _aidl_logo()
+    badge_src = _aidl_logo()  # as designed: AIDL in the circle, the company as the watermark
     if badge_src is not None:
         size = 72 * S
         badge = _contain(badge_src, size, size)

@@ -404,6 +404,19 @@ class CardApproval(models.Model):
         return f"{self.organization_id} {self.card_key} {self.status}"
 
 
+class CardImage(models.Model):
+    """A rendered card / licence PNG (image_cache.py), so Slack gets it at
+    once instead of waiting for it to be drawn. Keys include every version
+    that changes the picture (design, logo, AUP, avatar)."""
+
+    key = models.CharField(max_length=200, unique=True)
+    png = models.BinaryField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.key
+
+
 class AppRequest(models.Model):
     """An employee asked for an app to be approved (app_requests.py)."""
 

@@ -120,6 +120,9 @@ def _card_image(kind: str, org: Organization) -> dict:
     logo and watermark on Basic and Enterprise."""
     from . import card_image
 
+    from .image_cache import predraw
+
+    predraw(card_image.png_for, kind, org)  # drawn before Slack asks for it (Slack gives up after a few seconds)
     return {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": card_image.alt_text(kind, org)}
 
 
@@ -250,7 +253,10 @@ def licence(member: AIDLUser, org: Organization) -> dict:
     if not member.avatar_data:
         return avatar_card(member, org)
     number = member.licence_number
-    version = licence_image.avatar_version(member)
+    version = licence_image.url_version(member, org)
+    from .image_cache import predraw
+
+    predraw(licence_image.png_for, member, org)  # drawn before Slack asks for it
     valid = (f" · valid till *{member.licence_expires_at.strftime('%d %B %Y')}*"
              if member.licence_expires_at else "")
     issued = member.licence_issued_at or timezone.now()
