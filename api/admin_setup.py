@@ -3,10 +3,13 @@
   1. Create the AI policy (AUP)
   2. Add admins (optional)
   3. Add your team
-  4. Start the programme — every employee gets the Welcome card and moves
-     through the AUP, the Traffic Light Check and the Highway Code to their
+  4. Approve cards — the onboarding cards (Traffic Light, Highway Code, AUP)
+     and the plan's awareness cards (card_approval.py); nothing is sent
+     without approval
+  5. Start the programme — every employee gets the Welcome card and moves
+     through the Traffic Light Check, the Highway Code and the AUP to their
      licence (employee_flow.py); people who join later start automatically
-  5. Licences & awareness cards
+  6. Licences & awareness cards
 
 Progress lives in Organization.setup_state (JSON).
 """
@@ -149,16 +152,25 @@ def summary(org: Organization) -> dict:
     team_done = members > 0
     cards_done = started(org) or all(s["sent"] for s in sends.values())
     licensed = _slack_learners(org).filter(licence_issued=True).count()
+    from . import card_approval
+
+    approvals = card_approval.counts(org)
+    onboarding = card_approval.onboarding(org)
+    approved_ready = all(r["status"] == card_approval.APPROVED for r in onboarding)
     return {
         "aup_done": aup_done,
         "aup_draft_section": draft(org)["section"] if not aup_done and has_draft(org) else None,
         "admins_done": admins_done,
         "team_done": team_done,
         "cards_done": cards_done,
+        "approved_ready": approved_ready,
+        "onboarding": onboarding,
+        "approvals": approvals,
+        "aup_approved": card_approval.is_approved(org, "aup"),
         "members": members,
         "licensed": licensed,
         "sends": sends,
-        "done_count": sum([aup_done, admins_done, team_done, cards_done]),
+        "done_count": sum([aup_done, admins_done, team_done, approved_ready, cards_done]),
     }
 
 

@@ -2,13 +2,22 @@
 ("AIDL Trial Flow C"): one card at a time, each a coloured attachment.
 
     Welcome            → "Let's go →"
-    Card 1 of 3 · AUP  → the 14 points, accepted one at a time (the same
-                         message moves to the next point); turns green when done
-    Card 2 of 3 · Traffic Light Check → "Got it. Next →"
-    Card 3 of 3 · The Highway Code    → "Got it. Get my license →"
-    License issued     → the licence image (licence_image.py), download, share
+    Card 1 of 3 · Traffic Light Check → "Got it. Next →"   (image)
+    Card 2 of 3 · The Highway Code    → "Got it. Next →"   (image)
+    Card 3 of 3 · AUP  → the 14 points as image cards, accepted one at a time
+                         (the same message moves to the next point); turns
+                         green when done
+    Avatar             → only if they haven't picked one: create it on the
+                         website (avatar.py) or use their Slack photo
+    License issued     → the licence image (licence_image.py) with the avatar
+                         and the valid-till date (1 year), download, share
 
-The admin starts the flow once (Admin Center step 4); people who join the
+Every card must be approved by an admin first (card_approval.py). If the
+next card isn't approved yet the employee gets a "waiting for approval"
+card, and the real one follows as soon as it's approved
+(post_waiting_cards).
+
+The admin starts the flow once (Admin Center step 5); people who join the
 channel later get the Welcome card automatically.
 """
 
@@ -92,8 +101,9 @@ def welcome(member: AIDLUser, org: Organization, done: bool = False) -> dict:
         {"type": "section", "fields": [_m("*Takes*\nAbout 10 min"), _m("*You get*\nAI Driving License"),
                                        _m(f"*After that*\n{cadence(org).capitalize()}")]},
         DIVIDER,
-        _section(f"*Your route today*\n\n:one:  *{org.name} AUP* · {aup_store.POINTS} short points to agree\n"
-                 ":two:  *Traffic Light Check* · what's safe to paste\n:three:  *The Highway Code* · 5 everyday rules"),
+        _section(f"*Your route today*\n\n:one:  *Traffic Light Check* · what's safe to paste\n"
+                 ":two:  *The Highway Code* · 5 everyday rules\n"
+                 f":three:  *{org.name} AUP* · {aup_store.POINTS} short points to agree"),
         _done("Started onboarding") if done else _actions("aidl_flow_welcome", _button("Let's go →", "aidl_flow_start",
                                                                                          "start", "primary")),
         _context(":lock: Your progress is private to you and your AIDL admin."),
@@ -101,70 +111,126 @@ def welcome(member: AIDLUser, org: Organization, done: bool = False) -> dict:
     return card(f"Hi {_first(member)}, welcome to your AI Driving License.", "*Welcome*", COLOR["yellow"], blocks)
 
 
+def _card_image(kind: str, org: Organization) -> dict:
+    """The designed card as an image (card_image.py) — with the company
+    logo and watermark on Basic and Enterprise."""
+    from . import card_image
+
+    return {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": card_image.alt_text(kind, org)}
+
+
+WAITING_LABEL = {"traffic_light": "the Traffic Light Check", "highway_code": "the Highway Code",
+                 "aup": "the AI Acceptable Use Policy"}
+
+
+def waiting(member: AIDLUser, org: Organization, item: str) -> dict:
+    """The next card isn't approved yet: it follows as soon as it is."""
+    from .admin_setup import state, update
+
+    st = state(org)
+    ids = set(st.get(f"waiting_{item}") or [])
+    if str(member.pk) not in ids:
+        update(org, **{f"waiting_{item}": sorted(ids | {str(member.pk)})})
+    return card(f"Your next card ({WAITING_LABEL[item]}) is waiting for approval.", "*Waiting for approval*",
+                COLOR["asphalt"], [
+        _header(":hourglass_flowing_sand: Your next card is on its way"),
+        _section(f"Your AIDL admin is approving *{WAITING_LABEL[item]}* for {org.name}. It will appear here as soon "
+                 "as it's approved — nothing to do until then."),
+    ])
+
+
+def post_waiting_cards(org: Organization, item: str) -> int:
+    """After `item` was approved: send it to everyone who was waiting."""
+    from .admin_setup import state, update
+
+    ids = state(org).get(f"waiting_{item}") or []
+    if not ids:
+        return 0
+    update(org, **{f"waiting_{item}": []})
+    sent = 0
+    for member in AIDLUser.objects.filter(pk__in=ids, is_active=True):
+        if stage(member, org) == item:
+            post(org, member, BUILDERS[item](member, org))
+            sent += 1
+    return sent
+
+
+def _approved(org: Organization, item: str) -> bool:
+    from .card_approval import is_approved
+
+    return is_approved(org, item)
+
+
+def traffic(member: AIDLUser, org: Organization, done: bool = False) -> dict:
+    if not done and not _approved(org, "traffic_light"):
+        return waiting(member, org, "traffic_light")
+    return card("Card 1 of 3: Traffic Light Check. Before you paste anything into an AI, check the lights.",
+                "*Card 1 of 3 · :vertical_traffic_light: Traffic Light Check* · Before you paste anything",
+                COLOR["green"], [
+        _card_image("traffic_light", org),
+        _done("Card 1 complete") if done else _actions("aidl_flow_tl", _button(
+            "Got it. Next: The Highway Code →", "aidl_flow_tl", "next", "primary")),
+    ])
+
+
+def highway(member: AIDLUser, org: Organization, done: bool = False) -> dict:
+    if not done and not _approved(org, "highway_code"):
+        return waiting(member, org, "highway_code")
+    return card("Card 2 of 3: The Highway Code. The everyday rules for using AI safely and confidently.",
+                "*Card 2 of 3 · :book: Highway Code* · Section A · Learner Rules", COLOR["blue"], [
+        _card_image("highway_code", org),
+        _done("Card 2 complete") if done else _actions("aidl_flow_hc", _button(
+            f"Got it. Next: {org.name} AUP →", "aidl_flow_hc", "next", "primary")),
+    ])
+
+
 def aup_card(member: AIDLUser, org: Organization) -> dict:
+    """Card 3: the AUP, one point (image) at a time in the same message."""
     aup = aup_store.current(org)
-    title = f":scroll: {org.name} Acceptable Use Policy"
-    if aup is None:
-        return card("The AI policy is being set up.", "*Card 1 of 3 · Sign-off*", COLOR["asphalt"], [
-            _header(title), _section(f"⏳ {org.name} is still setting up its AI policy. It will appear here soon.")])
-    done = aup_store.points_accepted(member, org)
-    n = aup_store.next_point(member, org)
-    bar = "▰" * len(done) + "▱" * (aup_store.POINTS - len(done))
-    if n is None:
-        return card(f"Card 1 of 3: {org.name} Acceptable Use Policy — agreed.", "*Card 1 of 3 · Sign-off*",
-                    COLOR["green"], [
-            _header(title),
+    label = "*Card 3 of 3 · :scroll: Acceptable Use Policy* · Sign-off"
+    done = aup_store.points_accepted(member, org) if aup is not None else set()
+    n = aup_store.next_point(member, org) if aup is not None else None
+    if aup is not None and n is None:
+        return card(f"Card 3 of 3: {org.name} Acceptable Use Policy — agreed.", label, COLOR["green"], [
+            _header(f":scroll: {org.name} Acceptable Use Policy"),
             _context(f"All {aup_store.POINTS} points agreed · `AGREED`"),
             _section(f"*I, <@{_slack_id(member)}>, agreed to all {aup_store.POINTS} points of {org.name}'s AI "
                      "Acceptable Use Policy.*"),
             _done("Agreed"),
             _context("Your agreement is time-stamped and saved to your AIDL record."),
         ])
-    point = aup["points"][n - 1]
-    clauses = "\n".join(f"•  {c['text']}" for c in point["clauses"]) or "_Nothing for this point._"
-    text = f"*{point['no']} · {point['title']}*\n_{point['intro']}_\n\n{clauses}"
-    return card(f"Card 1 of 3: {org.name} AUP — point {n} of {aup_store.POINTS}.", "*Card 1 of 3 · Sign-off*",
-                COLOR["asphalt"], [
-        _header(title),
-        _context(f"First stop: agree to each point, then two short cards and your AI Driving License is issued. · "
-                 f"`REQUIRED`"),
-        _context(f"{bar}  *Point {n} of {aup_store.POINTS}*"),
-        _section(text if len(text) <= 2900 else text[:2899] + "…"),
+    if aup is None or not _approved(org, "aup"):
+        return waiting(member, org, "aup")
+    bar = "▰" * len(done) + "▱" * (aup_store.POINTS - len(done))
+    return card(f"Card 3 of 3: {org.name} AUP — point {n} of {aup_store.POINTS}.", label, COLOR["asphalt"], [
+        _context(f"{bar}  *Point {n} of {aup_store.POINTS}* · agree to each point and your AI Driving License is "
+                 "issued · `REQUIRED`"),
+        _card_image(f"aup-{n}", org),
         _actions("aidl_flow_aup", _button(f"I agree to point {n} →", "aidl_flow_aup", aup_store.point_item(n),
                                           "primary")),
         _context("Your agreement is time-stamped and saved to your AIDL record."),
     ])
 
 
-def _card_image(kind: str, org: Organization) -> dict:
-    """The designed card as an image (card_image.py) — with the company
-    logo and watermark on Basic and Enterprise."""
-    from . import card_image
+def avatar_card(member: AIDLUser, org: Organization, notice: str = "") -> dict:
+    """Licence earned, no avatar yet: pick one before the licence is shown."""
+    from . import avatar
 
-    return {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": card_image.alt_text(kind)}
-
-
-def traffic(member: AIDLUser, org: Organization, done: bool = False) -> dict:
-    return card("Card 2 of 3: Traffic Light Check. Before you paste anything into an AI, check the lights.",
-                "*Card 2 of 3 · :vertical_traffic_light: Traffic Light Check* · Before you paste anything",
-                COLOR["green"], [
-        _card_image("traffic_light", org),
-        _done("Card 2 complete") if done else _actions("aidl_flow_tl", _button(
-            "Got it. Next: The Highway Code →", "aidl_flow_tl", "next", "primary")),
-    ])
-
-
-def highway(member: AIDLUser, org: Organization, done: bool = False) -> dict:
-    return card("Card 3 of 3: The Highway Code. The everyday rules for using AI safely and confidently.",
-                "*Card 3 of 3 · :book: Highway Code* · Section A · Learner Rules", COLOR["blue"], [
-        _card_image("highway_code", org),
-        _done("Card 3 complete") if done else _actions("aidl_flow_hc", _button(
-            "Got it. Get my license →", "aidl_flow_hc", "next", "primary")),
+    return card("Your AI Driving License is ready — pick the avatar for it.", "*License · your photo*",
+                COLOR["yellow"], [
+        _header(":art: One last step: your licence avatar"),
+        _section(f"You've earned your *AI Driving License*, {_first(member)}! Choose the avatar that goes on it — "
+                 "build your own, or use your Slack profile photo."),
+        _actions("aidl_flow_avatar",
+                 _button(":art: Create my avatar", "aidl_link_avatar", "create", "primary", url=avatar.start_url(member)),
+                 _button(":camera: Use my Slack photo", "aidl_flow_avatar", "slack")),
+        *([_context(notice)] if notice else []),
+        _context("Your licence arrives here as soon as your avatar is saved."),
     ])
 
 
 def licence(member: AIDLUser, org: Organization) -> dict:
-    from . import licence_image
+    from . import avatar, licence_image
 
     if not member.licence_issued:
         return card("All cards done — your license is waiting for a free seat.", "*License*", COLOR["yellow"], [
@@ -172,7 +238,12 @@ def licence(member: AIDLUser, org: Organization) -> dict:
             _section(f"You've finished every card. All license seats on {org.name}'s plan are in use, so your license "
                      "will be issued as soon as one is free. Your AIDL admin has been told."),
         ])
+    if not member.avatar_data:
+        return avatar_card(member, org)
     number = member.licence_number
+    version = licence_image.avatar_version(member)
+    valid = (f" · valid till *{member.licence_expires_at.strftime('%d %B %Y')}*"
+             if member.licence_expires_at else "")
     issued = member.licence_issued_at or timezone.now()
     nxt = (PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
                                           post_at__gt=timezone.now()).order_by("post_at").first())
@@ -182,20 +253,24 @@ def licence(member: AIDLUser, org: Organization) -> dict:
                 COLOR["green"], [
         _header(f":tada: You're road-ready, {_first(member)}!"),
         _context("All three cards done and the policy agreed. · `ISSUED`"),
-        _section("Here's your *AI Driving License*."),
-        {"type": "image", "image_url": licence_image.image_url(number), "title": _t(f"AI Driving License · {number}"),
+        _section(f"Here's your *AI Driving License*{valid}."),
+        {"type": "image", "image_url": licence_image.image_url(number, version=version),
+         "title": _t(f"AI Driving License · {number}"),
          "alt_text": f"AI Driving License for {member.full_name or member.email}, {number}, issued for {org.name} "
                      f"on {issued.strftime('%d %B %Y')}."},
         DIVIDER,
-        _section(f":white_check_mark: {org.name} AUP agreed\n:white_check_mark: Traffic Light Check\n"
-                 ":white_check_mark: The Highway Code"),
+        _section(f":white_check_mark: Traffic Light Check\n:white_check_mark: The Highway Code\n"
+                 f":white_check_mark: {org.name} AUP agreed"),
         _section(f":spiral_calendar_pad: Your next card arrives {when}. Keep the Traffic Light and Highway Code "
                  "cards handy."),
         _actions("aidl_flow_licence",
                  _button(":inbox_tray: Download license", "aidl_link_download", "download",
-                         url=licence_image.image_url(number, download=True)),
+                         url=licence_image.image_url(number, download=True, version=version)),
+                 _button(":art: Change avatar", "aidl_link_avatar", "change", url=avatar.start_url(member)),
                  _button(":link: Share on LinkedIn", "aidl_link_share", "linkedin",
                          url="https://www.linkedin.com/sharing/share-offsite/?url=" + quote(verify, safe=""))),
+        _section("Want to use an AI tool that isn't approved yet? Ask your admin.",
+                 accessory=_button("🛣 Request an app", "aidl_app_request_open", "licence")),
     ])
 
 
@@ -209,13 +284,13 @@ def stage(member: AIDLUser, org: Organization) -> str:
     """The card the employee is on."""
     from .licensing import acknowledged_items
 
-    if not aup_store.all_points_accepted(member, org):
-        return "aup"
     done = acknowledged_items(member)
     if "traffic_light" not in done:
         return "traffic_light"
     if "highway_code" not in done:
         return "highway_code"
+    if not aup_store.all_points_accepted(member, org):
+        return "aup"
     return "licence"
 
 
@@ -233,6 +308,17 @@ def update(org: Organization, channel: str, ts: str, payload: dict) -> None:
         "attachments": payload.get("attachments") or []})
 
 
+def post_licence(member: AIDLUser) -> dict:
+    """The avatar was saved: post the licence card (with it)."""
+    from .org_service import get_organization_for_user
+
+    org = get_organization_for_user(member)
+    if org is None or not org.slack_bot_token:
+        return {}
+    member.refresh_from_db()
+    return post(org, member, licence(member, org))
+
+
 def start(org: Organization, member: AIDLUser) -> dict:
     """Send the Welcome card (once the AUP exists)."""
     return post(org, member, welcome(member, org))
@@ -247,36 +333,39 @@ def advance(org: Organization, member: AIDLUser, action_id: str, value: str, cha
     """A button on a flow card was pressed."""
     from .licensing import acknowledge, issue_learner_if_ready
 
+    if action_id == "aidl_flow_avatar":
+        from . import avatar
+
+        if avatar.use_slack_photo(member, org):
+            update(org, channel, ts, card("Avatar saved.", "*License · your photo*", COLOR["green"], [
+                _header(":camera: Your Slack photo is on your licence"), _done("Avatar saved")]))
+            post_licence(member)
+        else:
+            update(org, channel, ts, avatar_card(member, org, notice=":warning: You don't have a Slack profile "
+                                                                     "photo — create an avatar instead."))
+        return
     if action_id == "aidl_flow_start":
         update(org, channel, ts, welcome(member, org, done=True))
         post(org, member, BUILDERS[stage(member, org)](member, org))
         return
     if action_id == "aidl_flow_aup":
         n = aup_store.next_point(member, org)
-        if n is not None and value == aup_store.point_item(n):
+        if n is not None and value == aup_store.point_item(n) and _approved(org, "aup"):
             acknowledge(member, value, aup_store.version(org))
         update(org, channel, ts, aup_card(member, org))  # next point, or AGREED
-        nxt = stage(member, org)
-        if nxt == "aup":
-            return
-        if nxt != "licence":
-            post(org, member, BUILDERS[nxt](member, org))
+        if stage(member, org) == "aup":
             return
     elif action_id == "aidl_flow_tl":
         acknowledge(member, "traffic_light")
         update(org, channel, ts, traffic(member, org, done=True))
-        nxt = stage(member, org)
-        if nxt != "licence":
-            post(org, member, BUILDERS[nxt](member, org))
-            return
     elif action_id == "aidl_flow_hc":
         acknowledge(member, "highway_code")
         update(org, channel, ts, highway(member, org, done=True))
-        nxt = stage(member, org)
-        if nxt != "licence":
-            post(org, member, BUILDERS[nxt](member, org))
-            return
     else:
+        return
+    nxt = stage(member, org)
+    if nxt != "licence":
+        post(org, member, BUILDERS[nxt](member, org))
         return
     result = issue_learner_if_ready(member, org)
     member.refresh_from_db()
@@ -331,10 +420,12 @@ def remind_everyone(org: Organization) -> tuple[int, int]:
 
 
 def send_new_aup(org: Organization) -> tuple[int, int]:
-    """The AUP changed: everyone gets the AUP card for the new version."""
+    """The AUP changed: everyone who has reached the AUP (or finished) gets
+    the AUP card for the new version; the others get it in turn."""
     from .licensing import learners
 
-    members = list(learners(org).filter(microsoft_id__startswith=f"slack:{org.slack_team_id}:"))
+    members = [m for m in learners(org).filter(microsoft_id__startswith=f"slack:{org.slack_team_id}:")
+               if stage(m, org) == "aup"]
     sent = 0
     for m in members:
         r = post(org, m, aup_card(m, org))

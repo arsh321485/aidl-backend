@@ -27,8 +27,9 @@ def licence_png(request, number: str):
         raise Http404
     org = get_organization_for_user(member)
     png = licence_image.render(name=member.full_name or member.email, org_name=org.name if org else "",
-                               number=number, issued=member.licence_issued_at, org=org,
-                               avatar_url=member.avatar_url or "")
+                               number=number, issued=member.licence_issued_at,
+                               expires=member.licence_expires_at, org=org,
+                               avatar_url=member.avatar_url or "", avatar_data=member.avatar_data or "")
     resp = HttpResponse(png, content_type="image/png")
     resp["Cache-Control"] = "public, max-age=3600"
     if request.GET.get("download"):
@@ -38,7 +39,7 @@ def licence_png(request, number: str):
 
 @require_GET
 def card_png(request, kind: str, org_id: str):
-    if kind not in card_image.KINDS or not hmac.compare_digest(request.GET.get("s", ""),
+    if not card_image.valid_kind(kind) or not hmac.compare_digest(request.GET.get("s", ""),
                                                                card_image.signature(kind, org_id)):
         raise Http404
     org = Organization.objects.filter(pk=org_id).first()

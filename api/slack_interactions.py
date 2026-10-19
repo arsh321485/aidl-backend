@@ -23,7 +23,8 @@ from django.views.decorators.http import require_POST
 
 from .auth_jwt import create_access_token
 from .models import AIDLUser
-from . import admin_setup, aup_slack, aup_store, employee_flow, slack_client, slack_modals
+from . import (admin_setup, app_requests, aup_slack, aup_store, card_approval, card_review_slack, employee_flow,
+               slack_client, slack_modals)
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
 from .slack_cards import build_admin_cards_context, light_admin_context
@@ -101,6 +102,8 @@ _POPUP_TITLES = {
     "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_admin_edit": "Edit permissions", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
+    "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview",
+    "aidl_appreq_reject": "Reject app", "aidl_appreq_info": "Ask for more info",
 }
 
 
@@ -165,12 +168,20 @@ _SUBMIT_TAB = {
     "aidl_aup_section": "home",
     "aidl_logo": "home",
     "aidl_admin_perms": "add-admin",
+    app_requests.REJECT: "ai-apps",
+    app_requests.INFO: "ai-apps",
 }
 
 
 def _handle_submission(payload: dict):
     view = payload.get("view") or {}
     callback = view.get("callback_id", "")
+    if callback == app_requests.CALLBACK:  # an employee's app request — any AIDL account
+        member = _admin_for(payload)
+        org = get_organization_for_user(member) if member else None
+        if member is None or org is None:
+            return JsonResponse(slack_modals.errors(name="Join the AIDL programme first."))
+        return JsonResponse(app_requests.submit(member, org, view))
     tab = _SUBMIT_TAB.get(callback)
     if tab is None:
         return HttpResponse(status=200)
@@ -188,6 +199,8 @@ def _handle_submission(payload: dict):
         allowed = d["can_policy"]
     elif callback == "aidl_logo":
         allowed = d["can_admins"]
+    elif callback in (app_requests.REJECT, app_requests.INFO):
+        allowed = d["can_apps"]
     if not allowed:
         return JsonResponse(slack_modals.errors(**{_first_block(view): "Your admin permissions don't include this."}))
 
@@ -202,6 +215,8 @@ def _handle_submission(payload: dict):
         "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
         "aidl_logo": lambda: slack_modals.submit_logo(org, view),
         "aidl_admin_perms": lambda: slack_modals.submit_edit_admin(admin, org, view),
+        app_requests.REJECT: lambda: app_requests.submit_reason(admin, org, view),
+        app_requests.INFO: lambda: app_requests.submit_reason(admin, org, view),
     }
     result = handlers[callback]() or {}
     if "response_action" in result:
@@ -316,6 +331,12 @@ def _send_aup_to_team(org, response_url: str) -> None:
 def _send_or_remind(org, admin, item: str, *, remind: bool, response_url: str, view_id: str) -> None:
     """Setup step 4: send a learning card to the team (once — later joiners
     get it automatically) or remind the people who haven't accepted it."""
+    if not remind and not card_approval.onboarding_ready(org):
+        text = ("⏳ Approve the onboarding cards first (Traffic Light Check, Highway Code and the AUP) — "
+                "*📋 Review & approve cards* in the Admin Center.")
+        if response_url:
+            _reply(response_url, text=text)
+        return
     if remind:
         sent, total = admin_setup.remind_item(org, item)
         text = f"🔔 Reminder sent to {sent} of {total} people who haven't finished yet."
@@ -493,6 +514,13 @@ def slack_interactions(request):
             slack_modals.in_background(_acknowledge, org, member, payload, action.get("value", ""))
         return HttpResponse(status=200)
 
+    # "🛣 Request an app" on an employee's licence or awareness card.
+    if action_id == "aidl_app_request_open":
+        org = _org_for_team(payload)
+        if org is not None:
+            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), app_requests.request_view())
+        return HttpResponse(status=200)
+
     # The employee card flow (employee_flow.py): Let's go / I agree / Got it.
     if action_id.startswith("aidl_flow_"):
         org = _org_for_team(payload)
@@ -537,6 +565,89 @@ def slack_interactions(request):
     return HttpResponse(status=200)
 
 
+def _card_review_action(org, user, payload: dict, action: dict, action_id: str) -> None:
+    """Review & approve cards popup (card_review_slack.py)."""
+    view = payload.get("view") or {}
+    meta = json.loads(view.get("private_metadata") or "{}") if view.get("callback_id") == card_review_slack.CALLBACK else {}
+    month = int(meta.get("month") or 1)
+    value = action.get("value") or (action.get("selected_option") or {}).get("value", "")
+    token = slack_client.bot_token(org)
+
+    def redraw(notice: str = "", view_id: str = "", at_month: int | None = None) -> None:
+        target = view_id or (view.get("id") if view.get("callback_id") == card_review_slack.CALLBACK else "")
+        if target:
+            slack_client.slack_api("views.update", token, json={
+                "view_id": target, "view": card_review_slack.review_view(org, at_month or month, notice)})
+
+    if action_id == "aidl_cards_review":
+        _open_modal(org, payload.get("trigger_id", ""),
+                    card_review_slack.review_view(org, int(value) if str(value).isdigit() else 1),
+                    push=bool(view.get("id")))
+        return
+    if action_id == "aidl_crv_month":
+        redraw(at_month=int(value))
+        return
+    if action_id == "aidl_crv_preview" or (action_id == "aidl_crv_card" and value.startswith("preview|")):
+        what = value if action_id == "aidl_crv_preview" else value.split("|", 1)[1]
+        _open_modal(org, payload.get("trigger_id", ""), card_review_slack.preview_view(org, what), push=True)
+        return
+
+    summary, notice, onboarding_item = "", "", ""
+    if action_id == "aidl_crv_approve_onb" or (action_id == "aidl_crv_preview_approve" and value.startswith("onb|")):
+        onboarding_item = value.split("|", 1)[-1]
+        if card_approval.approve_onboarding(org, onboarding_item, user):
+            label = card_approval.ONBOARDING_LABEL[onboarding_item]
+            summary, notice = f"approved {label}.", f"✅ {label} approved."
+    elif action_id == "aidl_crv_approve_all":
+        n = card_approval.approve_waiting(org, user)
+        summary, notice = f"approved {n} awareness cards.", f"✅ {n} cards approved."
+    elif action_id == "aidl_crv_approve_month":
+        n = card_approval.approve_waiting(org, user, month=int(value))
+        summary, notice = f"approved {n} awareness cards (month {value}).", f"✅ {n} cards approved."
+    elif action_id == "aidl_crv_approve_list":
+        n = card_approval.approve(org, [no for no in value.split(",") if no], user)
+        summary, notice = f"approved {n} awareness cards.", f"✅ {n} cards approved."
+    elif action_id in ("aidl_crv_card", "aidl_crv_preview_approve"):
+        act, no = value.split("|", 1) if "|" in value else ("approve", value)
+        from .plans import card_by_no
+
+        title = (card_by_no(no) or {}).get("title", no)
+        if act == "approve":
+            card_approval.approve(org, [no], user)
+            summary, notice = f"approved the card *{title}*.", f"✅ *{title}* approved."
+        elif act == "skip":
+            card_approval.skip(org, no, user)
+            summary, notice = f"skipped the card *{title}*.", f"⏭ *{title}* skipped — it won't be sent."
+        elif act == "unskip":
+            card_approval.unskip(org, no, user)
+            notice = f"↩️ *{title}* is waiting for approval again."
+        elif act == "swap":
+            new = card_approval.swap(org, no, user)
+            if new is None:
+                notice = f"⚠️ No other unused card in *{title}*'s topic — skip it instead."
+            else:
+                summary = f"swapped *{title}* for *{new['title']}*."
+                notice = f"🔄 *{title}* swapped for *{new['title']}* — approve the new card."
+    else:
+        return
+
+    if view.get("callback_id") == "aidl_policy_done":  # Approve AUP in the AUP-ready popup
+        slack_client.slack_api("views.update", token, json={
+            "view_id": view.get("id", ""), "view": aup_slack.report_view(org, notice=notice)})
+    elif action_id == "aidl_crv_preview_approve":  # inside the preview popup: refresh it and the list under it
+        slack_client.slack_api("views.update", token, json={
+            "view_id": view.get("id", ""), "view": card_review_slack.preview_view(org, value)})
+        redraw(notice, view_id=view.get("previous_view_id") or "")
+    elif action_id == "aidl_crv_approve_list" and not view.get("id"):  # from the reminder DM
+        _reply(payload.get("response_url", ""), text=notice)
+    else:
+        redraw(notice)
+    if onboarding_item and summary:
+        employee_flow.post_waiting_cards(org, onboarding_item)
+    if summary:
+        card_approval.after_change(org, user, summary)
+
+
 class _BaseUrl:
     """Stands in for the request in the background: _private_link only needs
     the site's base URL."""
@@ -564,8 +675,11 @@ def _admin_action(request, payload: dict, action: dict, action_id: str, tab: str
 
     trigger_id = payload.get("trigger_id", "")
     org = get_organization_for_user(user)
-    if org is not None and trigger_id and action_id in _POPUP_TITLES:
-        _preopen(org, trigger_id, _POPUP_TITLES[action_id], push=bool((payload.get("view") or {}).get("id")))
+    picked = (action.get("selected_option") or {}).get("value", "")
+    title = _POPUP_TITLES.get(action_id) or ("Preview" if action_id == "aidl_crv_card" and picked.startswith("preview|")
+                                             else "")
+    if org is not None and trigger_id and title:
+        _preopen(org, trigger_id, title, push=bool((payload.get("view") or {}).get("id")))
     try:
         _admin_action_body(request, payload, action, action_id, tab, response_url, is_ephemeral, user, org)
     finally:
@@ -675,6 +789,27 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
     if action_id == "aidl_aup_remind":
         if org is not None:
             slack_modals.in_background(_send_aup_reminders, org, user, response_url)
+        return HttpResponse(status=200)
+
+    if org is not None and (action_id == "aidl_cards_review" or action_id.startswith("aidl_crv_")):
+        if not d.get("can_approve_cards"):
+            _reply(response_url, text="Approving cards needs the *Approve cards* permission — ask your master admin.")
+            return HttpResponse(status=200)
+        _card_review_action(org, user, payload, action, action_id)
+        return HttpResponse(status=200)
+
+    if org is not None and action_id.startswith("aidl_appreq_"):
+        if not d.get("can_apps"):
+            _reply(response_url, text="Approving apps needs the *Approve Apps* permission.")
+            return HttpResponse(status=200)
+        req = app_requests.get(org, action.get("value", ""))
+        if req is None:
+            return HttpResponse(status=200)
+        if action_id == "aidl_appreq_approve":
+            app_requests.approve(org, req, user)
+        elif req.status == req.Status.PENDING:
+            kind = app_requests.REJECT if action_id == "aidl_appreq_reject" else app_requests.INFO
+            _open_modal(org, payload.get("trigger_id", ""), app_requests.reason_view(req, kind))
         return HttpResponse(status=200)
 
     if tab not in d["tabs"]:

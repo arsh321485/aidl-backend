@@ -45,9 +45,14 @@ def signature(number: str) -> str:
     return hmac.new(settings.SECRET_KEY.encode(), f"licence:{number}".encode(), hashlib.sha256).hexdigest()[:20]
 
 
-def image_url(number: str, *, download: bool = False) -> str:
+def image_url(number: str, *, download: bool = False, version: str = "") -> str:
+    """`version` changes with the avatar so Slack fetches the new image."""
     url = f"{settings.BACKEND_URL}/api/licenses/{number}.png?s={signature(number)}"
-    return url + ("&download=1" if download else "")
+    return url + (f"&v={version}" if version else "") + ("&download=1" if download else "")
+
+
+def avatar_version(member) -> str:
+    return hashlib.sha256((member.avatar_data or "").encode()).hexdigest()[:8] if member.avatar_data else ""
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
@@ -75,7 +80,12 @@ def brand_logo(org) -> Image.Image | None:
     return _logo(org)
 
 
-def _avatar(url: str) -> Image.Image | None:
+def _avatar(url: str = "", data: str = "") -> Image.Image | None:
+    if data:
+        try:
+            return Image.open(io.BytesIO(base64.b64decode(data))).convert("RGBA")
+        except Exception:  # noqa: BLE001
+            return None
     if not url:
         return None
     try:
@@ -108,8 +118,8 @@ def _circle_mask(size: int) -> Image.Image:
     return m
 
 
-def render(*, name: str, org_name: str, number: str, issued: datetime | None, org=None,
-           avatar_url: str = "") -> bytes:
+def render(*, name: str, org_name: str, number: str, issued: datetime | None, expires: datetime | None = None,
+           org=None, avatar_url: str = "", avatar_data: str = "") -> bytes:
     img = Image.new("RGBA", _xy(W, H), YELLOW)
     d = ImageDraw.Draw(img)
 
@@ -146,7 +156,7 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, or
 
     # photo (Slack profile picture, else a silhouette) + signature
     box = (40, 148, 190, 336)
-    avatar = _avatar(avatar_url)
+    avatar = _avatar(avatar_url, avatar_data)
     if avatar is not None:
         ph = _fit(avatar, 150 * S, 188 * S)
         m = Image.new("L", ph.size, 0)
@@ -168,10 +178,15 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, or
     d.text(_xy(220, 208), name.upper()[:24], font=_font(34), fill=INK, anchor="ls")
     label(220, 252, "2. ISSUED")
     d.text(_xy(220, 280), issued.strftime("%d/%m/%Y") if issued else "—", font=_font(22), fill=INK, anchor="ls")
-    label(450, 252, "3. STATUS")
-    d.rounded_rectangle(_xy(450, 260, 560, 290), radius=15 * S, fill=GREEN)
-    d.ellipse(_xy(463, 270, 473, 280), fill="#FFFFFF")
-    d.text(_xy(480, 281), "ACTIVE", font=_font(16), fill="#FFFFFF", anchor="ls")
+    label(450, 252, "3. VALID TILL")
+    if expires is not None:
+        expired = expires < datetime.now(expires.tzinfo)
+        d.text(_xy(450, 280), expires.strftime("%d/%m/%Y"), font=_font(22), fill=RED if expired else GREEN,
+               anchor="ls")
+        if expired:
+            d.text(_xy(590, 280), "EXPIRED", font=_font(14), fill=RED, anchor="ls")
+    else:
+        d.text(_xy(450, 280), "—", font=_font(22), fill=INK, anchor="ls")
     label(220, 326, "4. LICENSE NO.")
     d.text(_xy(220, 356), number, font=_font(26), fill=RED, anchor="ls")
 

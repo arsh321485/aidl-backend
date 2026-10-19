@@ -461,6 +461,7 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
     data["can_admins"] = owner or bool(user and user.perm_manage_admins)
     data["can_team"] = data["can_admins"]
     data["can_billing"] = owner or bool(user and user.perm_billing)
+    data["can_approve_cards"] = owner or bool(user and user.perm_approve_cards)
     data["grantable"] = [k for k, _f, _l, _d in admin_perms.PERMS] if owner else (
         admin_perms.grantable(org, user) if user is not None else [])
     data["can_send"] = owner or bool(user and user.perm_access_cards)
@@ -634,6 +635,8 @@ def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
         "can_admins": owner or user.perm_manage_admins,
         "can_team": owner or user.perm_manage_admins,
         "can_billing": owner or user.perm_billing,
+        "can_approve_cards": owner or user.perm_approve_cards,
+        "can_apps": owner or user.perm_approve_apps,
         "grantable": admin_perms.grantable(org, user),
         "can_send": owner or user.perm_access_cards,
         "admin_count": AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN,

@@ -10,6 +10,7 @@ Other admins have the permissions they were given:
     create_card     request new cards
     manage_admins   add, edit and remove admins (not the master admin)
     billing         upgrade the plan
+    approve_cards   approve the cards AIDL sends to the team
 
 An admin can only give the permissions they have themselves. Every change
 made by someone other than the master admin is reported to them by DM.
@@ -25,6 +26,7 @@ PERMS = (
     ("create_card", "perm_create_card", "Create Card", "request new cards"),
     ("manage_admins", "perm_manage_admins", "Manage admins", "add, edit and remove admins"),
     ("billing", "perm_billing", "Manage plan & billing", "upgrade the plan"),
+    ("approve_cards", "perm_approve_cards", "Approve cards", "approve the cards sent to the team"),
 )
 FIELDS = [field for _k, field, _l, _d in PERMS]
 MASTER_LABEL = "👑 Master admin"
