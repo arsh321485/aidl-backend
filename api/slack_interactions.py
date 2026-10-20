@@ -772,7 +772,8 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
 
     if org is not None and action_id == "aidl_add_people" and d["can_team"]:
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
-        _open_modal(org, payload.get("trigger_id", ""), slack_modals.add_people_view(meta, d))
+        _open_modal(org, payload.get("trigger_id", ""),
+                    slack_modals.add_people_view(meta, d, slack_modals.workspace_members(org)))
         return HttpResponse(status=200)
 
     if org is not None and action_id == "aidl_setup_skip" and d["can_admins"]:

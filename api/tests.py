@@ -2095,6 +2095,25 @@ class SetupStepsTests(TestCase):
         resp = self._submit("aidl_add_people", {}).json()
         self.assertIn("select all", resp["errors"]["people"])
 
+    def test_add_people_select_everyone_in_the_dropdown(self):
+        from .slack_cards import build_admin_cards_context
+        from .slack_modals import SELECT_ALL, add_people_view
+
+        view = add_people_view({}, build_admin_cards_context(self.owner), [("U6", "Bharti Mali"), ("U8", "Yana")])
+        picker = next(b for b in view["blocks"] if b.get("block_id") == "people")["element"]
+        self.assertEqual(picker["type"], "multi_static_select")
+        self.assertEqual(picker["options"][0]["value"], SELECT_ALL)              # "Select everyone" on top
+        self.assertEqual([o["value"] for o in picker["options"][1:]], ["U6", "U8"])
+        self.assertNotIn("everyone", json.dumps(view["blocks"][-1]))             # no separate tick box
+        with patch("api.slack_modals.workspace_people", return_value=["U6", "U8"]), \
+                patch("api.slack_modals.in_background", side_effect=lambda fn, *a: fn(*a)):
+            everyone = {"people": {"v": {"type": "multi_static_select", "selected_options": [{"value": SELECT_ALL}]}}}
+            self.assertEqual(self._submit("aidl_add_people", everyone).json(), {"response_action": "clear"})
+        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U6", "slack:T9:U8"]).count(), 2)
+        self.assertEqual(add_people_view({}, build_admin_cards_context(self.owner),
+                                         [(f"U{i}", f"P{i}") for i in range(150)])["blocks"][1]["element"]["type"],
+                         "multi_users_select")                                   # too many → Slack's picker
+
     def test_old_home_button_points_to_live_message(self):
         from urllib.parse import urlencode
 
