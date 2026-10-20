@@ -2063,56 +2063,105 @@ class SetupStepsTests(TestCase):
         self._press("aidl_remind_item", "flow")                   # U5 hasn't finished → current card again
         self.assertTrue(any(m == "chat.postMessage" and b["channel"] == "U5" for m, b in self.calls))
 
-    def test_add_people_adds_to_channel_and_respects_plan(self):
-        users = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U5", "U6"]}}}
-        self.assertEqual(self._submit("aidl_add_people", users).json(), {"response_action": "clear"})
-        self.assertIn(("conversations.invite", {"channel": "C42", "users": "U5"}), self.calls)
-        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U5", "slack:T9:U6"]).count(), 2)
-        too_many = {"people": {"v": {"type": "multi_users_select", "selected_users": ["U7", "U8", "U9", "U10"]}}}
-        resp = self._submit("aidl_add_people", too_many).json()
-        self.assertEqual(resp["response_action"], "errors")
-        self.assertIn("seats left", resp["errors"]["people"])
+    PEOPLE = [("U6", "Bharti Mali"), ("U8", "Yana"), ("U9", "Ritika")]
 
-    def test_add_people_select_all(self):
-        from .slack_modals import workspace_people
+    def _people_patches(self, people=None):
+        """The workspace members who can be added (not in the channel)."""
+        people = self.PEOPLE if people is None else people
+        return (patch("api.slack_modals.workspace_members", return_value=people),
+                patch("api.slack_modals.in_background", side_effect=lambda fn, *a: fn(*a)))
+
+    def _picked(self, *uids, block="people_0"):
+        return {block: {"v": {"type": "multi_static_select",
+                              "selected_options": [{"value": u} for u in uids]}}}
+
+    def test_people_dropdown_has_select_all_on_top_and_no_checkbox(self):
+        from .slack_cards import build_admin_cards_context
+        from .slack_modals import SELECT_ALL, add_people_view
+
+        view = add_people_view({}, build_admin_cards_context(self.owner), self.PEOPLE)
+        block = next(b for b in view["blocks"] if b.get("block_id", "").startswith("people"))
+        picker = block["element"]
+        self.assertEqual(picker["type"], "multi_static_select")                  # searchable multi-select
+        self.assertTrue(block["dispatch_action"])
+        self.assertEqual(picker["options"][0]["value"], SELECT_ALL)              # "Select all people" on top
+        self.assertEqual(picker["options"][0]["text"]["text"], "✅ Select all people (3)")
+        self.assertEqual([o["value"] for o in picker["options"][1:]], ["U6", "U8", "U9"])
+        self.assertNotIn("checkboxes", json.dumps(view))                         # no tick box below the input
+        self.assertNotIn("isn't in the AIDL channel yet", json.dumps(view))
+        self.assertTrue(block["optional"])
+
+    def test_select_all_selects_everyone_as_removable_chips(self):
+        from urllib.parse import urlencode
+
+        view = {"id": "V9", "hash": "h1", "callback_id": "aidl_add_people",
+                "private_metadata": json.dumps({"channel_id": "C42", "people_version": 0})}
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"},
+                   "view": view, "actions": [{"action_id": "v", "block_id": "people_0",
+                                              "selected_options": [{"value": "U8"}, {"value": "__all__"}]}]}
+        with self._people_patches()[0]:
+            self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                         "application/x-www-form-urlencoded")
+        update = next(b for m, b in self.calls if m == "views.update")
+        self.assertEqual(update["view_id"], "V9")
+        block = next(b for b in update["view"]["blocks"] if b.get("block_id", "").startswith("people"))
+        self.assertEqual(block["block_id"], "people_1")                          # new id → Slack shows the selection
+        chosen = [o["value"] for o in block["element"]["initial_options"]]
+        self.assertEqual(chosen, ["U6", "U8", "U9"])                             # everyone, once each, as chips
+        self.assertNotIn("__all__", chosen)
+
+    def test_deselected_people_are_not_added(self):
+        p1, p2 = self._people_patches()
+        with p1, p2:                                                             # U9 removed after "Select all"
+            self.assertEqual(self._submit("aidl_add_people", self._picked("U6", "U8", block="people_1")).json(),
+                             {"response_action": "clear"})
+        invited = [b["users"] for m, b in self.calls if m == "conversations.invite"]
+        self.assertEqual(invited, ["U6", "U8"])
+
+    def test_select_all_applies_to_everyone_not_just_search_results(self):
+        from .slack_modals import people_options
+
+        with self._people_patches()[0]:
+            options = people_options(self.org, "bha")                            # searching "bha"
+        self.assertEqual(options[0]["value"], "__all__")                         # still "Select all people (3)"
+        self.assertIn("(3)", options[0]["text"]["text"])
+        self.assertEqual([o["value"] for o in options[1:]], ["U6"])              # the search result
+        p1, p2 = self._people_patches()
+        with p1, p2:                                                             # "Select all" chosen from a search
+            self._submit("aidl_add_people", self._picked("__all__"))
+        self.assertEqual([b["users"] for m, b in self.calls if m == "conversations.invite"], ["U6", "U8", "U9"])
+
+    def test_excludes_channel_members_and_duplicates(self):
+        from .slack_modals import workspace_members
 
         def fake(method, token, *, json=None, params=None):
             if method == "conversations.members":
                 return {"ok": True, "members": ["U1", "U5"]}
             if method == "users.list":
                 return {"ok": True, "members": [
-                    {"id": "U1"}, {"id": "U5"}, {"id": "U6"}, {"id": "U7", "deleted": True},
-                    {"id": "UB", "is_bot": True}, {"id": "USLACKBOT"}, {"id": "UG", "is_restricted": True}, {"id": "U8"}]}
+                    {"id": "U1"}, {"id": "U5"}, {"id": "U6", "profile": {"real_name": "Bharti Mali"}},
+                    {"id": "U7", "deleted": True}, {"id": "UB", "is_bot": True}, {"id": "USLACKBOT"},
+                    {"id": "UG", "is_restricted": True}, {"id": "U8", "real_name": "Yana"}]}
             return {"ok": True}
 
         with patch("api.slack_client.slack_api", side_effect=fake):
-            self.assertEqual(workspace_people(self.org), ["U6", "U8"])
-        with patch("api.slack_modals.workspace_people", return_value=["U6", "U8"]), \
-                patch("api.slack_modals.in_background", side_effect=lambda fn, *a: fn(*a)):
-            everyone = {"everyone": {"v": {"type": "checkboxes", "selected_options": [{"value": "all"}]}}}
-            self.assertEqual(self._submit("aidl_add_people", everyone).json(), {"response_action": "clear"})
-        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U6", "slack:T9:U8"]).count(), 2)
-        resp = self._submit("aidl_add_people", {}).json()
-        self.assertIn("select all", resp["errors"]["people"])
+            self.assertEqual(workspace_members(self.org), [("U6", "Bharti Mali"), ("U8", "Yana")])
+        p1, p2 = self._people_patches([("U6", "Bharti Mali")])
+        with p1, p2:  # U6 twice, U5 already in the channel
+            self._submit("aidl_add_people", self._picked("U6", "U6", "U5"))
+        self.assertEqual([b["users"] for m, b in self.calls if m == "conversations.invite"], ["U6"])
 
-    def test_add_people_select_everyone_in_the_dropdown(self):
-        from .slack_cards import build_admin_cards_context
-        from .slack_modals import SELECT_ALL, add_people_view
-
-        view = add_people_view({}, build_admin_cards_context(self.owner), [("U6", "Bharti Mali"), ("U8", "Yana")])
-        picker = next(b for b in view["blocks"] if b.get("block_id") == "people")["element"]
-        self.assertEqual(picker["type"], "multi_static_select")
-        self.assertEqual(picker["options"][0]["value"], SELECT_ALL)              # "Select everyone" on top
-        self.assertEqual([o["value"] for o in picker["options"][1:]], ["U6", "U8"])
-        self.assertNotIn("everyone", json.dumps(view["blocks"][-1]))             # no separate tick box
-        with patch("api.slack_modals.workspace_people", return_value=["U6", "U8"]), \
-                patch("api.slack_modals.in_background", side_effect=lambda fn, *a: fn(*a)):
-            everyone = {"people": {"v": {"type": "multi_static_select", "selected_options": [{"value": SELECT_ALL}]}}}
-            self.assertEqual(self._submit("aidl_add_people", everyone).json(), {"response_action": "clear"})
-        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U6", "slack:T9:U8"]).count(), 2)
-        self.assertEqual(add_people_view({}, build_admin_cards_context(self.owner),
-                                         [(f"U{i}", f"P{i}") for i in range(150)])["blocks"][1]["element"]["type"],
-                         "multi_users_select")                                   # too many → Slack's picker
+    def test_seat_limit_and_nothing_picked(self):
+        people = [(f"U{n}", f"Person {n}") for n in range(10, 20)]
+        p1, p2 = self._people_patches(people)
+        with p1, p2:
+            resp = self._submit("aidl_add_people", self._picked("__all__", block="people_2")).json()
+            self.assertEqual(resp["response_action"], "errors")
+            self.assertIn("seats left", resp["errors"]["people_2"])              # error on the People field
+            self.assertIn("Remove some people", resp["errors"]["people_2"])
+            resp = self._submit("aidl_add_people", self._picked(block="people_2")).json()
+            self.assertIn("Select all people", resp["errors"]["people_2"])
+        self.assertFalse(any(m == "conversations.invite" for m, _b in self.calls))
 
     def test_old_home_button_points_to_live_message(self):
         from urllib.parse import urlencode
