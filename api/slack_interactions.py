@@ -253,6 +253,21 @@ def _after_aup_published(org, admin) -> None:
                 "Open the AIDL Admin Center to send it to your team."}}])
 
 
+def _people_changed(payload: dict, action: dict) -> None:
+    user = _admin_for(payload)
+    org = get_organization_for_user(user) if user is not None else None
+    if org is None or user.role != AIDLUser.Role.ADMIN or not light_admin_context(user)["can_team"]:
+        return
+    view = payload.get("view") or {}
+    selected = [o.get("value") for o in action.get("selected_options") or []]
+    new = slack_modals.people_changed(org, user, view, selected)
+    if new is not None:
+        result = slack_client.slack_api("views.update", slack_client.bot_token(org),
+                                        json={"view_id": view.get("id", ""), "hash": view.get("hash", ""), "view": new})
+        if not result.get("ok"):
+            logger.info("add people redraw: %s", result.get("error"))
+
+
 def _aup_screen_action(payload: dict, action_id: str) -> None:
     """Inside the Create AUP popup: an answer changed (redraw the screen to
     show / hide follow-ups) or Back."""
@@ -494,6 +509,9 @@ def slack_interactions(request):
         return HttpResponse(status=400)
     if payload.get("type") == "view_submission":
         return _handle_submission(payload)
+    if payload.get("type") == "block_suggestion":  # the People search in Add your team (lists over 99)
+        org = _org_for_team(payload)
+        return JsonResponse({"options": slack_modals.people_options(org, payload.get("value", "")) if org else []})
     if payload.get("type") != "block_actions":
         return HttpResponse(status=200)
 
@@ -531,6 +549,12 @@ def slack_interactions(request):
             ts = container.get("message_ts") or (payload.get("message") or {}).get("ts", "")
             slack_modals.in_background(employee_flow.advance, org, member, action_id, action.get("value", ""),
                                        channel, ts)
+        return HttpResponse(status=200)
+
+    # Add your team: the People selection changed ("Select all people").
+    if ((payload.get("view") or {}).get("callback_id") == "aidl_add_people"
+            and (action.get("block_id") or "").startswith("people")):
+        slack_modals.in_background(_people_changed, payload, action)
         return HttpResponse(status=200)
 
     # Inside the Create AUP popup: an answer changed, or Back.

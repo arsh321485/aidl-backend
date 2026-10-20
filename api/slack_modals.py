@@ -161,31 +161,48 @@ def _tell_owner(org: Organization, text: str) -> None:
 
 
 SELECT_ALL = "__all__"
-_MAX_LISTED = 99  # Slack lists hold 100 options; one is "Select everyone"
+_MAX_LISTED = 99  # a Slack list holds 100 options; one is "Select all people"
 
 
-def add_people_view(meta: dict, d: dict, people: list[tuple[str, str]] | None = None) -> dict:
+def _person(uid: str, name: str) -> dict:
+    return _option(name[:75], uid)
+
+
+def _people_input(people: list[tuple[str, str]], selected: list[str], version: int) -> dict:
+    """The People field: a searchable multi-select with "✅ Select all
+    people" on top. Up to 99 people the list is in the popup; above that
+    Slack asks AIDL for it as the admin types (people_options, needs the
+    app's Options Load URL). Choosing "Select all people" redraws the popup
+    with everyone selected (people_changed); a new block id each time makes
+    Slack show the new selection."""
+    names = dict(people)
+    chosen = [_person(uid, names[uid]) for uid in selected if uid in names]
+    if len(people) <= _MAX_LISTED:
+        element = {"type": "multi_static_select", "action_id": "v", "placeholder": _text("Choose people"),
+                   "options": [_option(f"✅ Select all people ({len(people)})", SELECT_ALL)]
+                              + [_person(uid, name) for uid, name in people]}
+    else:
+        element = {"type": "multi_external_select", "action_id": "v", "placeholder": _text("Search people"),
+                   "min_query_length": 0}
+    if chosen:
+        element["initial_options"] = chosen
+    block = _input(f"people_{version}", "People", element, optional=True)
+    block["dispatch_action"] = True  # tell AIDL when the selection changes (for "Select all people")
+    return block
+
+
+def add_people_view(meta: dict, d: dict, people: list[tuple[str, str]] | None = None,
+                    selected: list[str] | None = None, version: int = 0) -> dict:
     """Setup step 3 — pick people; AIDL adds them to the AIDL channel and
     onboarding does the rest (no Add User form). `people` = the workspace
-    members not in the channel yet: when they fit in one list, the People
-    dropdown lists them with "✅ Select everyone" on top; otherwise Slack's
-    own people picker plus a select-all tick box."""
+    members who can be added (not in the AIDL channel, no bots / guests)."""
     p = d.get("plan") or {}
     free = p.get("free")
-    if people is not None and 0 < len(people) <= _MAX_LISTED:
-        picker = [_input("people", "People", {
-            "type": "multi_static_select", "action_id": "v", "placeholder": _text("Choose people"),
-            "options": [_option(f"✅ Select everyone ({len(people)} people)", SELECT_ALL)]
-                       + [_option(name[:75], uid) for uid, name in people]})]
-    elif people is not None and not people:
-        picker = [{"type": "section", "text": _md("✅ Everyone in your workspace is already in the AIDL channel.")}]
+    people = people or []
+    if people:
+        picker = [_people_input(people, selected or [], version)]
     else:
-        picker = [
-            _input("people", "People", {"type": "multi_users_select", "action_id": "v",
-                                        "placeholder": _text("Choose people")}, optional=True),
-            _input("everyone", "…or select all", {"type": "checkboxes", "action_id": "v", "options": [
-                _option("Everyone in the workspace who isn't in the AIDL channel yet", "all")]}, optional=True),
-        ]
+        picker = [{"type": "section", "text": _md("✅ Everyone in your workspace is already in the AIDL channel.")}]
     return _modal("aidl_add_people", "Add your team", [
         {"type": "section", "text": _md("Pick the people who should earn an AI licence. AIDL adds them to the AIDL "
                                         "channel and sends each one their welcome and learning cards.")},
@@ -193,7 +210,29 @@ def add_people_view(meta: dict, d: dict, people: list[tuple[str, str]] | None = 
         *([{"type": "context", "elements": [_md(f"*{free}* seat{'s' if free != 1 else ''} left on your "
                                                  f"{p.get('label', '')} plan ({p.get('used')} of {p.get('limit')} used)")]}]
           if free is not None else []),
-    ], submit="Add people", meta=meta)
+    ], submit="Add people", meta={**meta, "people_version": version})
+
+
+def people_options(org: Organization, query: str) -> list[dict]:
+    """Options for the People search (lists over 99 people): "Select all
+    people" first, then the matching people (Slack shows at most 100)."""
+    people = workspace_members(org)
+    q = (query or "").strip().lower()
+    matches = [_person(uid, name) for uid, name in people if not q or q in name.lower()]
+    return [_option(f"✅ Select all people ({len(people)})", SELECT_ALL)] + matches[:99]
+
+
+def people_changed(org: Organization, admin: AIDLUser, view: dict, selected: list[str]) -> dict | None:
+    """The People selection changed. "Select all people" → the same popup
+    with every eligible person selected (deduplicated); otherwise nothing."""
+    if SELECT_ALL not in selected:
+        return None
+    from .plans import usage
+
+    meta = json.loads(view.get("private_metadata") or "{}")
+    version = int(meta.get("people_version") or 0) + 1
+    people = workspace_members(org)
+    return add_people_view(meta, {"plan": usage(org)}, people, [uid for uid, _n in people], version)
 
 
 def workspace_people(org: Organization) -> list[str]:
@@ -230,22 +269,22 @@ def submit_add_people(caller: AIDLUser, org: Organization, view: dict) -> dict:
     if not light_admin_context(caller)["can_team"]:
         return errors(people="Only the admin who set up AIDL can add people.")
     values = _values(view)
-    field = values.get("people", {}).get("v", {}) or {}
+    block = next((b for b in values if b.startswith("people")), "people")
+    field = values.get(block, {}).get("v", {}) or {}
     picked = field.get("selected_users") or [o["value"] for o in field.get("selected_options") or []]
-    if SELECT_ALL in picked:  # "✅ Select everyone" in the People dropdown
-        picked = workspace_people(org)
-        if not picked:
-            return errors(people="Everyone in the workspace is already in the AIDL channel.")
-    if (values.get("everyone", {}).get("v", {}) or {}).get("selected_options"):
-        picked = list(dict.fromkeys(picked + workspace_people(org)))
-        if not picked:
-            return errors(everyone="Everyone in the workspace is already in the AIDL channel.")
+    eligible = workspace_people(org)
+    if SELECT_ALL in picked:  # "Select all people" chosen right before Add people
+        picked = eligible
+    else:  # still eligible (not added meanwhile), each person once
+        allowed = set(eligible)
+        picked = [uid for uid in dict.fromkeys(picked) if uid in allowed]
     if not picked:
-        return errors(people="Pick at least one person, or tick select all.")
+        return errors(**{block: "Pick at least one person, or choose “Select all people”."})
     u = usage(org)
     if len(picked) > u["free"]:
-        return errors(people=f"Only {u['free']} seat{'s' if u['free'] != 1 else ''} left on your {u['label']} plan "
-                             f"({u['used']} of {u['limit']} used).")
+        return errors(**{block: f"{len(picked)} selected, but only {u['free']} seat{'s' if u['free'] != 1 else ''} "
+                                f"left on your {u['label']} plan ({u['used']} of {u['limit']} used). "
+                                "Remove some people or upgrade."})
     token = slack_client.bot_token(org)
 
     def add_all():
