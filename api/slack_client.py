@@ -137,11 +137,12 @@ def _find_channel_by_name(token: str, name: str) -> str:
         data = slack_api(
             "conversations.list",
             token,
-            params={"exclude_archived": "true", "types": "public_channel", "limit": 200, "cursor": cursor},
+            params={"exclude_archived": "true", "types": "public_channel,private_channel", "limit": 200,
+                    "cursor": cursor},
         )
         for ch in data.get("channels") or []:
             if ch.get("name") == name:
-                return ch.get("id", "")
+                return ch.get("id", "")  # private ones are only listed when the bot is already in them
         cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
         if not cursor:
             break
@@ -154,11 +155,13 @@ def _channel_names() -> list[str]:
 
 
 def _create_or_join_channel(token: str) -> str:
-    """Create #aidl. If the name is taken by a public channel, join that one;
-    if it's taken by something the bot can't use (a private channel), fall
+    """Create #aidl (private, settings.SLACK_CHANNEL_PRIVATE). If the name is
+    taken by a channel the bot is in or can join, use that one; if it's taken
+    by something the bot can't use (someone else's private channel), fall
     back to #aidl-app, #aidl-2, ..."""
     for name in _channel_names():
-        created = slack_api("conversations.create", token, json={"name": name, "is_private": False})
+        created = slack_api("conversations.create", token,
+                            json={"name": name, "is_private": settings.SLACK_CHANNEL_PRIVATE})
         if created.get("ok"):
             return created["channel"]["id"]
         if created.get("error") != "name_taken":
@@ -167,8 +170,8 @@ def _create_or_join_channel(token: str) -> str:
         existing = _find_channel_by_name(token, name)
         if existing:
             joined = slack_api("conversations.join", token, json={"channel": existing})
-            if joined.get("ok"):
-                return existing
+            if joined.get("ok") or joined.get("error") == "method_not_supported_for_channel_type":
+                return existing  # private channel the bot is already in
         logger.warning("slack channel #%s is taken and not joinable; trying the next name", name)
     return ""
 

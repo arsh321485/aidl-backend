@@ -922,6 +922,8 @@ class SlackWorkspaceSetupTests(TestCase):
         self.assertIn("landed_on=channel", resp["Location"])
         methods = [m for m, _ in calls]
         self.assertIn("conversations.create", methods)
+        created = next(body for m, body in calls if m == "conversations.create")
+        self.assertTrue(created["is_private"])                     # #aidl is a private channel
         self.assertIn(("conversations.invite", {"channel": "C42", "users": "U1"}), calls)
 
         post = next(body for m, body in calls if m == "chat.postMessage")
