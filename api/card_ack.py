@@ -494,7 +494,7 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
     b = []
     if waiting and m["status"] != "todo":
         b.append({"type": "section", "text": _md(f"⏳ *{waiting} card{'s' if waiting != 1 else ''} still "
-                                                 f"need{'s' if waiting == 1 else ''} your ✅ Got it*"),
+                                                 f"need{'s' if waiting == 1 else ''} your acknowledgement*"),
                   "accessory": _btn("Show them", "mc_waiting", "todo", "primary")})
     b += [
         {"type": "input", "block_id": "mc_q", "dispatch_action": True, "optional": True,
