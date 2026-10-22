@@ -89,26 +89,40 @@ def _local_line(org: Organization, card: dict) -> str:
     return f"🔗 Ask your AIDL admin for {org.name}'s link or contact for this."
 
 
-def card_blocks(org: Organization, card: dict, position: int, total: int) -> list:
-    """The awareness card as an image (card_image.py — what the admin
-    approved), plus the company-specific line and Request an app."""
+def card_blocks(org: Organization, card: dict, position: int, total: int, acked_at=None) -> list:
+    """The awareness card (design E:\slack-cards.html): title + hook, the
+    card image (card_image.py — what the admin approved), the company line,
+    then ✅ Got it · 📚 My cards · 🛣 Request an app. Once acknowledged the
+    same message shows "✅ Acknowledged · <date>" instead of Got it."""
     from . import card_image
 
-    kind = f"pkg-{card['no']}"
+    kind, no = f"pkg-{card['no']}", card["no"]
     blocks = [
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
             f"📘 *Card {position} of {total}*  ·  {card['category']}  ·  {card['type']}"}]},
-        {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": card_image.alt_text(kind)},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*{card['title']}* · {card['hook']}"}},
+        {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": f"{card['title']}. {card['hook']}"[:1990]},
     ]
     if card.get("local_link"):
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": _local_line(org, card)}})
-    blocks += [
-        {"type": "actions", "block_id": "aidl_card_footer", "elements": [
-            {"type": "button", "text": {"type": "plain_text", "text": "🛣 Request an app", "emoji": True},
-             "action_id": "aidl_app_request_open", "value": "card"}]},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text":
-            f"AIDL · {org.name} · {plan_of(org)['label']} plan"}]},
-    ]
+
+    def btn(text, action_id, value, style=""):
+        b = {"type": "button", "text": {"type": "plain_text", "text": text, "emoji": True}, "action_id": action_id,
+             "value": value}
+        if style:
+            b["style"] = style
+        return b
+
+    more = [btn("📚 My cards", "aidl_my_cards", no), btn("🛣 Request an app", "aidl_app_request_open", f"card|{no}")]
+    if acked_at:
+        blocks += [{"type": "context", "elements": [{"type": "mrkdwn", "text":
+                    f"✅ *Acknowledged* · {acked_at.day} {acked_at.strftime('%b')}"}]},
+                   {"type": "actions", "block_id": "aidl_card_footer", "elements": more}]
+    else:
+        blocks.append({"type": "actions", "block_id": "aidl_card_footer",
+                       "elements": [btn("✅ Got it", "aidl_card_ack", no, "primary"), *more]})
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text":
+        f"AIDL · {org.name} · {plan_of(org)['label']} plan"}]})
     return blocks
 
 
@@ -189,7 +203,7 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
             "channel": channel, "text": f"AIDL card: {card['title']}", "blocks": card_blocks(org, card, position, total)})
         PackageDelivery.objects.create(**common, card_no=card["no"], post_order=position, post_at=now,
                                        status=PackageDelivery.Status.SENT if res.get("ok") else PackageDelivery.Status.FAILED,
-                                       error=res.get("error", "") or "")
+                                       error=res.get("error", "") or "", message_ts=res.get("ts", "") or "")
         result["sent_now"] = 1
 
     # Postponed cards follow the learner's last scheduled card.

@@ -35,7 +35,7 @@ from .licence_image import _circle_mask, _contain, brand_logo
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "3"
+DESIGN_VERSION = "4"
 
 
 def valid_kind(kind: str) -> bool:
@@ -313,7 +313,7 @@ def _awareness(img, d, org, no: str) -> float:
     card = card_by_no(no) or {}
     y = _header(img, d, org, "Awareness card", _book_icon)
     width = W - PAD - COL
-    y = _tag(d, COL, y + 2, f"{card.get('category', '')} · {card.get('type', '')}".upper()[:70])
+    y = _tag(d, COL, y + 2, f"{card.get('category', '')} · {card.get('type', '')}".upper()[:70], fill="#F1F1F1", color="#616061")
     y = _rich(d, COL, y, width, f"**{_plain(card.get('title', ''))}**", size=22, line=30) + 4
     y = _rich(d, COL, y, width, f"**{_plain(card.get('hook', ''))}**", size=17, line=25) + 6
     y = _rich(d, COL, y, width, _plain(card.get("message", "")), size=16, line=24) + 12

@@ -437,6 +437,7 @@ class AppRequest(models.Model):
     decided_by_name = models.CharField(max_length=255, blank=True, default="")
     decided_at = models.DateTimeField(null=True, blank=True)
     reason = models.TextField(blank=True, default="")
+    from_card = models.CharField(max_length=255, blank=True, default="")  # title of the card it was asked from
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -488,6 +489,13 @@ class PackageDelivery(models.Model):
     slack_channel_id = models.CharField(max_length=32, blank=True, default="")
     scheduled_message_id = models.CharField(max_length=64, blank=True, default="")
     error = models.CharField(max_length=255, blank=True, default="")
+    # ✅ Got it (card_ack.py): the posted message (to edit it in place), when
+    # the learner acknowledged it, and the one reminder in its thread.
+    message_ts = models.CharField(max_length=32, blank=True, default="")
+    acked_at = models.DateTimeField(null=True, blank=True)
+    reminded_at = models.DateTimeField(null=True, blank=True)
+    reminder_ts = models.CharField(max_length=32, blank=True, default="")
+    reminded_by = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -3401,3 +3401,173 @@ class AppRequestTests(TestCase):
                           "actions": [{"action_id": "aidl_appreq_approve", "value": str(req.pk)}]})
         req.refresh_from_db()
         self.assertEqual(req.status, "pending")
+
+
+class CardAckTests(TestCase):
+    """✅ Got it · 📚 My cards · reminders · acknowledgement numbers for admins
+    (design E:\\slack-cards.html)."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+
+    def setUp(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import PackageDelivery
+        from .plans import package_cards
+        from .slack_client import encrypt_token
+
+        self.org = make_org(name="Secureitlab", slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), plan="basic", seats_purchased=50)
+        self.master = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Master")
+        self.member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5",
+                                full_name="Jordan Ellis", licence_issued=True, licence_number="AIDL-L-1-2")
+        _answer_policy(self.org)
+        _approve_all(self.org)
+        self.calls = []
+        now = timezone.now()
+        self.cards = package_cards(self.org)[:12]
+        self.rows = []
+        for i, c in enumerate(self.cards):  # 12 cards sent, every 3 days, oldest first
+            self.rows.append(PackageDelivery.objects.create(
+                organization_id=str(self.org.pk), user_id=str(self.member.pk), package="basic", card_no=c["no"],
+                post_order=i + 1, post_at=now - timedelta(days=3 * (12 - i)), status="sent", slack_channel_id="D7",
+                message_ts=f"{100 + i}.1"))
+
+    def _post(self, user, payload):
+        from urllib.parse import urlencode
+
+        payload = {"team": {"id": "T9"}, "user": {"id": user, "team_id": "T9"}, "trigger_id": "TR", **payload}
+        with patch("api.slack_client.slack_api", side_effect=self._fake), \
+                patch("api.card_ack.slack_client.slack_api", side_effect=self._fake):
+            return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                                "application/x-www-form-urlencoded")
+
+    def test_card_has_got_it_my_cards_and_request(self):
+        from .package_delivery import card_blocks
+
+        text = json.dumps(card_blocks(self.org, self.cards[0], 1, 104))
+        for part in ("aidl_card_ack", "aidl_my_cards", "aidl_app_request_open", f"card|{self.cards[0]['no']}",
+                     self.cards[0]["hook"]):
+            self.assertIn(part, text)
+
+    def test_got_it_updates_the_same_message_and_counts(self):
+        row = self.rows[-1]
+        self._post("U5", {"type": "block_actions", "container": {"channel_id": "D7", "message_ts": row.message_ts},
+                          "actions": [{"action_id": "aidl_card_ack", "block_id": "aidl_card_footer",
+                                       "value": row.card_no}]})
+        row.refresh_from_db()
+        self.assertIsNotNone(row.acked_at)
+        upd = next(b for m, b in self.calls if m == "chat.update" and b.get("ts") == row.message_ts)
+        self.assertIn("Acknowledged", json.dumps(upd))
+        self.assertNotIn("aidl_card_ack", json.dumps(upd))                       # Got it is gone
+        counter = [b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U1"]
+        self.assertIn("Today: 1 acknowledged", json.dumps(counter))              # master's live message
+
+    def test_my_cards_search_filters_views_and_paging(self):
+        from . import card_ack
+
+        view = card_ack.my_cards_view(self.org, self.member)
+        text = json.dumps(view, ensure_ascii=False)
+        for part in ("Search your 12 cards", "mc_status", "mc_topic", "mc_month", "mc_latest", "1 of 12",
+                     "12 cards still need"):
+            self.assertIn(part, text)
+        m = json.loads(view["private_metadata"])
+        m = card_ack.my_cards_action(m, {"action_id": "mc_view", "value": "list"})
+        listed = json.dumps(card_ack.my_cards_view(self.org, self.member, m), ensure_ascii=False)
+        self.assertIn("Older →", listed)                                         # 10 a page
+        m = card_ack.my_cards_action(m, {"action_id": "mc_latest", "selected_option": {"value": "2"}})
+        self.assertIn("Showing *2* of 12", json.dumps(card_ack.my_cards_view(self.org, self.member, m)))
+        word = self.cards[3]["title"].split()[0].lower()
+        m = card_ack.my_cards_action(card_ack._blank_state(), {"action_id": "mc_search", "value": word})
+        found = card_ack._filtered(card_ack.received(self.member), m)
+        self.assertTrue(any(r.card_no == self.cards[3]["no"] for r in found))
+        opened = card_ack.my_cards_view(self.org, self.member, open_no=self.cards[0]["no"])
+        self.assertIn(f"/api/cards/pkg-{self.cards[0]['no']}/", json.dumps(opened))   # opens on that card
+
+    def test_got_it_inside_my_cards_refreshes_popup(self):
+        from . import card_ack
+
+        view = card_ack.my_cards_view(self.org, self.member)
+        row = self.rows[-1]
+        self._post("U5", {"type": "block_actions", "view": {**view, "id": "V1"},
+                          "actions": [{"action_id": "aidl_card_ack", "block_id": "mc_nav", "value": row.card_no}]})
+        row.refresh_from_db()
+        self.assertIsNotNone(row.acked_at)
+        self.assertTrue(any(m == "views.update" and b.get("view_id") == "V1" for m, b in self.calls))
+        self.assertTrue(any(m == "chat.update" and b.get("ts") == row.message_ts for m, b in self.calls))
+
+    def test_one_reminder_after_7_days_then_overdue_and_admin_remind(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import card_ack
+
+        with patch("api.card_ack.slack_client.slack_api", side_effect=self._fake):
+            sent = card_ack.send_reminders(self.org)
+            self.assertEqual(card_ack.send_reminders(self.org), 0)               # only once per card
+        self.assertEqual(sent, 10)                                               # cards older than 7 days
+        replies = [b for m, b in self.calls if m == "chat.postMessage" and b.get("thread_ts")]
+        self.assertEqual(len(replies), 10)                                       # thread replies under the cards
+        self.assertIn("only reminder", json.dumps(replies[0]))
+        later = timezone.now() + timedelta(days=4)
+        stats = card_ack.admin_stats(self.org, now=later)
+        self.assertEqual([p["name"] for p in stats["overdue"]], ["Jordan Ellis"])  # one row per person
+        self.calls.clear()
+        with patch("api.card_ack.slack_client.slack_api", side_effect=self._fake), \
+                patch("api.card_ack.timezone.now", return_value=later):
+            self.assertTrue(card_ack.remind_person(self.org, self.master, str(self.member.pk)))
+        self.assertIn("Priya Master", json.dumps(self.calls))                    # "asked you to take a look"
+
+    def test_admin_center_team_progress_and_review_show_acknowledgements(self):
+        from django.utils import timezone
+
+        from .card_review_slack import review_view
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+        from .admin_setup import update
+
+        for r in self.rows[:6]:
+            r.acked_at = timezone.now()
+            r.save()
+        update(self.org, flow_started="2026-10-01")
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.master), "home"), ensure_ascii=False)
+        for part in ("Cards acknowledged this month", "Last week", "Today: 6 acknowledged", "Most acknowledged",
+                     "aidl_ack_alerts"):
+            self.assertIn(part, home)
+        team = json.dumps(__import__("api.slack_modals", fromlist=["x"]).team_progress_view(self.org), ensure_ascii=False)
+        self.assertIn("6 of 12", team)
+        self.assertIn("Awareness cards acknowledged", team)
+        review = json.dumps(review_view(self.org, 1), ensure_ascii=False)
+        self.assertIn("How topics are landing", review)
+        self.assertIn("% acknowledged", review)
+
+    def test_alerts_settings_saved_per_admin(self):
+        from . import card_ack
+
+        helper = make_user(self.org, microsoft_id="slack:T9:U2", full_name="Mo Helper")
+        self.assertEqual(card_ack.prefs_for(self.org, self.master), {"live": "counter", "late": "alert"})
+        self.assertEqual(card_ack.prefs_for(self.org, helper)["live"], "none")
+        values = {"live": {"v": {"selected_option": {"value": "every"}}},
+                  "late": {"v": {"selected_option": {"value": "weekly"}}}}
+        self.assertIn("notice", card_ack.save_alerts(self.org, helper, {"state": {"values": values}}))
+        self.assertEqual(card_ack.prefs_for(self.org, helper), {"live": "every", "late": "weekly"})
+
+    def test_request_from_a_card_names_the_card(self):
+        from .models import AppRequest
+
+        no = self.cards[2]["no"]
+        self._post("U5", {"type": "block_actions", "actions": [{"action_id": "aidl_app_request_open",
+                                                                "value": f"card|{no}"}]})
+        opened = next(b for m, b in self.calls if m in ("views.open", "views.update"))
+        self.assertIn("Asked from card", json.dumps(opened))
+        values = {"name": {"v": {"value": "Perplexity"}}, "purpose": {"v": {"value": "Research"}},
+                  "data": {"v": {"selected_option": {"value": "green"}}}}
+        self._post("U5", {"type": "view_submission", "view": {
+            "callback_id": "aidl_app_request", "private_metadata": opened["view"]["private_metadata"],
+            "state": {"values": values}}})
+        self.assertEqual(AppRequest.objects.get().from_card, self.cards[2]["title"])

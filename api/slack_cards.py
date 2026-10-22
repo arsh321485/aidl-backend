@@ -454,6 +454,9 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
         team = team_progress(org)
         data["team"] = {k: v for k, v in team.items() if k != "rows"}
         data["setup"] = summary(org)
+        from .card_ack import admin_stats
+
+        data["acks"] = admin_stats(org)
     # What this admin may do in each setup step (the owner may do everything).
     owner = data.get("is_primary", True) or user is None
     data["can_policy"] = owner or bool(user and (user.perm_policy or user.perm_approve_apps))

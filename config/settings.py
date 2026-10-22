@@ -58,7 +58,7 @@ SLACK_SCOPES = os.getenv("SLACK_SCOPES", "openid,email,profile")
 SLACK_BOT_SCOPES = os.getenv(
     "SLACK_BOT_SCOPES",
     "channels:manage,channels:join,channels:read,groups:read,groups:write,chat:write,users:read,users:read.email,"
-    "im:write,files:write,files:read",
+    "im:write,im:history,files:write,files:read",
 )
 # #aidl is private: only people AIDL (or a member) invites can join.
 # groups:read / groups:write let the bot see, invite to and remove from it.

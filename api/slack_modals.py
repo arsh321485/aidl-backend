@@ -474,6 +474,13 @@ def _bar(done: int, total: int) -> str:
     return f"`{'▰' * filled}{'▱' * (10 - filled)}`  *{done}/{total}* · {pct}%"
 
 
+def _ack_line(stat) -> str:
+    if not stat or not stat[1]:
+        return ""
+    a, r, late = stat
+    return f"\n📘 *{a} of {r}* cards acknowledged  ·  " + (f"⏰ *{late} overdue*" if late else "✅ caught up")
+
+
 def team_progress_view(org: Organization, notice: str = "") -> dict:
     """Admin progress view: every team member's journey to the Learner
     licence, grouped by where they are (admins aren't part of the team)."""
@@ -495,6 +502,15 @@ def team_progress_view(org: Organization, notice: str = "") -> dict:
             f"🚦  *Traffic Light accepted*\n{_bar(t['traffic_light'], n)}\n\n"
             f"📄  *AUP — all 14 points accepted*{'' if t['aup_version'] else ' (not created)'}\n{_bar(t['aup'], n)}")},
     ]
+    from .card_ack import member_stats
+
+    acks = member_stats(org)
+    a_all, r_all = sum(v[0] for v in acks.values()), sum(v[1] for v in acks.values())
+    if r_all:
+        pct = round(a_all / r_all * 100)
+        blocks.append({"type": "section", "text": _md(f"📘  *Awareness cards acknowledged*\n"
+                                                      f"{'▰' * round(pct / 10)}{'▱' * (10 - round(pct / 10))}  "
+                                                      f"*{a_all}/{r_all}* · {pct}%")})
     if t["legacy"]:
         blocks.append({"type": "context", "elements": [_md(
             f"{t['legacy']} license(s) came from the old *Add User* flow, before the acknowledgement rule.")]})
@@ -520,7 +536,7 @@ def team_progress_view(org: Organization, notice: str = "") -> dict:
             blocks.append({"type": "section", "fields": [
                 _md(who),
                 _md(f"📄 AUP  {'✅' if r['aup_at'] else '⬜'} {r['aup_points']}/14 points\n📖 Highway Code  {step(r['highway_code_at'])}\n"
-                    f"🚦 Traffic Light  {step(r['traffic_light_at'])}"),
+                    f"🚦 Traffic Light  {step(r['traffic_light_at'])}" + _ack_line(acks.get(str(m.pk)))),
             ], "accessory": {
                 "type": "button", "text": _text("Remove"), "action_id": "aidl_member_remove", "value": str(m.pk),
                 "confirm": _confirm("Remove from AIDL?", f"*{r['name']}* will be taken out of the AIDL channel and "

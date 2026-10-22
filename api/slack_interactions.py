@@ -23,8 +23,8 @@ from django.views.decorators.http import require_POST
 
 from .auth_jwt import create_access_token
 from .models import AIDLUser
-from . import (admin_setup, app_requests, aup_slack, aup_store, card_approval, card_review_slack, employee_flow,
-               slack_client, slack_modals)
+from . import (admin_setup, app_requests, aup_slack, aup_store, card_ack, card_approval, card_review_slack,
+               employee_flow, slack_client, slack_modals)
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
 from .slack_cards import build_admin_cards_context, light_admin_context
@@ -102,7 +102,7 @@ _POPUP_TITLES = {
     "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_admin_edit": "Edit permissions", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
-    "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview",
+    "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview", "aidl_ack_alerts": "Acknowledgement alerts",
     "aidl_appreq_reject": "Reject app", "aidl_appreq_info": "Ask for more info",
 }
 
@@ -170,12 +170,19 @@ _SUBMIT_TAB = {
     "aidl_admin_perms": "add-admin",
     app_requests.REJECT: "ai-apps",
     app_requests.INFO: "ai-apps",
+    "aidl_ack_alerts": "home",
 }
 
 
 def _handle_submission(payload: dict):
     view = payload.get("view") or {}
     callback = view.get("callback_id", "")
+    if callback == "aidl_my_cards":  # "Search" in My cards
+        member = _admin_for(payload)
+        org = get_organization_for_user(member) if member else None
+        if member is None or org is None:
+            return JsonResponse({"response_action": "clear"})
+        return JsonResponse(card_ack.search_submit(org, member, view))
     if callback == app_requests.CALLBACK:  # an employee's app request — any AIDL account
         member = _admin_for(payload)
         org = get_organization_for_user(member) if member else None
@@ -215,6 +222,7 @@ def _handle_submission(payload: dict):
         "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
         "aidl_logo": lambda: slack_modals.submit_logo(org, view),
         "aidl_admin_perms": lambda: slack_modals.submit_edit_admin(admin, org, view),
+        "aidl_ack_alerts": lambda: card_ack.save_alerts(org, admin, view),
         app_requests.REJECT: lambda: app_requests.submit_reason(admin, org, view),
         app_requests.INFO: lambda: app_requests.submit_reason(admin, org, view),
     }
@@ -532,11 +540,24 @@ def slack_interactions(request):
             slack_modals.in_background(_acknowledge, org, member, payload, action.get("value", ""))
         return HttpResponse(status=200)
 
-    # "🛣 Request an app" on an employee's licence or awareness card.
+    # "🛣 Request an app" on an employee's licence or awareness card (or in
+    # My cards, where it opens on top so Cancel goes back to the card).
     if action_id == "aidl_app_request_open":
         org = _org_for_team(payload)
         if org is not None:
-            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), app_requests.request_view())
+            value = action.get("value", "")
+            title = card_ack.card_title(value[5:]) if value.startswith("card|") else ""
+            slack_modals.in_background(_open_modal, org, payload.get("trigger_id", ""), app_requests.request_view(title),
+                                       push=bool((payload.get("view") or {}).get("id")))
+        return HttpResponse(status=200)
+
+    # ✅ Got it and 📚 My cards (card_ack.py) — on the cards, the reminder and inside My cards.
+    if action_id in ("aidl_card_ack", "aidl_my_cards") or (
+            (payload.get("view") or {}).get("callback_id") == "aidl_my_cards" and action_id.startswith("mc_")):
+        org = _org_for_team(payload)
+        member = _admin_for(payload)
+        if org is not None and member is not None:
+            slack_modals.in_background(_card_action, org, member, payload, action, action_id)
         return HttpResponse(status=200)
 
     # The employee card flow (employee_flow.py): Let's go / I agree / Got it.
@@ -673,6 +694,33 @@ def _card_review_action(org, user, payload: dict, action: dict, action_id: str) 
         employee_flow.post_waiting_cards(org, onboarding_item)
     if summary:
         card_approval.after_change(org, user, summary)
+
+
+def _card_action(org, member, payload: dict, action: dict, action_id: str) -> None:
+    import json as _json
+
+    view = payload.get("view") or {}
+    token = slack_client.bot_token(org)
+    if action_id == "aidl_my_cards":
+        trigger = payload.get("trigger_id", "")
+        _preopen(org, trigger, "My cards", push=bool(view.get("id")))
+        value = action.get("value", "")
+        _open_modal(org, trigger, card_ack.my_cards_view(org, member, open_no=value if value != "0" else ""),
+                    push=bool(view.get("id")))
+        return
+    if action_id == "aidl_card_ack":
+        container = payload.get("container") or {}
+        in_modal = view.get("callback_id") == "aidl_my_cards"
+        channel = "" if in_modal else container.get("channel_id") or (payload.get("channel") or {}).get("id", "")
+        ts = "" if in_modal else container.get("message_ts") or (payload.get("message") or {}).get("ts", "")
+        card_ack.acknowledge(org, member, action.get("value", ""), channel, ts,
+                             from_reminder=action.get("block_id") == "aidl_nudge")
+        if not in_modal:
+            return
+    m = _json.loads(view.get("private_metadata") or "{}")
+    m = card_ack.my_cards_action({**card_ack._blank_state(), **m}, action) if action_id.startswith("mc_") else m
+    slack_client.slack_api("views.update", token, json={
+        "view_id": view.get("id", ""), "view": card_ack.my_cards_view(org, member, m)})
 
 
 class _BaseUrl:
@@ -824,6 +872,17 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
             _reply(response_url, text="Approving cards needs the *Approve cards* permission — ask your master admin.")
             return HttpResponse(status=200)
         _card_review_action(org, user, payload, action, action_id)
+        return HttpResponse(status=200)
+
+    if org is not None and action_id == "aidl_ack_alerts":
+        meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
+        _open_modal(org, payload.get("trigger_id", ""), card_ack.alerts_view(org, user, meta))
+        return HttpResponse(status=200)
+
+    if org is not None and action_id == "aidl_ack_remind":
+        done = card_ack.remind_person(org, user, action.get("value", ""))
+        _reply(response_url, text="⏰ Reminder sent." if done else "They've caught up — nothing to remind.")
+        publish_admin_center(org, user)
         return HttpResponse(status=200)
 
     if org is not None and action_id.startswith("aidl_appreq_"):
