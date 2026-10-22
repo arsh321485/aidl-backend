@@ -57,8 +57,12 @@ SLACK_SCOPES = os.getenv("SLACK_SCOPES", "openid,email,profile")
 # create/reuse #aidl, invite admins, post the Admin cards.
 SLACK_BOT_SCOPES = os.getenv(
     "SLACK_BOT_SCOPES",
-    "channels:manage,channels:join,channels:read,chat:write,users:read,users:read.email,im:write,files:write,files:read",
+    "channels:manage,channels:join,channels:read,groups:read,groups:write,chat:write,users:read,users:read.email,"
+    "im:write,files:write,files:read",
 )
+# #aidl is private: only people AIDL (or a member) invites can join.
+# groups:read / groups:write let the bot see, invite to and remove from it.
+SLACK_CHANNEL_PRIVATE = os.getenv("SLACK_CHANNEL_PRIVATE", "True").lower() == "true"
 # Slack channel names must be lowercase with no spaces ("AIDL Driving License"
 # → "aidl-driving-license").
 SLACK_CHANNEL_NAME = "-".join(os.getenv("SLACK_CHANNEL_NAME", "aidl").strip().lower().split())
