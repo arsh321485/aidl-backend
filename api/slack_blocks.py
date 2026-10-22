@@ -164,6 +164,12 @@ def _step_approve(d: dict, st: dict) -> list:
     else:
         head = "✅  *4 · Card approval*  ·  onboarding cards approved"
     blocks = [_section(f"{head}\n{onboarding}\n{awareness}")]
+    acks = d.get("acks") or {}
+    if acks.get("best"):  # how the cards land (card_ack.admin_stats)
+        line = f"🏆 Most acknowledged: *{acks['best'][0]}* {acks['best'][1]}%"
+        if acks.get("worst"):
+            line += f"  ·  🔻 Least: *{acks['worst'][0]}* {acks['worst'][1]}%"
+        blocks.append(_context(line))
     if st["approved_ready"] and a["waiting"] and st["cards_done"]:
         blocks.append(_context(f"⚠️ {a['waiting']} awareness card{'s are' if a['waiting'] != 1 else ' is'} waiting — "
                                "postponed until approved."))
@@ -220,13 +226,32 @@ def _step_licences(d: dict, st: dict) -> list:
     waiting = f"  ·  ⏳ {t['waiting_seat']} waiting for a seat" if t.get("waiting_seat") else ""
     package = (f"📘 {p['package_label']}: {p['cards']} awareness cards, {p['cadence']} — approved cards are "
                "sent automatically after each licence") if p else ""
-    return [
-        _section(f"*6 · Licences & awareness cards*\n🪪 *{t.get('licensed', 0)}* of {t.get('members', 0)} licensed"
-                 f"{waiting}\n{package}"),
-        _actions("aidl_step_licences",
-                 _button("View team progress", "aidl_team_progress", value="team", style="primary"),
-                 _button("⬇ Export coverage", "aidl_open_home", value="home")),
-    ]
+    blocks = [_section(f"*6 · Licences & awareness cards*\n🪪 *{t.get('licensed', 0)}* of {t.get('members', 0)} licensed"
+                       f"{waiting}\n{package}")]
+    a = d.get("acks")
+    if a and a["sent"]:
+        from .card_ack import _bar, _pct, _short, today_line
+
+        blocks += [
+            _section(f"📘 *Cards acknowledged this month: {_pct(a['month_acked'], a['month_sent'])}%* "
+                     f"({a['month_acked']} of {a['month_sent']})\n{_bar(a['month_acked'], a['month_sent'])}"),
+            _context(f"📊 *Last week · {_short(a['week_start'])}–{_short(a['week_start'] + __import__('datetime').timedelta(days=6))}:* "
+                     f"{a['week_sent']} cards sent  ·  {a['week_acked']} of {a['week_sent']} acknowledged "
+                     f"({_pct(a['week_acked'], a['week_sent'])}%)"),
+            _context(today_line(a)),
+        ]
+        if a["overdue"]:
+            blocks.append(_context("⏰ *Overdue · reminded 3+ days ago, still not acknowledged*"))
+            for p in a["overdue"][:8]:
+                reminded = "\n✅ _Reminded by an admin_" if p["reminded_by_admin"] else ""
+                blocks.append(_section(f"*{p['name']}* · {p['title']} (sent {_short(p['sent'])}){reminded}",
+                                       accessory=None if reminded else _button("⏰ Remind", "aidl_ack_remind",
+                                                                               value=p["user_id"])))
+    blocks.append(_actions("aidl_step_licences",
+                           _button("View team progress", "aidl_team_progress", value="team", style="primary"),
+                           _button("⬇ Export coverage", "aidl_open_home", value="home"),
+                           _button("🔔 Acknowledgement alerts", "aidl_ack_alerts", value="alerts")))
+    return blocks
 
 
 def _home(d: dict) -> list:

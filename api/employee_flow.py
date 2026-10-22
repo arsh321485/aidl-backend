@@ -284,8 +284,9 @@ def licence(member: AIDLUser, org: Organization) -> dict:
                  _button(":art: Change avatar", "aidl_link_avatar", "change", url=avatar.start_url(member)),
                  _button(":link: Share on LinkedIn", "aidl_link_share", "linkedin",
                          url="https://www.linkedin.com/sharing/share-offsite/?url=" + quote(verify, safe=""))),
-        _section("Want to use an AI tool that isn't approved yet? Ask your admin.",
-                 accessory=_button("🛣 Request an app", "aidl_app_request_open", "licence")),
+        _actions("aidl_licence_more",
+                 _button(":books: My cards", "aidl_my_cards", "0"),
+                 _button(":motorway: Request an app", "aidl_app_request_open", "licence")),
     ])
 
 

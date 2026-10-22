@@ -46,11 +46,13 @@ def _slack_id(user: AIDLUser) -> str:
 
 # ---------- employee ----------
 
-def request_view() -> dict:
+def request_view(from_card: str = "") -> dict:
+    """`from_card` = the title of the card it was opened from (if any)."""
     return {"type": "modal", "callback_id": CALLBACK, "title": _t("Request an app"), "submit": _t("Send request"),
-            "close": _t("Cancel"), "blocks": [
+            "close": _t("Cancel"), "private_metadata": json.dumps({"from_card": from_card}), "blocks": [
         {"type": "section", "text": _md("Ask your AIDL admin to approve an AI tool or app. You'll get the answer here "
                                         "in Slack.")},
+        *([{"type": "context", "elements": [_md(f"📘 Asked from card: *{from_card}*")]}] if from_card else []),
         _input("name", "App name", {"type": "plain_text_input", "action_id": "v", "max_length": 100,
                                     "placeholder": _t("e.g. Perplexity")}),
         _input("website", "Website", {"type": "plain_text_input", "action_id": "v", "max_length": 300,
@@ -106,8 +108,9 @@ def submit(member: AIDLUser, org: Organization, view: dict) -> dict:
                                               "that request. You'll hear back here.")
         in_background(refresh_admin_messages, org, req)
         return {"response_action": "clear"}
+    from_card = (json.loads(view.get("private_metadata") or "{}") or {}).get("from_card", "")[:255]
     req = AppRequest.objects.create(organization_id=str(org.pk), name=name, name_key=key, website=v.get("website", ""),
-                                    purpose=v.get("purpose", ""), data_class=v["data"],
+                                    purpose=v.get("purpose", ""), data_class=v["data"], from_card=from_card,
                                     requester_ids=json.dumps([str(member.pk)]))
     in_background(_after_request, org, member, req)
     return {"response_action": "clear"}
@@ -143,6 +146,8 @@ def admin_blocks(req: AppRequest) -> list:
                                         + (f"  ·  {len(people)} people asked" if len(people) > 1 else ""))},
         {"type": "section", "fields": [_md(f"*Use*\n{req.purpose or '—'}"[:1990]), _md(f"*Data*\n{label}")]},
     ]
+    if req.from_card:
+        blocks.append({"type": "context", "elements": [_md(f"📘 Asked from card: *{req.from_card}*")]})
     if req.status == AppRequest.Status.PENDING:
         blocks.append({"type": "actions", "block_id": "aidl_appreq", "elements": [
             {"type": "button", "text": _t("✅ Approve"), "style": "primary", "action_id": "aidl_appreq_approve",

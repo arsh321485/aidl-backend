@@ -76,6 +76,14 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
                                         f"✅ {n['approved']} approved  ·  ⏳ {n['waiting']} waiting  ·  "
                                         f"⏭ {n['skipped']} skipped")},
     ]
+    from .card_ack import admin_stats
+
+    acks = admin_stats(org)
+    if acks["sent"] and (acks["topics_top"] or acks["topics_low"]):
+        top = " · ".join(f"{c} {p}%" for c, p in acks["topics_top"])
+        low = " · ".join(f"{c} {p}%" for c, p in acks["topics_low"] if (c, p) not in acks["topics_top"])
+        blocks.append({"type": "section", "text": _md(f"📘 *How topics are landing* · {acks['sent']} cards sent so far\n"
+                                                      f"🏆 {top}" + (f"\n🔻 {low}" if low else ""))})
     if n["waiting"]:
         blocks.append({"type": "actions", "block_id": "crv_all", "elements": [
             {**_btn(f"✅ Approve all {n['waiting']} waiting", "aidl_crv_approve_all", month, "primary"),
@@ -110,6 +118,15 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
                        "text": _md(f"{ICON[c['approval']]}  *{c['position']}. {c['title']}*\n"
                                    f"{c['category']} · {c['type']}{swapped}"),
                        "accessory": {"type": "overflow", "action_id": "aidl_crv_card", "options": options}})
+        if acks["sent"]:
+            rate = acks["card_rates"].get(c["no"])
+            if rate is not None:
+                note = f"{rate}% acknowledged" + (" 🔻" if rate <= 50 else "")
+            elif c["no"] in acks["recent"]:
+                note = "sent this week · too early to tell"
+            else:
+                note = "not sent yet"
+            blocks.append({"type": "context", "elements": [_md(f"📘 {note}")]})
 
     blocks += [
         {"type": "divider"},

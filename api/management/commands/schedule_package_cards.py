@@ -8,6 +8,7 @@ be scheduled at once), and remind admins about cards waiting for approval
 
 from django.core.management.base import BaseCommand
 
+from api.card_ack import send_overdue_alerts, send_reminders
 from api.card_approval import remind
 from api.models import Organization
 from api.package_delivery import schedule_due
@@ -21,6 +22,12 @@ class Command(BaseCommand):
             n = schedule_due(org)
             if n:
                 self.stdout.write(f"{org.name}: {n} card(s) scheduled")
+            nudged = send_reminders(org)
+            if nudged:
+                self.stdout.write(f"{org.name}: {nudged} card reminder(s) sent")
+            alerted = send_overdue_alerts(org)
+            if alerted:
+                self.stdout.write(f"{org.name}: {alerted} overdue alert(s) sent")
             told = remind(org)
             if told:
                 self.stdout.write(f"{org.name}: {told} admin(s) reminded about cards waiting for approval")
