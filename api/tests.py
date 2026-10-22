@@ -3473,7 +3473,7 @@ class CardAckTests(TestCase):
         view = card_ack.my_cards_view(self.org, self.member)
         text = json.dumps(view, ensure_ascii=False)
         for part in ("Search your 12 cards", "mc_status", "mc_topic", "mc_month", "mc_latest", "1 of 12",
-                     "12 cards still need"):
+                     "12 cards still need your acknowledgement"):
             self.assertIn(part, text)
         m = json.loads(view["private_metadata"])
         m = card_ack.my_cards_action(m, {"action_id": "mc_view", "value": "list"})
