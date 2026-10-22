@@ -75,6 +75,8 @@ SLACK_REPLY_SYNC = False
 # Draw card / licence images ahead of time so Slack gets them at once
 # (image_cache.py). Off while the test suite runs.
 CARD_IMAGE_PREDRAW = os.getenv("CARD_IMAGE_PREDRAW", "True").lower() == "true" and "test" not in sys.argv[1:2]
+# Remember the master admin for a few seconds (slack_onboarding.primary_admin). Off in tests.
+PRIMARY_ADMIN_CACHE = "test" not in sys.argv[1:2]
 
 # Default = production Render callback (override with localhost in local .env).
 _DEFAULT_MS_REDIRECT_URI = (

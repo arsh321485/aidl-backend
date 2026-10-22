@@ -637,7 +637,7 @@ def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
         "can_billing": owner or user.perm_billing,
         "can_approve_cards": owner or user.perm_approve_cards,
         "can_apps": owner or user.perm_approve_apps,
-        "grantable": admin_perms.grantable(org, user),
+        "grantable": [k for k, f, _l, _d in admin_perms.PERMS if owner or getattr(user, f, False)],
         "can_send": owner or user.perm_access_cards,
         "admin_count": AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN,
                                                is_active=True).count() if org is not None else 0,

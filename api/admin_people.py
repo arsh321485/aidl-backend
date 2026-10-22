@@ -63,6 +63,9 @@ def remove_admin(org: Organization, by: AIDLUser, user_id: str) -> tuple[bool, s
     for field in FIELDS:
         setattr(target, field, False)
     target.save(update_fields=["role", *FIELDS, "updated_at"])
+    from .slack_onboarding import forget_primary_admin
+
+    forget_primary_admin(org)
 
     token = slack_client.bot_token(org)
     slack_id = _slack_id(target)

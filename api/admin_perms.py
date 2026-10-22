@@ -52,7 +52,11 @@ def has(org: Organization | None, user: AIDLUser | None, key: str) -> bool:
 
 def grantable(org: Organization | None, user: AIDLUser | None) -> list[str]:
     """Permissions this admin may give to others: the ones they have."""
-    return [k for k, _f, _l, _d in PERMS if has(org, user, k)]
+    if user is None or user.role != AIDLUser.Role.ADMIN:
+        return []
+    if is_master(org, user):  # looked up once, not once per permission
+        return [k for k, _f, _l, _d in PERMS]
+    return [k for k, f, _l, _d in PERMS if getattr(user, f, False)]
 
 
 def labels(user: AIDLUser) -> list[str]:

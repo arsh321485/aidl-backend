@@ -24,9 +24,39 @@ from .slack_modals import _upsert_member, _warn_if_dm_failed, in_background
 logger = logging.getLogger(__name__)
 
 
+_PRIMARY_CACHE: dict = {}
+_PRIMARY_TTL = 30  # seconds — popups ask for it many times within one click
+
+
+def forget_primary_admin(org: Organization | None = None) -> None:
+    """Call when admins change (added, removed, owner changed)."""
+    if org is None:
+        _PRIMARY_CACHE.clear()
+    else:
+        _PRIMARY_CACHE.pop(str(org.pk), None)
+
+
 def primary_admin(org: Organization) -> AIDLUser | None:
     """The organization's first admin: its recorded owner, else the oldest
-    active admin."""
+    active admin. Kept for a few seconds: Slack gives popups 3 seconds and
+    one click used to look this up 10+ times (≈0.2 s each)."""
+    import time
+
+    from django.conf import settings
+
+    if org is None:
+        return None
+    key = str(org.pk)
+    hit = _PRIMARY_CACHE.get(key)
+    if hit and hit[0] > time.monotonic() and hit[1] == (org.owner_user_id or ""):
+        return hit[2]
+    found = _primary_admin_lookup(org)
+    if getattr(settings, "PRIMARY_ADMIN_CACHE", True):
+        _PRIMARY_CACHE[key] = (time.monotonic() + _PRIMARY_TTL, org.owner_user_id or "", found)
+    return found
+
+
+def _primary_admin_lookup(org: Organization) -> AIDLUser | None:
     admins = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True)
     if org.owner_user_id:
         owner = admins.filter(pk=org.owner_user_id).first()

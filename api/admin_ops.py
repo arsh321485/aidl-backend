@@ -43,6 +43,9 @@ def promote_to_admin(caller: AIDLUser, *, email: str, permissions: dict | None =
     target.organization_id = caller.organization_id
     target.organization_name = caller.organization_name or (org.name if org else "")
     target.role = AIDLUser.Role.ADMIN
+    from .slack_onboarding import forget_primary_admin
+
+    forget_primary_admin()
     update_fields = ["organization_id", "organization_name", "role", "updated_at"]
     if isinstance(permissions, dict):
         for key, field in (
