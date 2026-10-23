@@ -704,9 +704,14 @@ def _card_action(org, member, payload: dict, action: dict, action_id: str) -> No
     if action_id == "aidl_my_cards":
         trigger = payload.get("trigger_id", "")
         _preopen(org, trigger, "My cards", push=bool(view.get("id")))
+        with _PREOPEN_LOCK:
+            loading = _PREOPENED.pop(trigger, "")
         value = action.get("value", "")
-        _open_modal(org, trigger, card_ack.my_cards_view(org, member, open_no=value if value != "0" else ""),
-                    push=bool(view.get("id")))
+        popup = card_ack.my_cards_view(org, member, open_no=value if value != "0" else "")
+        if loading:
+            card_ack.show_view(org, loading, popup)
+        else:
+            _open_modal(org, trigger, popup, push=bool(view.get("id")))
         return
     if action_id == "aidl_card_ack":
         container = payload.get("container") or {}
@@ -719,8 +724,7 @@ def _card_action(org, member, payload: dict, action: dict, action_id: str) -> No
             return
     m = _json.loads(view.get("private_metadata") or "{}")
     m = card_ack.my_cards_action({**card_ack._blank_state(), **m}, action) if action_id.startswith("mc_") else m
-    slack_client.slack_api("views.update", token, json={
-        "view_id": view.get("id", ""), "view": card_ack.my_cards_view(org, member, m)})
+    card_ack.show_view(org, view.get("id", ""), card_ack.my_cards_view(org, member, m))
 
 
 class _BaseUrl:
