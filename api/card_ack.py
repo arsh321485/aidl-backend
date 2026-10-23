@@ -499,7 +499,8 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
     b += [
         {"type": "input", "block_id": "mc_q", "dispatch_action": True, "optional": True,
          "label": _t(f"🔍 Search your {total} cards"),
-         "element": {"type": "plain_text_input", "action_id": "mc_search", "initial_value": m["q"],
+         "element": {"type": "plain_text_input", "action_id": "mc_search",
+                     **({"initial_value": m["q"]} if m["q"] else {}),
                      "placeholder": _t("e.g. password, privacy, then press Enter")}},
         {"type": "actions", "block_id": "mc_filters", "elements": [
             _select("mc_status", "Status", [("all", "All cards"), ("todo", "Not acknowledged"), ("done", "Acknowledged")],
@@ -527,6 +528,9 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
         status = f"✅ Acknowledged {_short(r.acked_at)}" if r.acked_at else "🟡 Not acknowledged"
         b.append({"type": "context", "elements": [_md(f"*{m['idx'] + 1} of {len(lst)}*  ·  Card {r.post_order}  ·  "
                                                       f"received {_short(r.post_at)} {r.post_at.year}  ·  {status}")]})
+        from .image_cache import predraw
+
+        predraw(card_image.png_for, f"pkg-{r.card_no}", org)  # ready before Slack fetches it
         b.append({"type": "image", "image_url": card_image.image_url(f"pkg-{r.card_no}", org),
                   "alt_text": f"{c['title']}. {c['hook']}"[:1990]})
         nav = []
@@ -567,6 +571,35 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
                                                       f"{start + len(page)} of {len(lst)}")]})
     return {"type": "modal", "callback_id": "aidl_my_cards", "title": _t("My cards"), "submit": _t("Search"),
             "close": _t("Close"), "private_metadata": json.dumps(m), "blocks": b[:100]}
+
+
+def without_images(view: dict) -> dict:
+    """The same popup with each card image swapped for its text — used when
+    Slack refuses the popup (e.g. it couldn't fetch an image in time)."""
+    blocks = []
+    for b in view.get("blocks") or []:
+        if b.get("type") == "image":
+            blocks.append({"type": "section", "text": _md(f"*{b.get('alt_text', '')}*")})
+        else:
+            blocks.append(b)
+    return {**view, "blocks": blocks}
+
+
+def show_view(org: Organization, view_id: str, view: dict) -> bool:
+    """views.update; on failure retry without images and remember Slack's
+    error in setup_state["last_view_error"] (to diagnose from outside)."""
+    from .admin_setup import update
+
+    token = slack_client.bot_token(org)
+    res = slack_client.slack_api("views.update", token, json={"view_id": view_id, "view": view})
+    if res.get("ok"):
+        return True
+    err = {"error": res.get("error"), "detail": (res.get("response_metadata") or {}).get("messages"),
+           "at": timezone.now().isoformat()}
+    logger.warning("My cards views.update failed: %s", err)
+    update(org, last_view_error=err)
+    return bool(slack_client.slack_api("views.update", token, json={"view_id": view_id,
+                                                                    "view": without_images(view)}).get("ok"))
 
 
 def my_cards_action(m: dict, action: dict) -> dict:
