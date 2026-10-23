@@ -513,8 +513,8 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
         {"type": "context", "elements": [_md((f"Showing *{len(lst)}* of {total}  ·  " if filtered_on else "")
                                              + f"*{total} cards*  ·  {acked} acknowledged  ·  {waiting} to go")]},
         {"type": "actions", "block_id": "mc_mode", "elements": [
-            _btn("🖼️ Card view", "mc_view", "card", "primary" if m["view"] == "card" else ""),
-            _btn("📋 List view", "mc_view", "list", "primary" if m["view"] == "list" else ""),
+            _btn("🖼️ Card view", "mc_view_card", "card", "primary" if m["view"] == "card" else ""),
+            _btn("📋 List view", "mc_view_list", "list", "primary" if m["view"] == "list" else ""),
             *([_btn("Clear filters", "mc_clear", "clear")] if filtered_on else []),
         ]},
         {"type": "divider"},
@@ -558,13 +558,13 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
             state_txt = f"✅ {_short(r.acked_at)}" if r.acked_at else "🟡 Not acknowledged"
             b.append({"type": "section", "text": _md(f"*{r.post_order}. {c['title']}*\n{c['category']}  ·  "
                                                      f"{_short(r.post_at)}  ·  {state_txt}"),
-                      "accessory": _btn("Open", "mc_open", r.card_no)})
+                      "accessory": _btn("Open", f"mc_open_{r.card_no}", r.card_no)})
         b.append({"type": "divider"})
         nav = []
         if m["page"] > 0:
-            nav.append(_btn("← Newer", "mc_page", m["page"] - 1))
+            nav.append(_btn("← Newer", "mc_page_newer", m["page"] - 1))
         if m["page"] < pages - 1:
-            nav.append(_btn("Older →", "mc_page", m["page"] + 1))
+            nav.append(_btn("Older →", "mc_page_older", m["page"] + 1))
         if nav:
             b.append({"type": "actions", "block_id": "mc_pages", "elements": nav})
         b.append({"type": "context", "elements": [_md(f"Page *{m['page'] + 1} of {pages}*  ·  cards {start + 1}–"
@@ -610,11 +610,11 @@ def my_cards_action(m: dict, action: dict) -> dict:
         m.update(q=value or "", idx=0, page=0)
     elif aid in ("mc_status", "mc_topic", "mc_month", "mc_latest"):
         m.update({aid[3:]: value, "idx": 0, "page": 0})
-    elif aid == "mc_page":
+    elif aid.startswith("mc_page"):
         m["page"] = int(value)
     elif aid == "mc_waiting":
         m.update(status="todo", view="list", idx=0, page=0)
-    elif aid == "mc_view":
+    elif aid.startswith("mc_view"):
         m.update(view=value, idx=0, page=0)
     elif aid == "mc_prev":
         m["idx"] -= 1
@@ -622,7 +622,7 @@ def my_cards_action(m: dict, action: dict) -> dict:
         m["idx"] += 1
     elif aid == "mc_clear":
         m = _blank_state(view=m.get("view", "card"))
-    elif aid == "mc_open":
+    elif aid.startswith("mc_open"):
         m.update(view="card", open=value)
     return m
 

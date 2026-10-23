@@ -3476,7 +3476,7 @@ class CardAckTests(TestCase):
                      "12 cards still need your acknowledgement"):
             self.assertIn(part, text)
         m = json.loads(view["private_metadata"])
-        m = card_ack.my_cards_action(m, {"action_id": "mc_view", "value": "list"})
+        m = card_ack.my_cards_action(m, {"action_id": "mc_view_list", "value": "list"})
         listed = json.dumps(card_ack.my_cards_view(self.org, self.member, m), ensure_ascii=False)
         self.assertIn("Older →", listed)                                         # 10 a page
         m = card_ack.my_cards_action(m, {"action_id": "mc_latest", "selected_option": {"value": "2"}})
@@ -3571,3 +3571,35 @@ class CardAckTests(TestCase):
             "callback_id": "aidl_app_request", "private_metadata": opened["view"]["private_metadata"],
             "state": {"values": values}}})
         self.assertEqual(AppRequest.objects.get().from_card, self.cards[2]["title"])
+
+
+class BlockKitIdsTests(TestCase):
+    """Slack refuses a view or message when two buttons in one block share an
+    action_id (that kept My cards on "Loading…")."""
+
+    def _check(self, blocks):
+        for b in blocks:
+            ids = [e.get("action_id") for e in b.get("elements") or [] if e.get("action_id")]
+            self.assertEqual(len(ids), len(set(ids)), b)
+
+    def test_my_cards_views_have_unique_action_ids(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import card_ack
+        from .models import PackageDelivery
+        from .plans import package_cards
+
+        org = make_org(plan="basic")
+        member = make_user(org, role=AIDLUser.Role.LEARNER, licence_issued=True)
+        for i, c in enumerate(package_cards(org)[:14]):
+            PackageDelivery.objects.create(organization_id=str(org.pk), user_id=str(member.pk), package="basic",
+                                           card_no=c["no"], post_order=i + 1, status="sent",
+                                           post_at=timezone.now() - timedelta(days=30 - i))
+        m = card_ack._blank_state()
+        for view in ("card", "list"):
+            m["view"] = view
+            for page in (0, 1):
+                m["page"] = page
+                self._check(card_ack.my_cards_view(org, member, dict(m))["blocks"])
