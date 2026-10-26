@@ -3488,6 +3488,26 @@ class CardAckTests(TestCase):
         opened = card_ack.my_cards_view(self.org, self.member, open_no=self.cards[0]["no"])
         self.assertIn(f"/api/cards/pkg-{self.cards[0]['no']}/", json.dumps(opened))   # opens on that card
 
+    def test_my_cards_says_when_the_next_card_arrives(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import card_ack
+        from .models import PackageDelivery
+        from .plans import package_cards
+
+        self.cards_all = package_cards(self.org)
+        text = json.dumps(card_ack.my_cards_view(self.org, self.member), ensure_ascii=False)
+        self.assertIn("Your next card is on its way", text)                     # nothing scheduled yet
+        when = timezone.now() + timedelta(days=3)
+        PackageDelivery.objects.create(organization_id=str(self.org.pk), user_id=str(self.member.pk), package="basic",
+                                       card_no=self.cards_all[12]['no'], post_order=13, post_at=when,
+                                       status="scheduled")
+        text = json.dumps(card_ack.my_cards_view(self.org, self.member), ensure_ascii=False)
+        self.assertIn(f"Next card:* <!date^{int(when.timestamp())}^", text)    # shown in the learner's time zone
+        self.assertNotIn(card_ack.card_title(self.cards_all[12]['no']), text.split("Next card")[1][:80])
+
     def test_got_it_inside_my_cards_refreshes_popup(self):
         from . import card_ack
 

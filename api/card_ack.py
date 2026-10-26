@@ -465,16 +465,38 @@ def _month_name(key: str) -> str:
     return f"{MONTHS[int(key[5:]) - 1]} {key[:4]}"
 
 
+def next_card_line(org: Organization, member: AIDLUser, received_count: int) -> str:
+    """When the learner's next card arrives, in their own time zone (Slack's
+    date token). Only the date — admins can still approve, skip or swap
+    which card it is."""
+    if not member.licence_issued or member.slack_left_at:
+        return ""
+    nxt = (PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
+                                          post_at__gt=timezone.now()).order_by("post_at").first())
+    if nxt is not None:
+        when = int(nxt.post_at.timestamp())
+        fallback = f"{nxt.post_at:%a %d %b, %H:%M} UTC"
+        return f"📅 *Next card:* <!date^{when}^{{date_long_pretty}} at {{time}}|{fallback}>"
+    total = _total(org)
+    if received_count >= total:
+        return f"🎉 You've received all {total} cards for this year."
+    return "📅 *Your next card is on its way.*"
+
+
 def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, open_no: str = "") -> dict:
     from . import card_image
 
     m = m or _blank_state()
     rows = received(member)
     total = len(rows)
+    nxt = next_card_line(org, member, total)
     if not rows:
+        blocks = [{"type": "section", "text": _md(
+            "*No cards yet.* Your awareness cards appear here once your licence is issued.")}]
+        if nxt:
+            blocks.append({"type": "context", "elements": [_md(nxt)]})
         return {"type": "modal", "callback_id": "aidl_my_cards", "title": _t("My cards"), "close": _t("Close"),
-                "private_metadata": json.dumps(m), "blocks": [{"type": "section", "text": _md(
-                    "*No cards yet.* Your awareness cards appear here once your licence is issued.")}]}
+                "private_metadata": json.dumps(m), "blocks": blocks}
     lst = _filtered(rows, m)
     open_no = open_no or m.pop("open", "")
     if open_no:
@@ -491,7 +513,7 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
         if cat and cat not in topics:
             topics.append(cat)
     topics.sort()
-    b = []
+    b = [{"type": "context", "elements": [_md(nxt)]}] if nxt else []
     if waiting and m["status"] != "todo":
         b.append({"type": "section", "text": _md(f"⏳ *{waiting} card{'s' if waiting != 1 else ''} still "
                                                  f"need{'s' if waiting == 1 else ''} your acknowledgement*"),
