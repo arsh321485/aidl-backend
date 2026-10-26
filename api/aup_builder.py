@@ -41,6 +41,8 @@ ORG_PLACEMENT = {"0.1": (1, "start"), "0.6": (14, "end"), "0.7": (14, "end"),
 _KEEP_CASE = {"Company", "Microsoft", "Google", "Slack", "Teams", "WhatsApp", "VPN", "USB", "IT", "HR", "MDM"}
 _SPECIFY = re.compile(r"\s*\((?:please\s+)?specify[^)]*\)\s*", re.I)
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Questions in the bank that AIDL doesn't ask (and the policy doesn't use).
+HIDDEN = {"0.8"}  # contact email for questions about the policy
 
 
 class AupAnswersError(ValueError):
@@ -108,7 +110,7 @@ def is_visible(q: dict, answers: dict) -> bool:
 
 def visible_questions(answers: dict, section: int | None = None) -> list[dict]:
     return [q for q in bank()["questions"]
-            if (section is None or q["section"] == section) and is_visible(q, answers)]
+            if (section is None or q["section"] == section) and q["id"] not in HIDDEN and is_visible(q, answers)]
 
 
 # ---------- validation ----------

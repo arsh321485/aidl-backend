@@ -928,7 +928,8 @@ class SlackWorkspaceSetupTests(TestCase):
 
         post = next(body for m, body in calls if m == "chat.postMessage")
         text = json.dumps(post["blocks"], ensure_ascii=False)
-        self.assertIn("🚦 AIDL Admin Center", text)
+        self.assertIn("AIDL Admin Center", text)
+        self.assertNotIn("🚦", text)
         self.assertIn("aidl_policy_open", text)                    # step 1: Create AUP
         self.assertFalse(any(b.get("block_id") == "aidl_tabs" for b in post["blocks"]))
 
@@ -1423,7 +1424,7 @@ class SlackHomeVisualTests(TestCase):
         """Step-by-step Admin Center: no tab bar; finished steps collapse."""
         _answer_policy(self.org)
         blocks = self._blocks()
-        self.assertEqual(blocks[0]["text"]["text"], "🚦 AIDL Admin Center")
+        self.assertEqual(blocks[0]["text"]["text"], "AIDL Admin Center")
         self.assertFalse(any(b.get("block_id") == "aidl_tabs" for b in blocks))
         text = json.dumps(blocks, ensure_ascii=False)
         for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 5 setup steps done",
@@ -2307,8 +2308,9 @@ class AupBuilderTests(SimpleTestCase):
         from . import aup_builder
 
         errors = aup_builder.validate(aup_builder.recommended_answers())
-        for qid in ("0.1", "0.8", "0.9", "6.2", "9.2"):
+        for qid in ("0.1", "0.9", "6.2", "9.2"):
             self.assertIn(qid, errors)
+        self.assertNotIn("0.8", errors)                             # contact email: not asked
         with self.assertRaises(aup_builder.AupAnswersError):
             aup_builder.generate({}, {})
 
@@ -2414,7 +2416,8 @@ class AupQuestionnaireSlackTests(TestCase):
         values = self._values(view)
         resp = self._submit(view, values)                           # email / date / laws still empty
         self.assertEqual(resp["response_action"], "errors")
-        self.assertIn("q|0.8", resp["errors"])
+        self.assertIn("q|0.9", resp["errors"])
+        self.assertNotIn("q|0.8", [b.get("block_id") for b in view["blocks"]])   # contact email: not asked
         values.update({"q|0.3": {"v": {"selected_option": {"value": "0.3.a"}}},
                        "q|0.4": {"v": {"selected_option": {"value": "0.4.b"}}},
                        "q|0.5": {"v": {"value": "Bahrain"}}, "q|0.6": {"v": {"selected_options": [{"value": "0.6.b"}]}},

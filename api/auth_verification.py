@@ -113,7 +113,7 @@ def _send_code(user: AIDLUser, code: str, purpose: str) -> None:
         html_message=(
             '<div style="font-family:Arial,sans-serif;max-width:460px;margin:auto;border:3px solid #14140f;'
             'background:#f5ecd2;padding:24px">'
-            '<div style="font-weight:bold;font-size:18px;letter-spacing:1px">🚦 AIDL · AI Driving License</div>'
+            '<div style="font-weight:bold;font-size:18px;letter-spacing:1px">AIDL · AI Driving License</div>'
             f'<p style="font-size:15px">Hi {escape(user.first_name or user.full_name or "there")},</p>'
             f'<p style="font-size:15px">Use this code to {action}:</p>'
             f'<div style="font-size:34px;font-weight:bold;letter-spacing:10px;background:#ffcc00;'
