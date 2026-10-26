@@ -264,7 +264,7 @@ def _home(d: dict) -> list:
     name = d["admin_name"]
     done = st["done_count"]
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": "🚦 AIDL Admin Center", "emoji": True}},
+        {"type": "header", "text": {"type": "plain_text", "text": "AIDL Admin Center", "emoji": True}},
         _context(f"*{d['org_name']}*  ·  AI Driving License  ·  Signed in as *{name}*"),
         _section(f"👋 *Welcome, {name}.* Let's set up AI Driving License for *{d['org_name']}* — "
                  "a few short steps, top to bottom.\n" + "🟩" * done + "⬜" * (5 - done)
@@ -410,7 +410,7 @@ def _app_line(org_name: str) -> dict:
     # The AIDL logo is the Slack app icon (shown next to "aidl" on every
     # message), so it isn't repeated here.
     return {"type": "context", "elements": [
-        _md(f"*🚦 AIDL · AI Driving License*   |   Admin Center for *{org_name}*"),
+        _md(f"*AIDL · AI Driving License*   |   Admin Center for *{org_name}*"),
     ]}
 
 

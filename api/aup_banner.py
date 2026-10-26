@@ -21,9 +21,11 @@ from urllib.parse import urlencode
 from django.conf import settings
 from PIL import Image, ImageDraw, ImageFont
 
-DESIGN = "1"  # bump when the strip's look changes
-S = 2  # drawn at 2x
-W, H, PAD = 720, 92, 18
+DESIGN = "2"  # bump when the strip's look changes
+# Slack shows the picture at the popup's width (~480px), so it is laid out
+# at that width — text sized for it reads like the rest of the popup.
+S = 3  # drawn at 3x for a crisp image
+W, H, PAD = 480, 104, 16
 ASPHALT, YELLOW, CREAM, ROAD = "#14140F", "#FFCC00", "#F5ECD2", "#3A3A30"
 _FONTS = Path(__file__).resolve().parent / "data" / "fonts"
 
@@ -61,20 +63,34 @@ def png_for(params: dict) -> bytes:
     return png(_key(params), lambda: render(params))
 
 
+def _fit(d: ImageDraw.ImageDraw, text: str, font, width: float) -> str:
+    """Shorten text with … until it fits the width."""
+    if d.textlength(text, font=font) <= width:
+        return text
+    while text and d.textlength(text + "…", font=font) > width:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
 def render(params: dict) -> bytes:
     """Asphalt band: AI POLICY · right text / label · ORG NAME / the road."""
     img = Image.new("RGB", (W * S, H * S), ASPHALT)
     d = ImageDraw.Draw(img)
-    mono = _font("JetBrainsMono-Bold.ttf", 11)
+    mono = _font("JetBrainsMono-Bold.ttf", 13)
 
-    d.text((PAD * S, 14 * S), "AI POLICY", font=_font("Bungee-Regular.ttf", 20), fill=YELLOW)
-    d.text(((W - PAD) * S, 20 * S), params.get("r", "").upper(), font=mono, fill=CREAM, anchor="ra")
-    d.text((PAD * S, 46 * S), params.get("l", "").upper(), font=mono, fill=CREAM)
-    d.text(((W - PAD) * S, 46 * S), params.get("o", "").upper(), font=mono, fill=CREAM, anchor="ra")
+    d.text((PAD * S, 13 * S), "AI POLICY", font=_font("Bungee-Regular.ttf", 24), fill=YELLOW)
+    right = _fit(d, params.get("r", "").upper(), mono, (W - 2 * PAD - 170) * S)
+    d.text(((W - PAD) * S, 20 * S), right, font=mono, fill=CREAM, anchor="ra")
+    label = params.get("l", "").upper()
+    d.text((PAD * S, 52 * S), label, font=mono, fill=CREAM)
+    room = (W - 2 * PAD - 16) * S - d.textlength(label, font=mono)  # the org name gets what's left
+    if room > 40 * S:
+        d.text(((W - PAD) * S, 52 * S), _fit(d, params.get("o", "").upper(), mono, room), font=mono,
+               fill=YELLOW, anchor="ra")
 
     total = max(int(params.get("n") or 15), 1)
     at = int(params.get("at") or 0)
-    gap, top, height = 4, 70, 9
+    gap, top, height = 3, 80, 10
     seg = (W - 2 * PAD - gap * (total - 1)) / total
     for i in range(total):
         x0 = PAD + i * (seg + gap)

@@ -945,7 +945,7 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
         # replace a stale copy if the click came from one).
         publish_admin_center(org, user)
         _reply(response_url, replace=is_ephemeral,
-               text="👆 Your Admin Center is the *🚦 AIDL Admin Center* message from AIDL in this channel — "
+               text="👆 Your Admin Center is the *AIDL Admin Center* message from AIDL in this channel — "
                     "it's kept up to date as you complete each step.")
         return HttpResponse(status=200)
     blocks = admin_card_blocks(d, tab, open_url=_private_link(request, user, tab))
