@@ -139,7 +139,7 @@ def accepted_count(org: Organization, item: str) -> int:
 
 def summary(org: Organization) -> dict:
     """Everything the setup steps show."""
-    from .aup_store import draft, has_draft, is_complete
+    from .aup_store import current, draft, has_draft, is_complete, published_info
 
     st = state(org)
     members = _slack_learners(org).count()
@@ -160,6 +160,8 @@ def summary(org: Organization) -> dict:
     return {
         "aup_done": aup_done,
         "aup_draft_section": draft(org)["section"] if not aup_done and has_draft(org) else None,
+        "aup_number": published_info(org)["number"] if aup_done else None,
+        "aup_rules": sum(len(p["clauses"]) for p in (current(org) or {}).get("points", [])) if aup_done else 0,
         "admins_done": admins_done,
         "team_done": team_done,
         "cards_done": cards_done,

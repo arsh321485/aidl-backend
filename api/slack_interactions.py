@@ -166,6 +166,7 @@ _SUBMIT_TAB = {
     "aidl_add_app": "ai-apps",
     "aidl_add_people": "home",
     "aidl_aup_section": "home",
+    "aidl_aup_review": "home",
     "aidl_logo": "home",
     "aidl_admin_perms": "add-admin",
     app_requests.REJECT: "ai-apps",
@@ -202,7 +203,7 @@ def _handle_submission(payload: dict):
         allowed = d["can_manage_cards"]
     elif callback == "aidl_card_new":
         allowed = d["can_create_card"]
-    elif callback == "aidl_aup_section":
+    elif callback in (aup_slack.CALLBACK, aup_slack.REVIEW):
         allowed = d["can_policy"]
     elif callback == "aidl_logo":
         allowed = d["can_admins"]
@@ -220,6 +221,7 @@ def _handle_submission(payload: dict):
         "aidl_add_app": lambda: slack_modals.submit_add_app(admin, org, view),
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
         "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
+        "aidl_aup_review": lambda: _submit_aup_section(admin, org, view),
         "aidl_logo": lambda: slack_modals.submit_logo(org, view),
         "aidl_admin_perms": lambda: slack_modals.submit_edit_admin(admin, org, view),
         "aidl_ack_alerts": lambda: card_ack.save_alerts(org, admin, view),
@@ -239,8 +241,12 @@ def _handle_submission(payload: dict):
 
 
 def _submit_aup_section(admin, org, view: dict) -> dict:
-    """Create AUP: Next / Generate on one section screen (aup_slack.py)."""
-    result = aup_slack.submit(org, admin, view)
+    """Policy builder: Next on a section screen, Generate policy on the
+    review (aup_slack.py)."""
+    if view.get("callback_id") == aup_slack.REVIEW:
+        result = aup_slack.generate(org, admin, view)
+    else:
+        result = aup_slack.submit(org, admin, view)
     if result.pop("published", False):
         slack_modals.in_background(_after_aup_published, org, admin)
     return result
@@ -276,15 +282,22 @@ def _people_changed(payload: dict, action: dict) -> None:
             logger.info("add people redraw: %s", result.get("error"))
 
 
-def _aup_screen_action(payload: dict, action_id: str) -> None:
-    """Inside the Create AUP popup: an answer changed (redraw the screen to
-    show / hide follow-ups) or Back."""
+def _aup_screen_action(payload: dict, action_id: str, value: str = "") -> None:
+    """Inside the policy builder: an answer changed (redraw the screen —
+    follow-ups and the policy sentences), Back, Go to section n, Edit answers."""
     user = _admin_for(payload)
     org = get_organization_for_user(user) if user is not None else None
-    if org is None or user.role != AIDLUser.Role.ADMIN:
+    if org is None or user.role != AIDLUser.Role.ADMIN or not light_admin_context(user)["can_policy"]:
         return
     view = payload.get("view") or {}
-    new = aup_slack.back(org, view) if action_id == "aidl_aup_back" else aup_slack.redraw(org, view)
+    if action_id == "aidl_aup_back":
+        new = aup_slack.back(org, view)
+    elif action_id == "aidl_aup_goto":
+        new = aup_slack.goto(org, view, int(value) if value.isdigit() else -1)
+    elif action_id == "aidl_aup_edit":
+        new = aup_slack.edit(org, view)
+    else:
+        new = aup_slack.redraw(org, view)
     result = slack_client.slack_api("views.update", slack_client.bot_token(org),
                                     json={"view_id": view.get("id", ""), "hash": view.get("hash", ""), "view": new})
     if not result.get("ok"):
@@ -578,10 +591,14 @@ def slack_interactions(request):
         slack_modals.in_background(_people_changed, payload, action)
         return HttpResponse(status=200)
 
-    # Inside the Create AUP popup: an answer changed, or Back.
-    if (payload.get("view") or {}).get("callback_id") == aup_slack.CALLBACK and (
-            action_id == "aidl_aup_back" or (action.get("block_id") or "").startswith("q|")):
-        slack_modals.in_background(_aup_screen_action, payload, action_id)
+    # Inside the policy builder: an answer changed, Back, Go to section n
+    # (review), Edit answers (ready screen).
+    callback = (payload.get("view") or {}).get("callback_id")
+    if ((callback == aup_slack.CALLBACK and (action_id == "aidl_aup_back"
+                                             or (action.get("block_id") or "")[:2] in ("q|", "f|")))
+            or (callback == aup_slack.REVIEW and action_id in ("aidl_aup_back", "aidl_aup_goto"))
+            or (callback == "aidl_policy_done" and action_id == "aidl_aup_edit")):
+        slack_modals.in_background(_aup_screen_action, payload, action_id, action.get("value", ""))
         return HttpResponse(status=200)
 
     # User dashboard tabs (guide 10): swap the card shown in that message.

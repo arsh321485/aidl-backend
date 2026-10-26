@@ -51,6 +51,7 @@ urlpatterns = [
     path("billing/stripe/webhook/", billing_views.stripe_webhook, name="billing-stripe-webhook"),
     path("aup/questions/", aup_views.questions, name="aup-questions"),
     path("aup/preview/", aup_views.preview, name="aup-preview"),
+    path("aup/banner.png", licence_views.aup_banner_png, name="aup-banner-png"),
     path("locations/countries/", location_views.countries, name="location-countries"),
     path("locations/states/", location_views.states, name="location-states"),
     path("locations/cities/", location_views.cities, name="location-cities"),
