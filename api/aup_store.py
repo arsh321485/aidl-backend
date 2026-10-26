@@ -1,10 +1,10 @@
 """The organization's AUP built from the question bank (aup_builder.py).
 
 Organization.aup_data (JSON) holds
-    draft      {answers, fills, section}  — the admin's work in progress,
-               saved after every screen so they can stop and continue
-    published  {answers, fills, version, published_at, published_by}
-               — the AUP employees receive
+    draft      {answers, fills, section, started_at}  — the admin's work in
+               progress, saved after every screen so they can stop and continue
+    published  {answers, fills, version, number, published_at, published_by,
+               started_at} — the AUP employees receive (number = v1, v2 …)
 
 Employees accept it one point at a time: Acknowledgement items "aup_1" …
 "aup_14", versioned by the published AUP's version. All 14 points (plus the
@@ -78,7 +78,8 @@ def draft(org: Organization) -> dict:
 
 def save_draft(org: Organization, answers: dict, fills: dict, section: int) -> None:
     data = _load(org)
-    data["draft"] = {"answers": answers, "fills": fills, "section": section}
+    started = (data.get("draft") or {}).get("started_at") or timezone.now().isoformat()
+    data["draft"] = {"answers": answers, "fills": fills, "section": section, "started_at": started}
     _save(org, data)
 
 
@@ -92,8 +93,11 @@ def publish(org: Organization, by: AIDLUser | None = None) -> dict:
     data = _load(org)
     d = data.get("draft") or draft(org)
     aup = aup_builder.generate(d["answers"], d.get("fills") or {})
+    previous = data.get("published") or {}
+    number = int(previous.get("number") or 1) + (previous.get("version") not in (None, aup["version"]))
     data["published"] = {"answers": d["answers"], "fills": d.get("fills") or {}, "version": aup["version"],
-                         "published_at": timezone.now().isoformat(), "published_by": str(by.pk) if by else ""}
+                         "number": number, "published_at": timezone.now().isoformat(),
+                         "published_by": str(by.pk) if by else "", "started_at": d.get("started_at", "")}
     data.pop("draft", None)
     _save(org, data)
     from .card_image import onboarding_kinds, warm
@@ -125,6 +129,14 @@ def is_complete(org: Organization | None) -> bool:
 
 def version(org: Organization | None) -> str:
     return (_load(org).get("published") or {}).get("version", "")
+
+
+def published_info(org: Organization | None) -> dict:
+    """number (v1, v2 …), published_at, started_at and answers of the
+    published AUP."""
+    p = _load(org).get("published") or {}
+    return {"number": int(p.get("number") or 1), "published_at": p.get("published_at", ""),
+            "started_at": p.get("started_at", ""), "answers": p.get("answers") or {}}
 
 
 # ---------- employees: one point at a time ----------

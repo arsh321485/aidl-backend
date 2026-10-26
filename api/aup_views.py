@@ -1,7 +1,7 @@
 """AUP question bank + generator preview (aup_builder.py).
 
 Stateless: nothing is saved yet. Used to try the generator and, later, by
-the Slack Create AUP screens.
+the Slack AI policy builder screens.
 
     GET  /api/aup/questions/  sections, questions, options, recommended answers
     POST /api/aup/preview/    {answers, fills} → the 14 generated points

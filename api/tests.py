@@ -1427,7 +1427,7 @@ class SlackHomeVisualTests(TestCase):
         self.assertFalse(any(b.get("block_id") == "aidl_tabs" for b in blocks))
         text = json.dumps(blocks, ensure_ascii=False)
         for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 5 setup steps done",
-                      "✅  *1 · AI policy (AUP)*", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
+                      "✓  *1 · AI policy*  ·  waiting for your approval  ·  v1  ·  14 points", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
                       "*2 · Add admins (optional)*", "aidl_open_add-admin", "aidl_setup_skip",
                       "3 · Add your team*  —  _after step 2_"):
             self.assertIn(label, text)
@@ -2424,34 +2424,114 @@ class AupQuestionnaireSlackTests(TestCase):
         self.assertIn("Scope & Applicability", json.dumps(resp["view"]))
         self.assertEqual(json.loads(resp["view"]["private_metadata"])["section"], 1)
 
-    def test_last_screen_generates_aup_with_send_and_view(self):
+    def test_last_screen_reviews_then_generates_ready_report(self):
         from . import aup_builder, aup_store
 
         answers = aup_builder.recommended_answers()
         answers.update(AUP_BASE)
         aup_store.save_draft(self.org, answers, dict(AUP_FILLS), 14)
         view = self._screen(14)
-        self.assertEqual(view["submit"]["text"], "Generate AUP")
+        self.assertEqual(view["submit"]["text"], "Review →")
         resp = self._submit(view, self._values(view))
+        review = resp["view"]
+        self.assertEqual(review["callback_id"], "aidl_aup_review")
+        text = json.dumps(review, ensure_ascii=False)
+        for label in ("Your policy at a glance", "✓  *1 · Scope & Applicability*", "rules written",
+                      "Generate policy", "/api/aup/banner.png"):
+            self.assertIn(label, text)
+        self.assertNotIn("Go to section", text)                     # nothing missing
+        resp = self._post({"type": "view_submission", "view": {**review, "state": {"values": {}}}}).json()
         self.assertEqual(resp["response_action"], "update")
         text = json.dumps(resp["view"], ensure_ascii=False)
-        for label in ("Your AUP is ready", "aidl_crv_approve_onb", "aidl_aup_view", "1 · Scope & Applicability",
-                      "14 · Acknowledgment & Review"):
+        for label in ("Your AI policy is ready", "Built from", "Nothing is sent to your team until you approve it",
+                      "*Policy points*\\n14", "*Version*\\nv1", "What happens after you approve",
+                      "aidl_crv_approve_onb", "aidl_aup_view", "aidl_aup_edit", "Not legal advice"):
             self.assertIn(label, text)
         self.org.refresh_from_db()
         self.assertTrue(aup_store.is_complete(self.org))
+
+    def test_review_sends_to_missing_section_and_back(self):
+        from . import aup_builder, aup_store
+        from .aup_slack import review_view
+
+        answers = aup_builder.recommended_answers()
+        answers.update(AUP_BASE)
+        q = next(q for q in aup_builder.visible_questions(answers, 9) if q["required"] and q["type"] == "single")
+        good = answers[q["id"]]
+        answers[q["id"]] = ""                                        # one question left in point 9
+        aup_store.save_draft(self.org, answers, dict(AUP_FILLS), 14)
+        d = aup_store.draft(self.org)
+        review = review_view(self.org, d["answers"], d["fills"], {})
+        row = next(b for b in review["blocks"] if b.get("block_id") == "rv|9")
+        self.assertIn("⚠", row["text"]["text"])
+        self.assertEqual(row["accessory"]["text"]["text"], "Go to section 10")
+        resp = self._post({"type": "view_submission", "view": {**review, "state": {"values": {}}}}).json()
+        self.assertIn("Answer section 10 first", json.dumps(resp["view"], ensure_ascii=False))
+        self.assertFalse(aup_store.is_complete(self.org))
+
+        self._post({"type": "block_actions", "view": {**review, "id": "V1", "hash": "h"},
+                    "actions": [{"action_id": "aidl_aup_goto", "block_id": "rv|9", "value": "9"}]})
+        section = next(b for m, b in self.calls if m == "views.update")["view"]
+        self.assertEqual(section["title"]["text"], "AI policy · 10 of 15")
+        self.assertEqual(section["submit"]["text"], "Save and return →")
+        self.assertIn("← Back to review", json.dumps(section, ensure_ascii=False))
+        values = self._values(section)
+        values[f"q|{q['id']}"] = {"v": {"selected_option": {"value": good}}}
+        resp = self._submit(section, values)
+        self.assertEqual(resp["view"]["callback_id"], "aidl_aup_review")    # back to the review
+        self.assertNotIn("Go to section", json.dumps(resp["view"], ensure_ascii=False))
+
+    def test_section_shows_live_policy_text(self):
+        from . import aup_builder
+        from .aup_slack import section_view
+
+        answers = aup_builder.recommended_answers()
+        answers.update(AUP_BASE)
+        view = section_view(self.org, 7, answers, dict(AUP_FILLS), {})
+        self.assertEqual(view["title"]["text"], "AI policy · 8 of 15")
+        self.assertEqual(view["blocks"][0]["type"], "image")
+        text = json.dumps(view, ensure_ascii=False)
+        self.assertIn("Becomes point 7 of your policy", text)
+        self.assertIn("*What this adds to your policy*", text)
+        clause = aup_builder.generate(answers, AUP_FILLS)["points"][6]["clauses"][0]["text"]
+        self.assertIn("> " + clause[:40], text)
+        self.assertTrue(all(b.get("dispatch_action") for b in view["blocks"] if b["type"] == "input"))
+        self.assertIn('"Recommended"', text)                        # the recommended option is marked
+        self.assertLessEqual(len(view["blocks"]), 100)
+
+    def test_banner_png_is_signed(self):
+        from urllib.parse import urlparse
+
+        from . import aup_banner
+
+        url = urlparse(aup_banner.url("Section 1 of 15 · about 8 min left", "0 rules written", "Acme", 0))
+        resp = self.client.get(url.path + "?" + url.query)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "image/png")
+        self.assertEqual(self.client.get(url.path + "?" + url.query.replace("Acme", "Evil")).status_code, 404)
+
+    def test_edit_answers_reopens_the_builder(self):
+        from .aup_slack import report_view
+
+        _answer_policy(self.org)
+        view = report_view(self.org)
+        self._post({"type": "block_actions", "view": {**view, "id": "V1", "hash": "h"},
+                    "actions": [{"action_id": "aidl_aup_edit", "block_id": "aidl_aup_next", "value": "edit"}]})
+        new = next(b for m, b in self.calls if m == "views.update")["view"]
+        self.assertEqual(new["callback_id"], "aidl_aup_section")
+        self.assertEqual(new["title"]["text"], "AI policy · 1 of 15")
 
     def test_admin_center_create_then_view(self):
         from .slack_blocks import admin_card_blocks
         from .slack_cards import build_admin_cards_context
 
         home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-        self.assertIn("📝 Create AUP", home)
+        self.assertIn("Build my AI policy →", home)
         _answer_policy(self.org)
         home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
         self.assertIn("View AUP", home)
         self.assertIn("Change AUP", home)
-        self.assertNotIn("📝 Create AUP", home)
+        self.assertNotIn("Build my AI policy →", home)
 
     def test_continue_where_left_off(self):
         from . import aup_store
@@ -2461,7 +2541,7 @@ class AupQuestionnaireSlackTests(TestCase):
         d = aup_store.draft(self.org)
         aup_store.save_draft(self.org, d["answers"], {}, 4)
         home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-        self.assertIn("Continue AUP (step 5 of 15)", home)
+        self.assertIn("Continue · section 5 of 15 →", home)
 
     def test_employee_accepts_one_point_at_a_time_then_licence(self):
         from . import aup_store
@@ -2523,7 +2603,7 @@ class AupQuestionnaireSlackTests(TestCase):
 
         card_approval.approve_onboarding(self.org, "aup", self.owner)
         self.assertIn("Send new version", home())
-        self.assertIn("Your updated AUP is approved", json.dumps(report_view(self.org)))
+        self.assertIn("Your updated AI policy is approved", json.dumps(report_view(self.org)))
 
     def test_fresh_reset_clears_acceptances_and_licences(self):
         from django.core.management import call_command

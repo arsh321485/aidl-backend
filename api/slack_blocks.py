@@ -90,24 +90,26 @@ def _locked(n: int, title: str, after: str) -> dict:
 
 def _step_aup(d: dict, st: dict) -> list:
     if not st["aup_done"]:
-        blocks = [_section("*1 · Create your AI policy (AUP)*\nAnswer a short questionnaire in 15 steps — recommended "
-                           "answers are already selected — and AIDL writes your team's AI Acceptable Use Policy "
-                           "(14 points).")]
+        blocks = [_section("*1 · Build your AI policy*\n15 short sections, recommended answers already chosen. "
+                           "About 10 minutes. AIDL writes the 14-point policy as you go.")]
         if d["can_policy"]:
             blocks.append(_actions("aidl_step_aup",
-                                   _button("📝 Create AUP" if st.get("aup_draft_section") is None
-                                           else f"📝 Continue AUP (step {st['aup_draft_section'] + 1} of 15)",
+                                   _button("Build my AI policy →" if st.get("aup_draft_section") is None
+                                           else f"Continue · section {st['aup_draft_section'] + 1} of 15 →",
                                            "aidl_policy_open", value="policy", style="primary")))
         return blocks
-    apps = f"{d['approved_apps']} of {d['total_apps']} apps approved"
-    return [
-        _section(f"✅  *1 · AI policy (AUP)*  ·  {apps}"),
+    state = "approved" if st.get("aup_approved") else "waiting for your approval"
+    rules = st.get("aup_rules") or 0
+    return [b for b in [
+        _section(f"✓  *1 · AI policy*  ·  {state}  ·  v{st.get('aup_number') or 1}  ·  14 points  ·  "
+                 f"{rules} rule{'' if rules == 1 else 's'}"),
+        _context(f"{d['approved_apps']} of {d['total_apps']} AI apps approved") if d["total_apps"] else None,
         _actions("aidl_step_aup",
-                 _button("📄 View AUP", "aidl_aup_view", value="view"),
-                 _button("✏️ Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
-                 _button("🤖 AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
-                 _button("💻 IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
-    ]
+                 _button("View AUP", "aidl_aup_view", value="view"),
+                 _button("Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
+                 _button("AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
+                 _button("IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
+    ] if b]
 
 
 def _step_admins(d: dict, st: dict) -> list:
