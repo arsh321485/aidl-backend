@@ -1,7 +1,7 @@
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from . import aup_views, avatar, auth_views, billing_views, licence_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views, waitlist_views
+from . import aup_views, avatar, auth_views, billing_views, licence_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views, waitlist_views, aup_upload_views
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
@@ -50,6 +50,8 @@ urlpatterns = [
     path("billing/checkout/", billing_views.checkout_view, name="billing-checkout"),
     path("billing/stripe/webhook/", billing_views.stripe_webhook, name="billing-stripe-webhook"),
     path("waitlist/", waitlist_views.join, name="waitlist"),
+    path("aup/upload/", aup_upload_views.upload, name="aup-upload"),
+    path("aup/upload/publish/", aup_upload_views.publish, name="aup-upload-publish"),
     path("aup/questions/", aup_views.questions, name="aup-questions"),
     path("aup/preview/", aup_views.preview, name="aup-preview"),
     path("aup/banner.png", licence_views.aup_banner_png, name="aup-banner-png"),

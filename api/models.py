@@ -566,3 +566,40 @@ class WaitlistEntry(models.Model):
 
     def __str__(self):
         return self.email
+
+
+class AupUpload(models.Model):
+    """An organization's own AUP, uploaded by an admin and turned into the 14
+    point cards by the NVIDIA model (aup_upload.py). The text stays here (not
+    in Organization.aup_data, which is read on every card) so the cards can
+    be regenerated; publishing copies the cards into aup_data["published"]."""
+
+    class Status(models.TextChoices):
+        PROCESSING = "processing", "Processing"
+        READY = "ready", "Ready for review"
+        FAILED = "failed", "Failed"
+        PUBLISHED = "published", "Published"
+
+    organization_id = models.CharField(max_length=64, db_index=True)
+    organization_name = models.CharField(max_length=255, blank=True, default="")
+    file_name = models.CharField(max_length=255)
+    file_type = models.CharField(max_length=10)
+    file_size = models.IntegerField(default=0)
+    text = models.TextField(blank=True, default="")
+    text_truncated = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PROCESSING)
+    cards = models.TextField(blank=True, default="")  # JSON: 14 cards
+    error = models.TextField(blank=True, default="")
+    model = models.CharField(max_length=200, blank=True, default="")
+    uploaded_by_id = models.CharField(max_length=64, blank=True, default="")
+    uploaded_by_email = models.EmailField(blank=True, default="")
+    slack_view_id = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.organization_name}: {self.file_name} ({self.status})"

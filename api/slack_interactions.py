@@ -23,8 +23,8 @@ from django.views.decorators.http import require_POST
 
 from .auth_jwt import create_access_token
 from .models import AIDLUser
-from . import (admin_setup, app_requests, aup_slack, aup_store, card_ack, card_approval, card_review_slack,
-               employee_flow, slack_client, slack_modals)
+from . import (admin_setup, app_requests, aup_slack, aup_store, aup_upload, aup_upload_slack, card_ack, card_approval,
+               card_review_slack, employee_flow, slack_client, slack_modals)
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
 from .slack_cards import build_admin_cards_context, light_admin_context
@@ -104,6 +104,7 @@ _POPUP_TITLES = {
     "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
     "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview", "aidl_ack_alerts": "Acknowledgement alerts",
     "aidl_appreq_reject": "Reject app", "aidl_appreq_info": "Ask for more info",
+    "aidl_aup_upload_open": "Upload your AUP", "aidl_aup_upload_review": "Your AUP cards",
 }
 
 
@@ -167,6 +168,8 @@ _SUBMIT_TAB = {
     "aidl_add_people": "home",
     "aidl_aup_section": "home",
     "aidl_aup_review": "home",
+    "aidl_aup_upload": "home",
+    "aidl_aup_upload_review": "home",
     "aidl_logo": "home",
     "aidl_admin_perms": "add-admin",
     app_requests.REJECT: "ai-apps",
@@ -203,7 +206,7 @@ def _handle_submission(payload: dict):
         allowed = d["can_manage_cards"]
     elif callback == "aidl_card_new":
         allowed = d["can_create_card"]
-    elif callback in (aup_slack.CALLBACK, aup_slack.REVIEW):
+    elif callback in (aup_slack.CALLBACK, aup_slack.REVIEW, aup_upload_slack.UPLOAD, aup_upload_slack.REVIEW):
         allowed = d["can_policy"]
     elif callback == "aidl_logo":
         allowed = d["can_admins"]
@@ -222,6 +225,8 @@ def _handle_submission(payload: dict):
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
         "aidl_aup_section": lambda: _submit_aup_section(admin, org, view),
         "aidl_aup_review": lambda: _submit_aup_section(admin, org, view),
+        aup_upload_slack.UPLOAD: lambda: aup_upload_slack.submit_upload(admin, org, view),
+        aup_upload_slack.REVIEW: lambda: _submit_aup_section(admin, org, view),
         "aidl_logo": lambda: slack_modals.submit_logo(org, view),
         "aidl_admin_perms": lambda: slack_modals.submit_edit_admin(admin, org, view),
         "aidl_ack_alerts": lambda: card_ack.save_alerts(org, admin, view),
@@ -245,6 +250,8 @@ def _submit_aup_section(admin, org, view: dict) -> dict:
     review (aup_slack.py)."""
     if view.get("callback_id") == aup_slack.REVIEW:
         result = aup_slack.generate(org, admin, view)
+    elif view.get("callback_id") == aup_upload_slack.REVIEW:  # "Use these cards" (uploaded AUP)
+        result = aup_upload_slack.submit_review(admin, org, view)
     else:
         result = aup_slack.submit(org, admin, view)
     if result.pop("published", False):
@@ -805,6 +812,18 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
         view = payload.get("view") or {}
         slack_modals.in_background(_remove_person, org, user, action_id, action.get("value", ""),
                                    view.get("id", ""), view.get("private_metadata") or "{}")
+        return HttpResponse(status=200)
+
+    # Upload your own AUP (Enterprise): the file popup, and the cards' review.
+    if org is not None and d["can_policy"] and action_id in ("aidl_aup_upload_open", "aidl_aup_upload_review"):
+        in_modal = bool((payload.get("view") or {}).get("id"))
+        meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
+        if action_id == "aidl_aup_upload_open":
+            view = aup_upload_slack.upload_view(org, meta) if aup_upload.can_upload(org) else \
+                aup_upload_slack.review_view(org, None, notice="Uploading your own AUP is part of the Enterprise plan.")
+        else:
+            view = aup_upload_slack.review_view(org, aup_upload.latest(org))
+        _open_modal(org, payload.get("trigger_id", ""), view, push=in_modal)
         return HttpResponse(status=200)
 
     # Create / Change AUP: the question-bank screens, from where the admin

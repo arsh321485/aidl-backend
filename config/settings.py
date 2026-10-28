@@ -3,6 +3,7 @@ Django settings for Backend-AIDL-Project.
 Python 3.13 + Django 6 + MongoDB
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -382,3 +383,22 @@ SPECTACULAR_SETTINGS = {
 }
 # Each new website waitlist sign-up is emailed here (empty = BILLING_SALES_EMAIL; both empty = no email).
 WAITLIST_NOTIFY_EMAIL = os.getenv("WAITLIST_NOTIFY_EMAIL", "")
+
+# NVIDIA hosted AI models (nvidia_ai.py) — turn an uploaded AUP into the 14 point cards (aup_upload.py).
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NVIDIA_STATUS_URL = os.getenv("NVIDIA_STATUS_URL", "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status")
+NVIDIA_TIMEOUT = int(os.getenv("NVIDIA_TIMEOUT", "300"))  # seconds for one generation, retries included
+NVIDIA_MAX_TOKENS = int(os.getenv("NVIDIA_MAX_TOKENS", "8000"))
+NVIDIA_TEMPERATURE = float(os.getenv("NVIDIA_TEMPERATURE", "0.2"))
+try:  # extra request fields the chosen model needs, e.g. {"chat_template_kwargs": {"thinking": false}}
+    NVIDIA_EXTRA_BODY = json.loads(os.getenv("NVIDIA_EXTRA_BODY", "") or "{}")
+except ValueError:
+    NVIDIA_EXTRA_BODY = {}
+if not isinstance(NVIDIA_EXTRA_BODY, dict):
+    NVIDIA_EXTRA_BODY = {}
+# Uploaded AUPs: plans that may upload (comma-separated), file size, and how much text goes to the model.
+AUP_UPLOAD_PLANS = {p.strip() for p in os.getenv("AUP_UPLOAD_PLANS", "enterprise").split(",") if p.strip()}
+AUP_UPLOAD_MAX_BYTES = int(os.getenv("AUP_UPLOAD_MAX_BYTES", str(10 * 1024 * 1024)))
+AUP_UPLOAD_MAX_CHARS = int(os.getenv("AUP_UPLOAD_MAX_CHARS", "120000"))
