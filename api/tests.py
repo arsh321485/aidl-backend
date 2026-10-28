@@ -3706,3 +3706,39 @@ class BlockKitIdsTests(TestCase):
             for page in (0, 1):
                 m["page"] = page
                 self._check(card_ack.my_cards_view(org, member, dict(m))["blocks"])
+
+
+@override_settings(WAITLIST_NOTIFY_EMAIL="team@aidl.example",
+                   EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class WaitlistTests(TestCase):
+    """Website "Not a company? Join the waitlist" box: POST /api/waitlist/."""
+
+    def test_join_saves_once_and_emails_the_team(self):
+        from django.core import mail
+
+        from .models import WaitlistEntry
+
+        for _ in range(2):
+            resp = self.client.post("/api/waitlist/", {"email": " Sam@Example.com ", "source": "landing"},
+                                    content_type="application/json")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json(), {"ok": True})
+        self.assertEqual(list(WaitlistEntry.objects.values_list("email", "source")), [("sam@example.com", "landing")])
+        self.assertEqual(len(mail.outbox), 1)                    # only the first time
+        self.assertIn("sam@example.com", mail.outbox[0].subject)
+
+    def test_bad_email_is_refused(self):
+        resp = self.client.post("/api/waitlist/", {"email": "not-an-email"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("email", resp.json())
+        self.assertIn("detail", resp.json())                     # the website shows `detail`
+
+    def test_export_csv(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        self.client.post("/api/waitlist/", {"email": "a@example.com"}, content_type="application/json")
+        out = StringIO()
+        call_command("export_waitlist", stdout=out)
+        self.assertIn("a@example.com", out.getvalue())
