@@ -88,27 +88,58 @@ def _locked(n: int, title: str, after: str) -> dict:
     return _context(f"⬜  *{n} · {title}*  —  _after {after}_")
 
 
+def _upload_line(st: dict) -> dict | None:
+    """Where an uploaded AUP (Enterprise) stands, if one isn't in use yet."""
+    up = st.get("aup_upload") or {}
+    if up.get("status") == "processing":
+        return _context(f"⏳ AIDL is writing your 14 cards from _{up['file_name']}_ — you'll get a message when "
+                        "they're ready.")
+    if up.get("status") == "ready":
+        return _context(f"✓ Cards from _{up['file_name']}_ are ready to review.")
+    if up.get("status") == "failed":
+        return _context(f"⚠ AIDL couldn't write cards from _{up['file_name']}_. {up.get('error', '')}")
+    return None
+
+
+def _upload_buttons(st: dict) -> list:
+    up = st.get("aup_upload") or {}
+    if not st.get("aup_upload_allowed"):
+        return []
+    if up.get("status") in ("ready", "processing"):
+        return [_button("Review uploaded cards", "aidl_aup_upload_review", value="review")]
+    return [_button("Upload your own AUP", "aidl_aup_upload_open", value="upload")]
+
+
 def _step_aup(d: dict, st: dict) -> list:
     if not st["aup_done"]:
         blocks = [_section("*1 · Build your AI policy*\n15 short sections, recommended answers already chosen. "
-                           "About 10 minutes. AIDL writes the 14-point policy as you go.")]
+                           "About 10 minutes. AIDL writes the 14-point policy as you go."
+                           + ("\nAlready have a policy? Upload it and AIDL turns it into the 14 cards."
+                              if st.get("aup_upload_allowed") else ""))]
         if d["can_policy"]:
             blocks.append(_actions("aidl_step_aup",
                                    _button("Build my AI policy →" if st.get("aup_draft_section") is None
                                            else f"Continue · section {st['aup_draft_section'] + 1} of 15 →",
-                                           "aidl_policy_open", value="policy", style="primary")))
+                                           "aidl_policy_open", value="policy", style="primary"),
+                                   *_upload_buttons(st)))
+            line = _upload_line(st)
+            if line:
+                blocks.append(line)
         return blocks
     state = "approved" if st.get("aup_approved") else "waiting for your approval"
     rules = st.get("aup_rules") or 0
     return [b for b in [
         _section(f"✓  *1 · AI policy*  ·  {state}  ·  v{st.get('aup_number') or 1}  ·  14 points  ·  "
                  f"{rules} rule{'' if rules == 1 else 's'}"),
+        _context(f"From your uploaded policy _{st['aup_file_name']}_") if st.get("aup_file_name") else None,
         _context(f"{d['approved_apps']} of {d['total_apps']} AI apps approved") if d["total_apps"] else None,
         _actions("aidl_step_aup",
                  _button("View AUP", "aidl_aup_view", value="view"),
                  _button("Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
+                 *(_upload_buttons(st) if d["can_policy"] else []),
                  _button("AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
                  _button("IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
+        _upload_line(st) if d["can_policy"] else None,
     ] if b]
 
 

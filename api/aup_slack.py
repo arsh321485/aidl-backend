@@ -441,8 +441,11 @@ def report_view(org: Organization, aup: dict | None = None, notice: str = "") ->
     if not approved:
         head, state = "Your AI policy is ready", "Policy ready"
         minutes = _minutes(info["started_at"], info["published_at"])
-        built = f"Built from {_plural(_answered(info['answers']), 'answer')}" + (
-            f" in {_plural(minutes, 'minute')}" if minutes else "")
+        if info["source"] == "upload":
+            built = f"Written by AI from your policy _{info['file_name']}_ — check every card"
+        else:
+            built = f"Built from {_plural(_answered(info['answers']), 'answer')}" + (
+                f" in {_plural(minutes, 'minute')}" if minutes else "")
         lead = f"{built}. Nothing is sent to your team until you approve it."
         buttons = [{"type": "button", "text": _text("Approve AUP"), "action_id": "aidl_crv_approve_onb",
                     "value": "aup", "style": "primary"}, view_button, edit_button]
@@ -456,7 +459,8 @@ def report_view(org: Organization, aup: dict | None = None, notice: str = "") ->
         lead = "Next: approve the cards and start the programme from the Admin Center (steps 4 and 5)."
         buttons = [view_button, edit_button]
 
-    tools = str(info["answers"].get("7.2") or "").strip() or "—"
+    tools = str(info["answers"].get("7.2") or "").strip() or ("See your policy" if info["source"] == "upload"
+                                                                else "—")
     who = f"Each of your {people} people agrees" if people > 1 else "Each person in your team agrees"
     blocks = [
         _image(aup_banner.url(f"{state} · {version}", for_whom, org.name, 15, 15), f"{state} · {version}"),

@@ -3742,3 +3742,379 @@ class WaitlistTests(TestCase):
         out = StringIO()
         call_command("export_waitlist", stdout=out)
         self.assertIn("a@example.com", out.getvalue())
+
+
+# ---------- uploaded AUP → 14 cards with the NVIDIA model ----------
+
+_POLICY = (
+    "Acme Ltd Acceptable Use Policy.\n"
+    "This policy applies to all employees, contractors and interns of Acme Ltd.\n"
+    "Company systems may be monitored for security purposes.\n"
+    "Employees must not use company systems for illegal activity or harassment.\n"
+    "Passwords must never be shared with anyone, including IT staff.\n"
+    "Customer personal data must not be entered into public AI tools.\n"
+    "Only approved generative AI tools may be used for work.\n"
+    "Security incidents must be reported to the IT team immediately.\n"
+    "Breaches of this policy may lead to disciplinary action.\n"
+)
+
+
+def _model_cards(skip=(), uncovered=(), bad_quote=()):
+    """What a well-behaved model answers: one card per point."""
+    cards = []
+    for n in range(1, 15):
+        if n in skip:
+            continue
+        if n in uncovered:
+            cards.append({"no": n, "covered": False})
+            continue
+        cards.append({"no": n, "covered": True, "headline": f"Point {n} in short",
+                      "summary": "Only approved generative AI tools may be used for work.",
+                      "do": ["Use the approved AI tools"], "dont": ["Paste customer personal data into public AI"],
+                      "source_quote": "This sentence is not in the policy at all." if n in bad_quote
+                      else "Only approved generative AI tools may be used for work."})
+    return json.dumps({"cards": cards})
+
+
+def _pdf(text: str) -> bytes:
+    """A minimal one-page PDF with real (selectable) text."""
+    stream = f"BT /F1 12 Tf 40 760 Td ({text}) Tj ET".encode()
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+            b"/Resources << /Font << /F1 5 0 R >> >> >>",
+            b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offsets = b"%PDF-1.4\n", []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % i + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    return out
+
+
+def _docx(paragraphs: list[str]) -> bytes:
+    import io
+    import zipfile
+
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    body = "".join(f"<w:p><w:r><w:t>{p}</w:t></w:r></w:p>" for p in paragraphs)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", f'<w:document xmlns:w="{w}"><w:body>{body}</w:body></w:document>')
+    return buf.getvalue()
+
+
+class _Resp:
+    def __init__(self, status=200, body=None, headers=None):
+        self.status_code, self._body, self.headers = status, body, headers or {}
+        self.text = json.dumps(body) if body is not None else ""
+
+    def json(self):
+        if self._body is None:
+            raise ValueError("no json")
+        return self._body
+
+
+@override_settings(NVIDIA_API_KEY="nvapi-SECRET-test-key", NVIDIA_MODEL="test/model", NVIDIA_EXTRA_BODY={})
+class NvidiaClientTests(SimpleTestCase):
+    """nvidia_ai.chat: the documented request, 202 polling, retries, errors."""
+
+    def _ok(self, content="hello"):
+        return _Resp(200, {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]})
+
+    def test_request_shape_and_reasoning_removed(self):
+        from . import nvidia_ai
+
+        with patch("api.nvidia_ai.requests.post", return_value=self._ok("<think>hmm</think>Answer")) as post:
+            self.assertEqual(nvidia_ai.chat([{"role": "user", "content": "hi"}]), "Answer")
+        url, kwargs = post.call_args[0][0], post.call_args[1]
+        self.assertEqual(url, "https://integrate.api.nvidia.com/v1/chat/completions")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer nvapi-SECRET-test-key")
+        self.assertEqual(kwargs["json"]["model"], "test/model")
+        self.assertFalse(kwargs["json"]["stream"])
+        self.assertNotIn("response_format", kwargs["json"])        # not in NVIDIA's schema
+
+    @override_settings(NVIDIA_API_KEY="", NVIDIA_MODEL="")
+    def test_missing_credentials(self):
+        from . import nvidia_ai
+
+        with patch("api.nvidia_ai.requests.post") as post, self.assertRaises(nvidia_ai.NvidiaNotConfigured):
+            nvidia_ai.chat([{"role": "user", "content": "hi"}])
+        post.assert_not_called()
+
+    def test_bad_key_is_reported_without_leaking_it(self):
+        from . import nvidia_ai
+
+        with patch("api.nvidia_ai.requests.post", return_value=_Resp(401, {"title": "Unauthorized"})), \
+                self.assertLogs("api.nvidia_ai", level="WARNING") as logs, \
+                self.assertRaises(nvidia_ai.NvidiaError) as err:
+            nvidia_ai.chat([{"role": "user", "content": "hi"}])
+        self.assertIn("API key was refused", err.exception.message)
+        self.assertNotIn("SECRET", err.exception.message + " ".join(logs.output))
+
+    def test_busy_then_ok_is_retried(self):
+        from . import nvidia_ai
+
+        answers = [_Resp(429, {"title": "Too Many Requests"}, {"Retry-After": "1"}), self._ok("done")]
+        with patch("api.nvidia_ai.requests.post", side_effect=answers), patch("api.nvidia_ai.time.sleep") as sleep:
+            self.assertEqual(nvidia_ai.chat([{"role": "user", "content": "hi"}]), "done")
+        sleep.assert_called_once_with(1.0)
+
+    def test_202_is_polled(self):
+        from . import nvidia_ai
+
+        with patch("api.nvidia_ai.requests.post", return_value=_Resp(202, None, {"NVCF-REQID": "req-1"})), \
+                patch("api.nvidia_ai.requests.get", side_effect=[_Resp(202), self._ok("late answer")]) as get, \
+                patch("api.nvidia_ai.time.sleep"):
+            self.assertEqual(nvidia_ai.chat([{"role": "user", "content": "hi"}]), "late answer")
+        self.assertTrue(get.call_args[0][0].endswith("/v2/nvcf/pexec/status/req-1"))
+
+    def test_server_errors_give_up_with_a_message(self):
+        from . import nvidia_ai
+
+        with patch("api.nvidia_ai.requests.post", return_value=_Resp(503, {"title": "down"})), \
+                patch("api.nvidia_ai.time.sleep"), self.assertRaises(nvidia_ai.NvidiaError) as err:
+            nvidia_ai.chat([{"role": "user", "content": "hi"}])
+        self.assertTrue(err.exception.retryable)
+        self.assertIn("busy or unavailable", err.exception.message)
+
+
+@override_settings(NVIDIA_API_KEY="nvapi-test", NVIDIA_MODEL="test/model", NVIDIA_EXTRA_BODY={},
+                   AUP_UPLOAD_PLANS={"enterprise"}, SLACK_REPLY_SYNC=True, CARD_IMAGE_PREDRAW=False)
+class AupUploadTests(TestCase):
+    """Upload your own AUP (Enterprise): read the file, the model writes 14
+    checked cards, the admin reviews and publishes, approval gates delivery."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(name="Acme", slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"), plan="enterprise")
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+
+    def _upload(self, answers, name="policy.txt", data=None):
+        from . import aup_upload
+
+        with patch("api.aup_upload.nvidia_ai.chat", side_effect=answers), \
+                patch("api.slack_client.slack_api", side_effect=self._fake):
+            return aup_upload.start(self.org, self.owner, name, data or _POLICY.encode())
+
+    # reading files
+    def test_reads_pdf_docx_and_text(self):
+        from .aup_upload import extract_text
+
+        long = "Only approved generative AI tools may be used for work. " * 5
+        self.assertIn("approved generative AI tools", extract_text("p.pdf", _pdf(long)))
+        self.assertIn("Passwords must never be shared", extract_text("p.docx", _docx(_POLICY.splitlines())))
+        self.assertIn("Acme Ltd", extract_text("p.txt", _POLICY.encode()))
+
+    def test_bad_files_are_refused(self):
+        import io
+
+        from PIL import Image
+
+        from .aup_upload import UploadError, extract_text
+
+        scanned = io.BytesIO()
+        Image.new("RGB", (200, 200), "white").save(scanned, "PDF")          # a picture, no text
+        for name, data, msg in (("p.exe", b"x" * 500, "PDF, Word"), ("p.txt", b"", "empty"),
+                                ("p.txt", b"too short", "almost no text"),
+                                ("p.pdf", scanned.getvalue(), "scanned"), ("p.pdf", b"not a pdf" * 50, "couldn't read"),
+                                ("p.docx", b"not a zip" * 50, "couldn't read")):
+            with self.subTest(name=name, msg=msg), self.assertRaises(UploadError) as err:
+                extract_text(name, data)
+            self.assertIn(msg, err.exception.message)
+        with self.settings(AUP_UPLOAD_MAX_BYTES=100), self.assertRaises(UploadError) as err:
+            extract_text("p.txt", b"x" * 500)
+        self.assertIn("too big", err.exception.message)
+
+    # who can upload
+    def test_only_enterprise_and_only_when_configured(self):
+        from .aup_upload import UploadError, start
+
+        self.org.plan = "basic"
+        self.org.save()
+        with self.assertRaises(UploadError) as err:
+            start(self.org, self.owner, "p.txt", _POLICY.encode())
+        self.assertIn("Enterprise", err.exception.message)
+        self.org.plan = "enterprise"
+        self.org.save()
+        with self.settings(NVIDIA_API_KEY=""), self.assertRaises(UploadError) as err:
+            start(self.org, self.owner, "p.txt", _POLICY.encode())
+        self.assertIn("isn't set up", err.exception.message)
+
+    # generation
+    def test_cards_are_checked_against_the_policy(self):
+        from . import aup_upload
+        from .models import AupUpload
+
+        up = self._upload(["```json\n" + _model_cards(uncovered=(11,), bad_quote=(5,)) + "\n```"])
+        up.refresh_from_db()
+        self.assertEqual(up.status, AupUpload.Status.READY)
+        cards = aup_upload.cards_of(up)
+        self.assertEqual([c["no"] for c in cards], list(range(1, 15)))
+        self.assertEqual(aup_upload.warnings(cards), {"not_covered": [11], "unverified": [5]})
+        self.assertEqual(cards[0]["title"], aup_upload.point_titles()[0]["title"])   # AIDL's point titles
+        dm = [b for m, b in self.calls if m == "chat.postMessage"]
+        self.assertIn("aidl_aup_upload_review", json.dumps(dm))                       # the admin is told
+
+    def test_missing_points_are_asked_again(self):
+        from . import aup_upload
+
+        cards = json.loads(_model_cards())["cards"]
+        first = json.dumps({"cards": cards[:10]})
+        second = json.dumps({"cards": cards[10:]})
+        up = self._upload([first, second])
+        up.refresh_from_db()
+        self.assertEqual(len(aup_upload.cards_of(up)), 14)
+
+    def test_unreadable_answer_fails_with_a_message(self):
+        from .models import AupUpload
+
+        up = self._upload(["Sorry, I can't help with that.", "Still not JSON"])
+        up.refresh_from_db()
+        self.assertEqual(up.status, AupUpload.Status.FAILED)
+        self.assertIn("expected format", up.error)
+        self.assertIn("couldn't write cards", json.dumps([b for m, b in self.calls if m == "chat.postMessage"]))
+
+    def test_model_error_fails_the_upload(self):
+        from . import nvidia_ai
+        from .models import AupUpload
+
+        up = self._upload(nvidia_ai.NvidiaError("The NVIDIA API key was refused. Check NVIDIA_API_KEY."))
+        up.refresh_from_db()
+        self.assertEqual((up.status, up.error), (AupUpload.Status.FAILED,
+                                                 "The NVIDIA API key was refused. Check NVIDIA_API_KEY."))
+
+    def test_stuck_upload_is_marked_failed(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import aup_upload
+        from .models import AupUpload
+
+        up = AupUpload.objects.create(organization_id=str(self.org.pk), file_name="p.txt", file_type="txt")
+        AupUpload.objects.filter(pk=up.pk).update(created_at=timezone.now() - timedelta(hours=2))
+        self.assertEqual(aup_upload.latest(self.org).status, AupUpload.Status.FAILED)
+        self.assertFalse(aup_upload.busy(self.org))
+
+    # publishing + approval
+    def test_publish_goes_through_card_approval(self):
+        from . import aup_store, aup_upload, card_approval
+        from .aup_slack import report_view
+
+        up = self._upload([_model_cards(uncovered=(11,))])
+        up.refresh_from_db()
+        aup = aup_upload.publish(self.org, up, self.owner)
+        self.org.refresh_from_db()
+        current = aup_store.current(self.org)
+        self.assertEqual(current["version"], aup["version"])
+        self.assertEqual(len(current["points"]), 14)
+        self.assertEqual(current["points"][10]["clauses"][0]["text"], aup_upload.NOT_COVERED)
+        self.assertFalse(card_approval.is_approved(self.org, "aup"))      # nothing reaches employees yet
+        self.assertIn("aidl_crv_approve_onb", json.dumps(report_view(self.org)))
+        self.assertIn("policy.txt", json.dumps(report_view(self.org)))
+        card_approval.approve_onboarding(self.org, "aup", self.owner)
+        self.assertTrue(card_approval.is_approved(self.org, "aup"))
+        self.assertIn("0.1", aup_store.draft(self.org)["answers"])        # Change AUP starts the builder fresh
+
+    def test_point_cards_carry_the_logo_watermark(self):
+        import io
+
+        from PIL import Image
+
+        from . import aup_upload, card_image
+        from .licence_image import save_logo
+
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 40), "#336699").save(buf, "PNG")
+        self.org.logo_data = save_logo(buf.getvalue())
+        self.org.save()
+        up = self._upload([_model_cards()])
+        up.refresh_from_db()
+        aup_upload.publish(self.org, up, self.owner)
+        self.org.refresh_from_db()
+        with patch("api.card_image.logo_watermark", wraps=card_image.logo_watermark) as wm:
+            png = card_image.render("aup-1", self.org)
+        self.assertEqual(png[1:4], b"PNG")
+        wm.assert_called_once()
+
+    def test_broken_logo_file_is_refused(self):
+        from .licence_image import save_logo
+
+        with self.assertRaises(Exception):
+            save_logo(b"this is not an image")
+
+    # Slack
+    def _post(self, payload):
+        from urllib.parse import urlencode
+
+        payload = {"team": {"id": "T9"}, "user": {"id": "U1", "team_id": "T9"}, **payload}
+        return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                            "application/x-www-form-urlencoded")
+
+    def test_slack_upload_review_and_use(self):
+        from . import aup_upload_slack
+        from .models import AupUpload
+
+        view = {**aup_upload_slack.upload_view(self.org, {}), "id": "V1"}
+        resp = self._post({"type": "view_submission", "view": {**view, "state": {"values": {}}}}).json()
+        self.assertEqual(resp["response_action"], "errors")                 # no file chosen
+        state = {"values": {"file": {"v": {"files": [{"id": "F1", "name": "policy.txt", "size": 400,
+                                                       "url_private_download": "https://files.slack/x"}]}}}}
+        download = _Resp(200)
+        download.content, download.raise_for_status = _POLICY.encode(), lambda: None
+        with patch("requests.get", return_value=download), \
+                patch("api.aup_upload.nvidia_ai.chat", side_effect=[_model_cards()]):
+            resp = self._post({"type": "view_submission", "view": {**view, "state": state}}).json()
+        self.assertIn("writing your 14 cards", json.dumps(resp))
+        up = AupUpload.objects.get(organization_id=str(self.org.pk))
+        self.assertEqual(up.status, AupUpload.Status.READY)
+        review = aup_upload_slack.review_view(self.org, up)
+        self.assertEqual(review["submit"]["text"], "Use these cards")
+        resp = self._post({"type": "view_submission", "view": {**review, "state": {"values": {}}}}).json()
+        self.assertEqual(resp["response_action"], "update")
+        self.assertIn("Your AI policy is ready", json.dumps(resp["view"]))
+        up.refresh_from_db()
+        self.assertEqual(up.status, AupUpload.Status.PUBLISHED)
+
+    def test_admin_center_offers_upload_on_enterprise_only(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"))
+        self.assertIn("aidl_aup_upload_open", home)
+        self.org.plan = "trial"
+        self.org.save()
+        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"))
+        self.assertNotIn("aidl_aup_upload_open", home)
+
+    # API
+    def test_api_upload_admin_only(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from .auth_jwt import create_access_token
+
+        learner = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5")
+        for user, code in ((learner, 403), (self.owner, 202)):
+            token = create_access_token(user)
+            with patch("api.aup_upload.nvidia_ai.chat", side_effect=[_model_cards()]), \
+                    patch("api.slack_client.slack_api", side_effect=self._fake):
+                resp = self.client.post("/api/aup/upload/", {"file": SimpleUploadedFile("p.txt", _POLICY.encode())},
+                                        HTTP_AUTHORIZATION=f"Bearer {token}")
+            self.assertEqual(resp.status_code, code)
+        token = create_access_token(self.owner)
+        got = self.client.get("/api/aup/upload/", HTTP_AUTHORIZATION=f"Bearer {token}").json()
+        self.assertEqual(got["upload"]["status"], "ready")
+        resp = self.client.post("/api/aup/upload/publish/", {"upload_id": got["upload"]["id"]},
+                                content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.assertEqual(resp.status_code, 200)

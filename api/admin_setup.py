@@ -137,6 +137,18 @@ def accepted_count(org: Organization, item: str) -> int:
     return Acknowledgement.objects.filter(user_id__in=ids, item=item, version=ACK_VERSION).count()
 
 
+def _upload_summary(org: Organization) -> dict:
+    """Uploaded AUP (Enterprise, aup_upload.py): allowed? and the newest
+    upload that isn't in use yet."""
+    from .aup_upload import can_upload, latest
+
+    allowed = can_upload(org)
+    up = latest(org) if allowed else None
+    shown = up is not None and up.status != "published"
+    return {"aup_upload_allowed": allowed,
+            "aup_upload": {"status": up.status, "file_name": up.file_name, "error": up.error} if shown else {}}
+
+
 def summary(org: Organization) -> dict:
     """Everything the setup steps show."""
     from .aup_store import current, draft, has_draft, is_complete, published_info
@@ -161,6 +173,8 @@ def summary(org: Organization) -> dict:
         "aup_done": aup_done,
         "aup_draft_section": draft(org)["section"] if not aup_done and has_draft(org) else None,
         "aup_number": published_info(org)["number"] if aup_done else None,
+        "aup_file_name": published_info(org)["file_name"] if aup_done else "",
+        **_upload_summary(org),
         "aup_rules": sum(len(p["clauses"]) for p in (current(org) or {}).get("points", [])) if aup_done else 0,
         "admins_done": admins_done,
         "team_done": team_done,
