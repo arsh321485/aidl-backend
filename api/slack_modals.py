@@ -700,8 +700,7 @@ def submit_add_admin(caller: AIDLUser, org: Organization, team_id: str, view: di
     admin.role = AIDLUser.Role.ADMIN
     apply(admin, [], [k for k, *_ in PERMS])        # a new admin starts with nothing…
     apply(admin, perms, grantable(org, caller))   # …and gets what the caller may give
-    admin.perm_create_card = False                # admins can't create cards (no such permission in Slack)
-    admin.save(update_fields=["role", *FIELDS, "perm_create_card", "updated_at"])
+    admin.save(update_fields=["role", *FIELDS, "updated_at"])
     in_background(_onboard_admin, token, org, caller, admin, slack_user_id)
     in_background(notify_master, org, caller,
                   f"👥 *{caller.full_name or caller.email}* added *{admin.full_name or admin.email}* as an admin "
