@@ -418,7 +418,7 @@ def _add_admin(d: dict) -> list:
     return [
         {"type": "header", "text": {"type": "plain_text", "text": "🧑‍💼 Add another admin", "emoji": True}},
         _section("Give a colleague access to your Admin Center — choose exactly what they can see and do.\n"
-                 "*Permissions:* Approve Apps · Access Cards · Create Card"),
+                 "*Permissions:* Approve Apps · Access Cards · Request New Cards"),
         _context(f"{d['admin_count']} of {d['admin_seat_limit']} admin seats used"),
     ]
 

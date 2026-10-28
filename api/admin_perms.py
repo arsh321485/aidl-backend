@@ -7,7 +7,7 @@ nobody can remove them or change their permissions.
 Other admins have the permissions they were given:
     approve_apps    change the AI / IT app lists
     access_cards    view and send reference cards
-    create_card     request new cards
+    create_card     request new awareness cards for review
     manage_admins   add, edit and remove admins (not the master admin)
     billing         upgrade the plan
     approve_cards   approve the cards AIDL sends to the team
@@ -23,7 +23,7 @@ from .models import AIDLUser, Organization
 PERMS = (
     ("approve_apps", "perm_approve_apps", "Approve Apps", "change the AI / IT app lists"),
     ("access_cards", "perm_access_cards", "Access Cards", "view and send reference cards"),
-    ("create_card", "perm_create_card", "Create Card", "request new cards"),
+    ("create_card", "perm_create_card", "Request New Cards", "request new awareness cards for review"),
     ("manage_admins", "perm_manage_admins", "Manage admins", "add, edit and remove admins"),
     ("billing", "perm_billing", "Manage plan & billing", "upgrade the plan"),
     ("approve_cards", "perm_approve_cards", "Approve cards", "approve the cards sent to the team"),
