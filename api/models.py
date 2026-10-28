@@ -551,3 +551,18 @@ class OAuthState(models.Model):
 
     def __str__(self):
         return self.state
+
+
+class WaitlistEntry(models.Model):
+    """Someone who isn't a company and wants AIDL later — the "Not a
+    company? Join the waitlist" box on the website (waitlist_views.py)."""
+
+    email = models.EmailField(unique=True)
+    source = models.CharField(max_length=40, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.email

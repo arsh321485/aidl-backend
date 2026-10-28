@@ -380,3 +380,5 @@ SPECTACULAR_SETTINGS = {
     "COMPONENT_SPLIT_REQUEST": True,
     "SWAGGER_UI_SETTINGS": {"persistAuthorization": True},
 }
+# Each new website waitlist sign-up is emailed here (empty = BILLING_SALES_EMAIL; both empty = no email).
+WAITLIST_NOTIFY_EMAIL = os.getenv("WAITLIST_NOTIFY_EMAIL", "")
