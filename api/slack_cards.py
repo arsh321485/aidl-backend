@@ -263,7 +263,7 @@ def _visible_admin_tabs(user: AIDLUser | None, is_primary: bool) -> list[str]:
     tabs = ["home"]
     if user.perm_manage_admins:
         tabs.append("add-admin")
-    if user.perm_access_cards or user.perm_create_card:
+    if user.perm_access_cards:
         tabs.append("cards")
     if user.perm_approve_apps:
         tabs += ["ai-apps", "it-apps"]
@@ -437,7 +437,7 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "cards": _card_rows(org, metrics["total_apps"]),
             "tabs": _visible_admin_tabs(user, is_primary),
             "can_manage_cards": is_primary or user.perm_access_cards,
-            "can_create_card": is_primary or user.perm_create_card,
+            "can_create_card": is_primary,  # no Create Card permission for other admins
             "is_primary": is_primary,
             "admins": [{
                 "id": str(a.pk), "name": a.full_name or a.email, "email": a.email, "primary": a.pk == admins[0].pk,
@@ -469,7 +469,7 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
         admin_perms.grantable(org, user) if user is not None else [])
     data["can_send"] = owner or bool(user and user.perm_access_cards)
     data["policy_only"] = bool(user and user.perm_policy and not owner and not user.perm_approve_apps
-                               and not user.perm_access_cards and not user.perm_create_card)
+                               and not user.perm_access_cards)
     data["cards"] = _apply_card_effects(data["cards"], fx)
     data["ai_apps"] = _apply_app_effects(data["ai_apps"], fx)
     shown = data["ai_apps"] + data["it_apps"]
@@ -633,7 +633,7 @@ def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
         "tabs": _visible_admin_tabs(user, owner),
         "is_primary": owner,
         "can_manage_cards": owner or user.perm_access_cards,
-        "can_create_card": owner or user.perm_create_card,
+        "can_create_card": owner,  # no Create Card permission for other admins
         "can_policy": owner or user.perm_policy or user.perm_approve_apps,
         "can_admins": owner or user.perm_manage_admins,
         "can_team": owner or user.perm_manage_admins,
