@@ -106,8 +106,8 @@ def _upload_buttons(st: dict) -> list:
     if not st.get("aup_upload_allowed"):
         return []
     if up.get("status") in ("ready", "processing"):
-        return [_button("Review uploaded cards", "aidl_aup_upload_review", value="review")]
-    return [_button("Upload your own AUP", "aidl_aup_upload_open", value="upload")]
+        return [_button("📋 Review uploaded cards", "aidl_aup_upload_review", value="review")]
+    return [_button("📤 Upload your own AUP", "aidl_aup_upload_open", value="upload")]
 
 
 def _step_aup(d: dict, st: dict) -> list:
@@ -118,8 +118,8 @@ def _step_aup(d: dict, st: dict) -> list:
                               if st.get("aup_upload_allowed") else ""))]
         if d["can_policy"]:
             blocks.append(_actions("aidl_step_aup",
-                                   _button("Build my AI policy →" if st.get("aup_draft_section") is None
-                                           else f"Continue · section {st['aup_draft_section'] + 1} of 15 →",
+                                   _button("📝 Build my AI policy →" if st.get("aup_draft_section") is None
+                                           else f"📝 Continue · section {st['aup_draft_section'] + 1} of 15 →",
                                            "aidl_policy_open", value="policy", style="primary"),
                                    *_upload_buttons(st)))
             line = _upload_line(st)
@@ -129,16 +129,16 @@ def _step_aup(d: dict, st: dict) -> list:
     state = "approved" if st.get("aup_approved") else "waiting for your approval"
     rules = st.get("aup_rules") or 0
     return [b for b in [
-        _section(f"✓  *1 · AI policy*  ·  {state}  ·  v{st.get('aup_number') or 1}  ·  14 points  ·  "
+        _section(f"✅  *1 · AI policy*  ·  {state}  ·  v{st.get('aup_number') or 1}  ·  14 points  ·  "
                  f"{rules} rule{'' if rules == 1 else 's'}"),
         _context(f"From your uploaded policy _{st['aup_file_name']}_") if st.get("aup_file_name") else None,
         _context(f"{d['approved_apps']} of {d['total_apps']} AI apps approved") if d["total_apps"] else None,
         _actions("aidl_step_aup",
-                 _button("View AUP", "aidl_aup_view", value="view"),
-                 _button("Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
+                 _button("📄 View AUP", "aidl_aup_view", value="view"),
+                 _button("✏️ Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
                  *(_upload_buttons(st) if d["can_policy"] else []),
-                 _button("AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
-                 _button("IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
+                 _button("🤖 AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
+                 _button("💻 IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
         _upload_line(st) if d["can_policy"] else None,
     ] if b]
 
