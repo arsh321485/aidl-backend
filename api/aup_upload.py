@@ -134,7 +134,7 @@ def _docx_text(data: bytes) -> str:
 def start(org: Organization, admin: AIDLUser, file_name: str, data: bytes, *, slack_view_id: str = "") -> AupUpload:
     """Check and read the file now (fast), then generate in the background."""
     if not can_upload(org):
-        raise UploadError("Uploading your own AUP is part of the Enterprise plan.")
+        raise UploadError("Uploading your own AUP is part of the Basic and Enterprise plans.")
     if not nvidia_ai.configured():
         raise UploadError("AI card generation isn't set up yet. Please try again later or contact AIDL support.")
     if busy(org):

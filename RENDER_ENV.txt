@@ -99,10 +99,10 @@ AUTH_EMAIL_OTP=True
 DEFAULT_FROM_EMAIL=AIDL <info@grcmentor.ai>
 # Website waitlist sign-ups are emailed here (empty = BILLING_SALES_EMAIL).
 WAITLIST_NOTIFY_EMAIL=
-# Uploaded AUP → 14 cards (Enterprise) with an NVIDIA hosted model.
+# Uploaded AUP → 14 cards (Basic + Enterprise) with an NVIDIA hosted model.
 # NVIDIA_API_KEY=         (secret — set in Render only; "nvapi-…" from build.nvidia.com)
 NVIDIA_MODEL=
 # Optional (defaults shown): NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
 # NVIDIA_STATUS_URL=https://api.nvcf.nvidia.com/v2/nvcf/pexec/status  NVIDIA_TIMEOUT=300
-# NVIDIA_MAX_TOKENS=8000  NVIDIA_TEMPERATURE=0.2  NVIDIA_EXTRA_BODY={}  AUP_UPLOAD_PLANS=enterprise
+# NVIDIA_MAX_TOKENS=8000  NVIDIA_TEMPERATURE=0.2  NVIDIA_EXTRA_BODY={}  AUP_UPLOAD_PLANS=basic,enterprise
 # AUP_UPLOAD_MAX_BYTES=10485760  AUP_UPLOAD_MAX_CHARS=120000

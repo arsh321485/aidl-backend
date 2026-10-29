@@ -399,6 +399,6 @@ except ValueError:
 if not isinstance(NVIDIA_EXTRA_BODY, dict):
     NVIDIA_EXTRA_BODY = {}
 # Uploaded AUPs: plans that may upload (comma-separated), file size, and how much text goes to the model.
-AUP_UPLOAD_PLANS = {p.strip() for p in os.getenv("AUP_UPLOAD_PLANS", "enterprise").split(",") if p.strip()}
+AUP_UPLOAD_PLANS = {p.strip() for p in os.getenv("AUP_UPLOAD_PLANS", "basic,enterprise").split(",") if p.strip()}
 AUP_UPLOAD_MAX_BYTES = int(os.getenv("AUP_UPLOAD_MAX_BYTES", str(10 * 1024 * 1024)))
 AUP_UPLOAD_MAX_CHARS = int(os.getenv("AUP_UPLOAD_MAX_CHARS", "120000"))
