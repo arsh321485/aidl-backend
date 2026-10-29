@@ -1428,7 +1428,7 @@ class SlackHomeVisualTests(TestCase):
         self.assertFalse(any(b.get("block_id") == "aidl_tabs" for b in blocks))
         text = json.dumps(blocks, ensure_ascii=False)
         for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 5 setup steps done",
-                      "✓  *1 · AI policy*  ·  waiting for your approval  ·  v1  ·  14 points", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
+                      "✅  *1 · AI policy*  ·  waiting for your approval  ·  v1  ·  14 points", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
                       "*2 · Add admins (optional)*", "aidl_open_add-admin", "aidl_setup_skip",
                       "3 · Add your team*  —  _after step 2_"):
             self.assertIn(label, text)
