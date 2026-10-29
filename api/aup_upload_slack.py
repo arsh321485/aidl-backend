@@ -1,6 +1,6 @@
 """Slack screens for an uploaded AUP (aup_upload.py).
 
-    Admin Center step 1 → "Upload your own AUP" (Enterprise) → popup with a
+    Admin Center step 1 → "Upload your own AUP" (Basic and Enterprise) → popup with a
     file field (callback aidl_aup_upload) → "AIDL is writing your 14 cards"
     → when the model is done, that popup turns into the review (if it's still
     open) and the admin gets a DM with "Review cards" either way.
@@ -87,7 +87,7 @@ def _card_block(c: dict) -> list:
 
 def review_view(org: Organization, upload: AupUpload | None, notice: str = "") -> dict:
     if upload is None:
-        return _modal(REVIEW, "Your AUP cards", [{"type": "section", "text": _md("No uploaded policy yet.")}])
+        return _modal(REVIEW, "Your AUP cards", [{"type": "section", "text": _md(notice or "No uploaded policy yet.")}])
     if upload.status == AupUpload.Status.PROCESSING:
         return working_view(upload.file_name)
     if upload.status == AupUpload.Status.FAILED:
@@ -142,7 +142,7 @@ def submit_upload(admin: AIDLUser, org: Organization, view: dict) -> dict:
         return {"response_action": "errors", "errors": {"file": "Choose your policy file."}}
     if not aup_upload.can_upload(org):
         return {"response_action": "errors", "errors": {"file": "Uploading your own AUP is part of the "
-                                                                "Enterprise plan."}}
+                                                                "Basic and Enterprise plans."}}
     name = files[0].get("name") or files[0].get("title") or "policy"
     if aup_upload.file_type(name) not in aup_upload.TYPES:
         return {"response_action": "errors", "errors": {"file": "Upload a PDF, Word (.docx) or text file."}}

@@ -3883,7 +3883,7 @@ class NvidiaClientTests(SimpleTestCase):
 
 
 @override_settings(NVIDIA_API_KEY="nvapi-test", NVIDIA_MODEL="test/model", NVIDIA_EXTRA_BODY={},
-                   AUP_UPLOAD_PLANS={"enterprise"}, SLACK_REPLY_SYNC=True, CARD_IMAGE_PREDRAW=False)
+                   AUP_UPLOAD_PLANS={"basic", "enterprise"}, SLACK_REPLY_SYNC=True, CARD_IMAGE_PREDRAW=False)
 class AupUploadTests(TestCase):
     """Upload your own AUP (Enterprise): read the file, the model writes 14
     checked cards, the admin reviews and publishes, approval gates delivery."""
@@ -3937,15 +3937,15 @@ class AupUploadTests(TestCase):
         self.assertIn("too big", err.exception.message)
 
     # who can upload
-    def test_only_enterprise_and_only_when_configured(self):
+    def test_only_paid_plans_and_only_when_configured(self):
         from .aup_upload import UploadError, start
 
-        self.org.plan = "basic"
+        self.org.plan = "trial"
         self.org.save()
         with self.assertRaises(UploadError) as err:
             start(self.org, self.owner, "p.txt", _POLICY.encode())
-        self.assertIn("Enterprise", err.exception.message)
-        self.org.plan = "enterprise"
+        self.assertIn("Basic and Enterprise", err.exception.message)
+        self.org.plan = "basic"
         self.org.save()
         with self.settings(NVIDIA_API_KEY=""), self.assertRaises(UploadError) as err:
             start(self.org, self.owner, "p.txt", _POLICY.encode())
@@ -4087,12 +4087,15 @@ class AupUploadTests(TestCase):
         up.refresh_from_db()
         self.assertEqual(up.status, AupUpload.Status.PUBLISHED)
 
-    def test_admin_center_offers_upload_on_enterprise_only(self):
+    def test_admin_center_offers_upload_on_basic_and_enterprise(self):
         from .slack_blocks import admin_card_blocks
         from .slack_cards import build_admin_cards_context
 
         home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"))
-        self.assertIn("aidl_aup_upload_open", home)
+        self.assertIn("aidl_aup_upload_open", home)                     # Enterprise
+        self.org.plan = "basic"
+        self.org.save()
+        self.assertIn("aidl_aup_upload_open", json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home")))
         self.org.plan = "trial"
         self.org.save()
         home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"))

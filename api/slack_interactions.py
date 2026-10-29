@@ -820,7 +820,7 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
         if action_id == "aidl_aup_upload_open":
             view = aup_upload_slack.upload_view(org, meta) if aup_upload.can_upload(org) else \
-                aup_upload_slack.review_view(org, None, notice="Uploading your own AUP is part of the Enterprise plan.")
+                aup_upload_slack.review_view(org, None, notice="Uploading your own AUP is part of the Basic and Enterprise plans.")
         else:
             view = aup_upload_slack.review_view(org, aup_upload.latest(org))
         _open_modal(org, payload.get("trigger_id", ""), view, push=in_modal)
