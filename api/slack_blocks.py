@@ -151,7 +151,7 @@ def _step_aup(d: dict, st: dict) -> list:
                                style="primary" if not cards else ""))
         buttons += _upload_buttons(st)
         if st.get("company_set"):
-            buttons.append(_button("⚖️ Your laws", "aidl_laws_open", value="laws"))
+            buttons.append(_button("🏛 Your regulators", "aidl_regulators_open", value="regulators"))
     if cards:
         buttons.append(_button("📄 View policy", "aidl_aup_view", value="view"))
         if d["can_apps"]:
@@ -462,7 +462,7 @@ def _add_admin(d: dict) -> list:
     return [
         {"type": "header", "text": {"type": "plain_text", "text": "🧑‍💼 Add another admin", "emoji": True}},
         _section("Give a colleague access to your Admin Center — choose exactly what they can see and do.\n"
-                 "*Permissions:* Approve Apps · Access Cards · Request New Cards"),
+                 "*Permissions:* Approve Apps · Request New Cards · Manage admins · Manage plan & billing · Approve cards"),
         _context(f"{d['admin_count']} of {d['admin_seat_limit']} admin seats used"),
     ]
 

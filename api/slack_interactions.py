@@ -99,10 +99,11 @@ _PREOPENED: dict[str, str] = {}
 _PREOPEN_LOCK = threading.Lock()
 _POPUP_TITLES = {
     "aidl_policy_open": "Add a policy card", "aidl_aup_view": "Your AI policy",
-    "aidl_laws_open": "Your laws", "aidl_company_open": "About your company",
+    "aidl_regulators_open": "Your regulators", "aidl_laws_open": "Your regulators",
+    "aidl_company_open": "About your company",
     "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_admin_edit": "Edit permissions", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
     "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
-    "aidl_open_cards": "Send Cards", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
+    "aidl_open_cards": "Approve cards", "aidl_crv_assign": "Ask an admin", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
     "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview", "aidl_ack_alerts": "Acknowledgement alerts",
     "aidl_appreq_reject": "Reject app", "aidl_appreq_info": "Ask for more info",
     "aidl_aup_upload_open": "Upload your AUP", "aidl_aup_upload_review": "Your AUP cards",
@@ -169,6 +170,7 @@ _SUBMIT_TAB = {
     "aidl_add_people": "home",
     policy_cards_slack.CARD: "home",
     policy_cards_slack.COMPANY: "home",
+    card_review_slack.ASSIGN: "home",
     "aidl_aup_upload": "home",
     "aidl_aup_upload_review": "home",
     "aidl_logo": "home",
@@ -212,6 +214,8 @@ def _handle_submission(payload: dict):
         allowed = d["can_policy"]
     elif callback == "aidl_logo":
         allowed = d["can_admins"]
+    elif callback == card_review_slack.ASSIGN:
+        allowed = d["can_approve_cards"]
     elif callback in (app_requests.REJECT, app_requests.INFO):
         allowed = d["can_apps"]
     if not allowed:
@@ -227,6 +231,7 @@ def _handle_submission(payload: dict):
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
         policy_cards_slack.CARD: lambda: _submit_policy(admin, org, view),
         policy_cards_slack.COMPANY: lambda: policy_cards_slack.submit_company(admin, org, view),
+        card_review_slack.ASSIGN: lambda: card_review_slack.submit_assign(admin, org, view),
         aup_upload_slack.UPLOAD: lambda: aup_upload_slack.submit_upload(admin, org, view),
         aup_upload_slack.REVIEW: lambda: _submit_policy(admin, org, view),
         "aidl_logo": lambda: slack_modals.submit_logo(org, view),
@@ -634,27 +639,55 @@ def slack_interactions(request):
     return HttpResponse(status=200)
 
 
-def _card_review_action(org, user, payload: dict, action: dict, action_id: str) -> None:
-    """Review & approve cards popup (card_review_slack.py)."""
+def _may_review_assigned(org, user, action: dict, action_id: str) -> bool:
+    """Without the Approve cards permission: only the cards another admin
+    asked this admin to approve (approve / skip / preview them)."""
+    keys = card_approval.assigned_keys(org, user)
+    if not keys:
+        return False
+    value = action.get("value") or (action.get("selected_option") or {}).get("value", "")
+    if action_id == "aidl_cards_review" or action_id == "aidl_crv_preview":
+        return True
+    if action_id == "aidl_crv_approve_paw" or (action_id == "aidl_crv_preview_approve" and value.startswith("paw|")):
+        return f"paw:{value.split('|', 1)[-1]}" in keys
+    if action_id in ("aidl_crv_card", "aidl_crv_preview_approve"):
+        act, no = value.split("|", 1) if "|" in value else ("approve", value)
+        return act in ("approve", "skip", "preview") and f"pkg:{no}" in keys
+    return False
+
+
+def _card_review_action(org, user, payload: dict, action: dict, action_id: str, *, full: bool = True,
+                        can_request: bool = False) -> None:
+    """Review & approve cards popup (card_review_slack.py). `full` = has the
+    Approve cards permission; otherwise only the cards assigned to them."""
     view = payload.get("view") or {}
     meta = json.loads(view.get("private_metadata") or "{}") if view.get("callback_id") == card_review_slack.CALLBACK else {}
     month = int(meta.get("month") or 1)
     value = action.get("value") or (action.get("selected_option") or {}).get("value", "")
     token = slack_client.bot_token(org)
+    mine = bool(meta.get("mine")) or not full
+
+    def popup(notice: str = "", at_month: int | None = None) -> dict:
+        if mine:
+            return card_review_slack.mine_view(org, user, notice)
+        return card_review_slack.review_view(org, at_month or month, notice, can_request=can_request)
 
     def redraw(notice: str = "", view_id: str = "", at_month: int | None = None) -> None:
         target = view_id or (view.get("id") if view.get("callback_id") == card_review_slack.CALLBACK else "")
         if target:
-            slack_client.slack_api("views.update", token, json={
-                "view_id": target, "view": card_review_slack.review_view(org, at_month or month, notice)})
+            slack_client.slack_api("views.update", token, json={"view_id": target, "view": popup(notice, at_month)})
 
     if action_id == "aidl_cards_review":
         from .card_image import onboarding_kinds, warm
 
         warm(org, [k for item in card_approval.ONBOARDING for k in onboarding_kinds(org, item)])  # fast previews
-        _open_modal(org, payload.get("trigger_id", ""),
-                    card_review_slack.review_view(org, int(value) if str(value).isdigit() else 1),
+        mine = mine or value == "mine"
+        _open_modal(org, payload.get("trigger_id", ""), popup(at_month=int(value) if str(value).isdigit() else 1),
                     push=bool(view.get("id")))
+        return
+    if full and (action_id == "aidl_crv_assign" or (action_id == "aidl_crv_card" and value.startswith("assign|"))):
+        what = value.split("|", 1)[1] if value.startswith("assign|") else value
+        _open_modal(org, payload.get("trigger_id", ""), card_review_slack.assign_view(org, user, what), push=True)
         return
     if action_id == "aidl_crv_month":
         redraw(at_month=int(value))
@@ -832,17 +865,17 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
         return HttpResponse(status=200)
 
     # Your AI policy: add a policy card (the company questions the first
-    # time), your laws, change country / industry.
+    # time), your regulators, change country / industry.
     if org is not None and d["can_policy"] and (
-            action_id in ("aidl_policy_open", "aidl_laws_open", "aidl_company_open")
+            action_id in ("aidl_policy_open", "aidl_regulators_open", "aidl_laws_open", "aidl_company_open")
             or (action_id in ("aidl_aup_view", "aidl_aup_send") and not aup_store.is_complete(org))):
         meta = {"channel_id": (payload.get("channel") or {}).get("id") or org.slack_channel_id}
         in_modal = bool((payload.get("view") or {}).get("id"))
         if action_id == "aidl_company_open":
-            view = policy_cards_slack.company_view(org, meta, then="laws")
-        elif action_id == "aidl_laws_open":
-            view = (policy_cards_slack.laws_view(org, meta) if aup_store.company(org)
-                    else policy_cards_slack.company_view(org, meta, then="laws"))
+            view = policy_cards_slack.company_view(org, meta, then="regulators")
+        elif action_id in ("aidl_regulators_open", "aidl_laws_open"):  # laws: older messages
+            view = (policy_cards_slack.regulators_view(org, meta) if aup_store.company(org)
+                    else policy_cards_slack.company_view(org, meta, then="regulators"))
         else:
             view = policy_cards_slack.open_view(org, meta)
         _open_modal(org, payload.get("trigger_id", ""), view, push=in_modal)
@@ -920,11 +953,15 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
             slack_modals.in_background(_send_aup_reminders, org, user, response_url)
         return HttpResponse(status=200)
 
+    # The paid extra reference cards are gone; older "Cards" buttons open Card approval.
+    if action_id in ("aidl_open_cards", "aidl_tab_cards"):
+        action_id, action = "aidl_cards_review", {**action, "value": "1"}
     if org is not None and (action_id == "aidl_cards_review" or action_id.startswith("aidl_crv_")):
-        if not d.get("can_approve_cards"):
+        if not d.get("can_approve_cards") and not _may_review_assigned(org, user, action, action_id):
             _reply(response_url, text="Approving cards needs the *Approve cards* permission — ask your master admin.")
             return HttpResponse(status=200)
-        _card_review_action(org, user, payload, action, action_id)
+        _card_review_action(org, user, payload, action, action_id, full=bool(d.get("can_approve_cards")),
+                            can_request=bool(d.get("can_create_card")))
         return HttpResponse(status=200)
 
     if org is not None and action_id == "aidl_ack_alerts":

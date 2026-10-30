@@ -804,8 +804,10 @@ class SlackCardsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "for Secureitlab")
         self.assertContains(resp, "Welcome to your Admin Center, Priya")
-        for tab in ("home", "add-admin", "cards", "ai-apps", "it-apps"):
+        for tab in ("home", "add-admin", "ai-apps", "it-apps"):
             self.assertContains(resp, f'data-tab="{tab}"')
+        self.assertNotContains(resp, 'data-tab="cards"')       # the paid reference cards are gone
+        self.assertNotContains(resp, 'id="card-cards"')
         self.assertNotContains(resp, 'data-tab="add-user"')   # users join the channel instead
 
     def test_invited_admin_sees_only_permitted_tabs(self):
@@ -814,8 +816,7 @@ class SlackCardsTests(TestCase):
         )
         resp = self._get("admin", invited)
         self.assertContains(resp, 'data-tab="home"')
-        self.assertContains(resp, 'data-tab="cards"')
-        for tab in ("add-admin", "ai-apps", "it-apps"):
+        for tab in ("cards", "add-admin", "ai-apps", "it-apps"):
             self.assertNotContains(resp, f'data-tab="{tab}"')
 
     def test_user_cards_welcome_and_selected_lights(self):
@@ -1005,15 +1006,6 @@ class SlackInteractionsTests(TestCase):
         resp, post = self._post({"action_id": "aidl_tab_cards", "value": "cards"}, secret="wrong")
         self.assertEqual(resp.status_code, 401)
         post.assert_not_called()
-
-    def test_tab_click_replies_privately_with_that_card(self):
-        resp, post = self._post({"action_id": "aidl_tab_cards", "value": "cards"})
-        self.assertEqual(resp.status_code, 200)
-        body = post.call_args.kwargs["json"]
-        self.assertEqual(body["response_type"], "ephemeral")
-        text = json.dumps(body["blocks"])
-        self.assertIn("Send Cards to your team", text)
-        self.assertIn("aidl_open_cards", text)  # opens a Slack modal, not a web page
 
     def test_tab_outside_permissions_is_refused(self):
         make_user(self.org, microsoft_id="slack:T9:U2", perm_approve_apps=False, perm_access_cards=True, perm_create_card=False)
@@ -1228,27 +1220,6 @@ class SlackModalTests(TestCase):
         resp = self._submit("aidl_add_admin", {"email": {"value": "rahul@acme.example"}})
         self.assertIn("no seats left", resp.json()["errors"]["email"])
 
-    def test_card_request_then_send_with_lights(self):
-        resp = self._submit("aidl_card_request", {}, meta={"channel_id": "C42", "card_id": "c1"})
-        self.assertEqual(resp.json()["view"]["callback_id"], "aidl_card_send")
-        meta = {"channel_id": "C42", "card_id": "c1"}
-        resp = self._submit("aidl_card_send", {"lights": {"selected_options": []}, "when": {"selected_option": {"value": "now"}}}, meta=meta)
-        self.assertIn("Select at least one light", resp.json()["errors"]["lights"])
-        resp = self._submit("aidl_card_send", {"lights": {"selected_options": [{"value": "green"}, {"value": "red"}]},
-                                               "when": {"selected_option": {"value": "now"}}}, meta=meta)
-        self.assertEqual(resp.json(), {"response_action": "clear"})
-        post = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "C42")
-        text = json.dumps(post["blocks"])
-        self.assertIn("GREEN", text)
-        self.assertNotIn("AMBER", text)
-        self.assertEqual(CardRequest.objects.get(organization_id=str(self.org.pk), card_id="c1").status, CardRequest.Status.SENT)
-
-    def test_schedule_needs_a_time(self):
-        meta = {"channel_id": "C42", "card_id": "c8"}
-        self._submit("aidl_card_request", {}, meta=meta)
-        resp = self._submit("aidl_card_send", {"when": {"selected_option": {"value": "later"}}}, meta=meta)
-        self.assertIn("at", resp.json()["errors"])
-
     def test_add_app_saves_to_registry(self):
         resp = self._submit("aidl_add_app", {
             "name": {"value": "Perplexity"},
@@ -1319,16 +1290,6 @@ class SlackModalTests(TestCase):
                              HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
         updated = [b for m, b in self.calls if m == "views.update"][-1]
         self.assertIn("files:write", json.dumps(updated["view"]["blocks"]))
-
-    def test_traffic_light_card_has_rating_row(self):
-        meta = {"channel_id": "C42", "card_id": "c1"}
-        self._submit("aidl_card_request", {}, meta=meta)
-        self._submit("aidl_card_send", {"lights": {"selected_options": [{"value": "green"}]},
-                                        "when": {"selected_option": {"value": "now"}}}, meta=meta)
-        post = next(b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "C42")
-        text = json.dumps(post["blocks"])
-        self.assertIn("Was this card useful?", text)
-        self.assertIn("aidl_rate_like", text)
 
     def test_full_highway_code_opens_for_any_member(self):
         self._post({"type": "block_actions", "user": {"id": "U99", "team_id": "T9"},  # not an AIDL admin
@@ -2400,7 +2361,8 @@ class PolicyCardsSlackTests(TestCase):
 
         return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
 
-    def test_first_time_asks_company_then_sends_laws_card(self):
+    @override_settings(REGULATORS_PREVIEW=True)
+    def test_first_time_asks_company_then_sends_regulator_card(self):
         self._post({"type": "block_actions", "trigger_id": "TR", "channel": {"id": "C42"},
                     "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]})
         company = _shown_views(self.calls)[-1]
@@ -2409,8 +2371,10 @@ class PolicyCardsSlackTests(TestCase):
                                       "industry": {"v": {"selected_option": {"value": "Banking & financial services"}}}})
         self.assertEqual(resp["view"]["callback_id"], "aidl_policy_topics")       # then the topics
         dm = json.dumps([b for m, b in self.calls if m == "chat.postMessage"], ensure_ascii=False)
-        for law in ("DPDP Act", "CERT-In", "PCI DSS", "not legal advice"):
-            self.assertIn(law, dm)
+        for name in ("Regulators for Acme", "Data Protection Board of India", "CERT-In", "Reserve Bank of India",
+                     "https://www.rbi.org.in", "DRAFT", "not legal advice"):
+            self.assertIn(name, dm)
+        self.assertNotIn("PCI DSS", dm)                                            # a standard, not a regulator
         self.calls.clear()
         self._post({"type": "block_actions", "trigger_id": "TR2", "channel": {"id": "C42"},
                     "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]})
@@ -2566,6 +2530,73 @@ class PolicyCardsSlackTests(TestCase):
         path = __import__("api.card_image", fromlist=["x"]).image_url("paw-never-ai", self.org).split("onrender.com", 1)[-1]
         resp = self.client.get(path)
         self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
+
+    def test_regulator_card_shows_only_reviewed_entries(self):
+        from . import regulators
+
+        blocks = json.dumps(regulators.card_blocks("Acme", ["India"], "Banking & financial services"))
+        self.assertIn("preparing the regulator details", blocks)                   # nothing reviewed yet
+        self.assertNotIn("Reserve Bank", blocks)
+        entry = regulators.BY_COUNTRY["India"][0]
+        with patch.dict(entry, {"reviewed": "2026-11-01"}):
+            blocks = json.dumps(regulators.card_blocks("Acme", ["India"], "Banking & financial services"))
+        self.assertIn("Data Protection Board of India", blocks)
+        self.assertNotIn("DRAFT", blocks)
+
+    def test_extra_paid_cards_are_gone_and_old_buttons_open_card_approval(self):
+        from .card_review_slack import review_view
+
+        view = json.dumps(review_view(self.org, 1, can_request=True), ensure_ascii=False)
+        for gone in ("Extra reference cards", "aidl_open_cards", "one-time", "$"):
+            self.assertNotIn(gone, view)
+        for shown in ("Your AI policy", "aidl_policy_open", "＋ Request a new card", "Traffic Light Check",
+                      "The Highway Code"):
+            self.assertIn(shown, view)
+        self.assertNotIn("Request a new card", json.dumps(review_view(self.org, 1)))   # needs the permission
+        self._post({"type": "block_actions", "trigger_id": "TR", "channel": {"id": "C42"},
+                    "actions": [{"action_id": "aidl_open_cards", "value": "cards"}]})       # an old message's button
+        self.assertEqual(_shown_views(self.calls)[-1]["callback_id"], "aidl_cards_review")
+        from .admin_perms import PERMS
+
+        self.assertNotIn("access_cards", [k for k, *_ in PERMS])
+        self.assertIn("create_card", [k for k, *_ in PERMS])
+
+    def test_ask_another_admin_to_approve_some_cards(self):
+        from . import card_approval
+        from .card_review_slack import ASSIGN, assign_view
+
+        rahul = make_user(self.org, microsoft_id="slack:T9:U7", full_name="Rahul K", perm_approve_cards=False)
+        no = card_approval.month_cards(self.org, 1)[0]["no"]
+        view = assign_view(self.org, self.owner, "month:1")
+        self.assertIn("Rahul K", json.dumps(view))
+        resp = self._submit({**view, "callback_id": ASSIGN},
+                            {"admin": {"v": {"selected_option": {"value": str(rahul.pk)}}}})
+        self.assertEqual(resp["response_action"], "clear")
+        self.org.refresh_from_db()
+        self.assertIn(f"pkg:{no}", card_approval.assigned_keys(self.org, rahul))
+        dm = json.dumps([b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U7"])
+        self.assertIn("Review my cards", dm)
+        self.calls.clear()
+        # Rahul has no "Approve cards" permission, but can approve what he was asked to
+        self._post({"type": "block_actions", "user": {"id": "U7", "team_id": "T9"}, "trigger_id": "TR",
+                    "actions": [{"action_id": "aidl_cards_review", "value": "mine"}]})
+        mine = _shown_views(self.calls)[-1]
+        self.assertIn("Cards you've been asked to approve", json.dumps(mine))
+        self._post({"type": "block_actions", "user": {"id": "U7", "team_id": "T9"},
+                    "view": {**mine, "id": "V9", "private_metadata": json.dumps({"mine": True})},
+                    "actions": [{"action_id": "aidl_crv_card", "selected_option": {"value": f"approve|{no}"}}]})
+        self.org.refresh_from_db()
+        self.assertEqual(card_approval.status(self.org, f"pkg:{no}"), card_approval.APPROVED)
+        other = card_approval.month_cards(self.org, 2)[0]["no"]                          # not assigned to him
+        self._post({"type": "block_actions", "user": {"id": "U7", "team_id": "T9"},
+                    "actions": [{"action_id": "aidl_crv_card", "selected_option": {"value": f"approve|{other}"}}]})
+        self.assertNotEqual(card_approval.status(self.org, f"pkg:{other}"), card_approval.APPROVED)
+
+    def test_images_have_short_hover_text(self):
+        from . import card_image
+
+        for kind in ("traffic_light", "highway_code", "aup-7", "paw-never-ai"):
+            self.assertLessEqual(len(card_image.alt_text(kind, self.org)), 40, kind)
 
     def test_fresh_reset_clears_acceptances_and_licences(self):
         from django.core.management import call_command
@@ -3271,7 +3302,7 @@ class CardApprovalTests(TestCase):
         self.org.save()
         view = review_view(self.org, 1)
         text = json.dumps(view, ensure_ascii=False)
-        for label in ("Onboarding cards", "Month 1 of 12", "Month 2 →", "aidl_crv_card", "Extra reference cards"):
+        for label in ("Onboarding cards", "Month 1 of 12", "Month 2 →", "aidl_crv_card", "Your AI policy"):
             self.assertIn(label, text)
         live = {"id": "V1", "callback_id": "aidl_cards_review", "private_metadata": json.dumps({"month": 1})}
         self._review("aidl_crv_approve_month", "1", view=live)

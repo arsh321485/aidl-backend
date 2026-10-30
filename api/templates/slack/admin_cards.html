@@ -151,8 +151,7 @@
           <div class="label-caps strip-label">Permissions</div>
           <div class="perm-grid">
             <button type="button" class="perm-chip" data-perm="approve_apps" aria-pressed="true"><b>Approve Apps</b><span>Change the AI / IT registry</span></button>
-            <button type="button" class="perm-chip" data-perm="access_cards" aria-pressed="false"><b>Access Cards</b><span>View and send reference cards</span></button>
-            <button type="button" class="perm-chip" data-perm="create_card" aria-pressed="false"><b>Create Card</b><span>Request new cards</span></button>
+            <button type="button" class="perm-chip" data-perm="create_card" aria-pressed="false"><b>Request New Cards</b><span>Request new awareness cards for review</span></button>
           </div>
           <div class="actions-row">
             <button class="slack-btn primary" type="submit">Send Admin Invite</button>
@@ -176,7 +175,7 @@
       <div class="msg-col">
         <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
         <div class="header-block">👤 Add a team member</div>
-        <div class="section-text">Issue a license to a team member — they get the reference cards and can request more for their channel. No Admin Center access.</div>
+        <div class="section-text">Issue a license to a team member — they get their AI Driving License cards. No Admin Center access.</div>
 
         <form id="addUserForm" novalidate>
           <div class="field">
@@ -192,7 +191,7 @@
           </div>
         </form>
         <div class="context-line" id="userLicencesLine" aria-live="polite">{{ d.licences_issued }} of {{ d.seats_purchased }} licenses issued</div>
-        <div class="next-hint">→ Next: send your team the reference cards they'll need</div>
+        <div class="next-hint">→ Next: set which AI tools your team is allowed to use</div>
       </div>
     </div>
   </div>

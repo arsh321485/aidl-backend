@@ -450,8 +450,9 @@ def new_card_view(meta: dict) -> dict:
         _input("desc", "What should it cover?", {"type": "plain_text_input", "action_id": "v", "multiline": True}, optional=True),
         _input("priority", "Priority", {"type": "static_select", "action_id": "v", "options": [_option("Standard"), _option("Urgent")],
                                         "initial_option": _option("Standard")}),
-        {"type": "context", "elements": [_md("Counts toward your monthly quota · pricing scoped after review")]},
-    ], submit="Submit Request", meta=meta)
+        {"type": "context", "elements": [_md("AIDL's team reviews every request and tells you when the card is "
+                                             "ready to approve.")]},
+    ], submit="Send request", meta=meta)
 
 
 def add_app_view(kind: str, meta: dict) -> dict:
@@ -840,7 +841,26 @@ def submit_new_card(caller: AIDLUser, org: Organization, view: dict) -> dict | N
     # A custom request uses one of the monthly quota (guide 8.4).
     CardRequest.objects.create(organization_id=str(org.pk), card_id=f"custom:{name[:40]}",
                                status=CardRequest.Status.REQUESTED, requested_by_email=caller.email)
-    return {"notice": f"⏳ Pending Review · {name} ({priority})"}
+    in_background(_tell_aidl_team, org.name, caller.full_name or caller.email, caller.email, name, priority, desc)
+    return {"notice": f"⏳ Card requested · {name} ({priority}) — AIDL's team will review it."}
+
+
+def _tell_aidl_team(org_name: str, who: str, email: str, name: str, priority: str, desc: str) -> None:
+    """Email a new-card request to the AIDL team (CARD_REQUEST_EMAIL, else
+    BILLING_SALES_EMAIL)."""
+    from django.conf import settings
+    from django.core.mail import send_mail
+
+    to = getattr(settings, "CARD_REQUEST_EMAIL", "") or settings.BILLING_SALES_EMAIL
+    if not to:
+        return
+    try:
+        send_mail(subject=f"AIDL card request ({priority}): {name} — {org_name}",
+                  message=f"{who} ({email}) at {org_name} asked for a new card.\n\nCard: {name}\nPriority: {priority}"
+                          f"\nWhat it should cover: {desc or '—'}",
+                  from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[to], fail_silently=True)
+    except Exception:  # noqa: BLE001 — the request is saved either way
+        pass
 
 
 def submit_add_app(caller: AIDLUser, org: Organization, view: dict) -> dict | None:

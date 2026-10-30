@@ -30,7 +30,6 @@ DEFAULT_POLICY_VERSION = "v3.1"
 ADMIN_TABS = (
     ("home", "Home", "🏠"),
     ("add-admin", "Add Admin", "🧑‍💼"),
-    ("cards", "Cards", "📬"),
     ("ai-apps", "AI Apps", "🤖"),
     ("it-apps", "IT Apps", "💻"),
 )
@@ -263,8 +262,6 @@ def _visible_admin_tabs(user: AIDLUser | None, is_primary: bool) -> list[str]:
     tabs = ["home"]
     if user.perm_manage_admins:
         tabs.append("add-admin")
-    if user.perm_access_cards or user.perm_create_card:
-        tabs.append("cards")
     if user.perm_approve_apps:
         tabs += ["ai-apps", "it-apps"]
     return tabs
@@ -436,7 +433,7 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "it_apps": it_apps,
             "cards": _card_rows(org, metrics["total_apps"]),
             "tabs": _visible_admin_tabs(user, is_primary),
-            "can_manage_cards": is_primary or user.perm_access_cards,
+            "can_manage_cards": False,  # the paid reference cards are gone from Slack
             "can_create_card": is_primary or user.perm_create_card,
             "is_primary": is_primary,
             "admins": [{
@@ -467,9 +464,9 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
     data["can_approve_cards"] = owner or bool(user and user.perm_approve_cards)
     data["grantable"] = [k for k, _f, _l, _d in admin_perms.PERMS] if owner else (
         admin_perms.grantable(org, user) if user is not None else [])
-    data["can_send"] = owner or bool(user and user.perm_access_cards)
+    data["can_send"] = owner or bool(user and user.perm_approve_cards)  # start / remind
     data["policy_only"] = bool(user and user.perm_policy and not owner and not user.perm_approve_apps
-                               and not user.perm_access_cards and not user.perm_create_card)
+                               and not user.perm_approve_cards and not user.perm_create_card)
     data["cards"] = _apply_card_effects(data["cards"], fx)
     data["ai_apps"] = _apply_app_effects(data["ai_apps"], fx)
     shown = data["ai_apps"] + data["it_apps"]
@@ -632,7 +629,7 @@ def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
     data = {
         "tabs": _visible_admin_tabs(user, owner),
         "is_primary": owner,
-        "can_manage_cards": owner or user.perm_access_cards,
+        "can_manage_cards": False,  # the paid reference cards are gone from Slack
         "can_create_card": owner or user.perm_create_card,
         "can_policy": owner or user.perm_policy or user.perm_approve_apps,
         "can_admins": owner or user.perm_manage_admins,
@@ -641,7 +638,7 @@ def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
         "can_approve_cards": owner or user.perm_approve_cards,
         "can_apps": owner or user.perm_approve_apps,
         "grantable": [k for k, f, _l, _d in admin_perms.PERMS if owner or getattr(user, f, False)],
-        "can_send": owner or user.perm_access_cards,
+        "can_send": owner or user.perm_approve_cards,  # start the programme / remind
         "admin_count": AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN,
                                                is_active=True).count() if org is not None else 0,
         "admin_seat_limit": org.admin_seat_limit if org is not None else 3,

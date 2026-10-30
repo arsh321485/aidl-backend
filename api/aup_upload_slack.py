@@ -67,7 +67,7 @@ def upload_view(org: Organization, meta: dict, notice: str = "") -> dict:
 def working_view(file_name: str) -> dict:
     return _modal(REVIEW, "Your AUP cards", [
         {"type": "section", "text": _md(f"⏳ *AIDL is writing your 14 cards* from _{file_name}_.")},
-        {"type": "context", "elements": [_md("This usually takes a minute or two. You can close this window — "
+        {"type": "context", "elements": [_md("This usually takes a few minutes. You can close this window — "
                                              "AIDL will message you when the cards are ready to review.")]},
     ])
 
