@@ -1,8 +1,8 @@
 """Licence rules — platform-neutral (Slack today, Teams later).
 
 A user earns the Learner (L) licence by accepting the Highway Code, the
-Traffic Light Check and all 14 points of the organization's AUP
-(aup_store.py). Nobody issues licences by hand; admins only see the result.
+Traffic Light Check and every policy card the admin has sent so far
+(aup_store.py / policy_cards.py). Nobody issues licences by hand; admins only see the result.
 The organization's seat limit still applies.
 """
 
@@ -21,9 +21,9 @@ from .models import Acknowledgement, AIDLUser, Organization
 LEARNER_REQUIREMENTS = ("highway_code", "traffic_light")
 ACK_VERSION = "v1"
 ACK_LABELS = {"highway_code": "📖 Highway Code", "traffic_light": "🚦 Traffic Light Check",
-              "aup": "📄 AI Acceptable Use Policy (14 points)"}
-# Items a user can accept: the two above (version ACK_VERSION) and the AUP's
-# points "aup_1" … "aup_14" (versioned by the published AUP, aup_store.py).
+              "aup": "📄 Policy cards"}
+# Items a user can accept: the two above (version ACK_VERSION) and the policy
+# cards "aup_1" … "aup_14" (each versioned by its card, aup_store.py).
 ACK_ITEMS = LEARNER_REQUIREMENTS + ("aup",)
 
 
@@ -69,7 +69,7 @@ def acknowledge(member: AIDLUser, item: str, version: str = ACK_VERSION) -> bool
 
 def missing_for_learner(member: AIDLUser) -> list[str]:
     """What's still needed for the licence: Highway Code, Traffic Light
-    Check and "aup" (all 14 points of the published AUP)."""
+    Check and "aup" (every policy card sent so far)."""
     from .aup_store import all_points_accepted
     from .org_service import get_organization_for_user
 
@@ -156,8 +156,9 @@ STATUS_LABELS = {
 }
 
 
-def member_status(member: AIDLUser, done: set[str]) -> str:
-    complete = all(item in done for item in LEARNER_REQUIREMENTS + ("aup",))
+def member_status(member: AIDLUser, done: set[str], policy_needed: bool = True) -> str:
+    complete = (all(item in done for item in LEARNER_REQUIREMENTS)  # no cards sent = no policy to agree
+                and ("aup" in done or not policy_needed))
     if member.licence_issued:
         # Licences from the old Add User flow were issued without acknowledgements.
         return "licensed" if complete else "legacy"
@@ -170,17 +171,18 @@ def team_progress(org: Organization) -> dict:
     """Each team member's journey: joined → Highway Code → Traffic Light →
     licence. Admins are not part of the team."""
     members = list(learners(org).order_by("full_name"))
-    from .aup_store import POINTS, is_point_item, version
+    from .aup_store import is_point_item, required_points, version
 
     aup_version = version(org)
+    req = required_points(org)  # {card: version} sent so far
     acks: dict[str, dict[str, object]] = {}
     points: dict[str, int] = {}
-    for row in Acknowledgement.objects.filter(organization_id=str(org.pk),
-                                              version__in=[ACK_VERSION, aup_version or ACK_VERSION]):
+    for row in (Acknowledgement.objects.filter(organization_id=str(org.pk),
+                                               version__in=[ACK_VERSION, *set(req.values())]).order_by("created_at")):
         if is_point_item(row.item):
-            if row.version == aup_version:
+            if req.get(int(row.item[4:])) == row.version:
                 points[row.user_id] = points.get(row.user_id, 0) + 1
-                if points[row.user_id] == POINTS:  # all points accepted → AUP done, at this time
+                if points[row.user_id] == len(req):  # every card agreed → policy done, at this time
                     acks.setdefault(row.user_id, {})["aup"] = row.created_at
             continue
         if row.item == "aup":
@@ -198,7 +200,7 @@ def team_progress(org: Organization) -> dict:
             "traffic_light_at": done.get("traffic_light"),
             "aup_at": done.get("aup"),
             "aup_points": points.get(str(m.pk), 0),
-            "status": member_status(m, set(done)),
+            "status": member_status(m, set(done), policy_needed=bool(req)),
         })
     count = lambda pred: sum(1 for r in rows if pred(r))  # noqa: E731
     return {

@@ -3,8 +3,9 @@
 The Highway Code and Traffic Light Check are the designer's cards
 (E:\\highway-traffic-cards.html), rendered once with headless Chrome into
 api/static/cards/*.png (tools/split_card_design.py — re-run it when the
-design changes). AUP points ("aup-<n>") and awareness cards
-("pkg-<card no>") are drawn here with Pillow.
+design changes). Policy cards ("aup-<n>", aup_store / policy_cards.py),
+awareness cards ("pkg-<card no>") and the AI policy's awareness cards
+("paw-<id>", policy_awareness.py) are drawn here with Pillow.
 
 The header circle always shows the AIDL logo (as designed). On Basic and
 Enterprise the Highway Code and AUP cards carry the design's watermark: the
@@ -35,7 +36,7 @@ from .licence_image import _circle_mask, _contain, brand_logo
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "4"
+DESIGN_VERSION = "5"
 
 
 def valid_kind(kind: str) -> bool:
@@ -47,6 +48,10 @@ def valid_kind(kind: str) -> bool:
         from .plans import card_by_no
 
         return card_by_no(kind[4:]) is not None
+    if kind.startswith("paw-"):
+        from .policy_awareness import by_id
+
+        return by_id(kind[4:]) is not None
     return False
 S = 2  # draw at 2x for a crisp image
 W, PAD = 720, 30
@@ -111,9 +116,9 @@ def version_for(kind: str, org) -> str:
     """Everything that changes this picture: design, logo, AUP version."""
     version = f"d{DESIGN_VERSION}-{logo_version(org)}"
     if kind.startswith("aup-"):
-        from .aup_store import version as aup_version
+        from .aup_store import card_version
 
-        version += "-" + (aup_version(org) or "none")
+        version += "-" + (card_version(org, int(kind[4:])) or "none")
     return version
 
 
@@ -131,10 +136,9 @@ def png_for(kind: str, org) -> bytes:
 
 def onboarding_kinds(org, item: str) -> list[str]:
     if item == "aup":
-        from .aup_store import current
+        from .aup_store import cards
 
-        aup = current(org)
-        return [f"aup-{n}" for n in range(1, len(aup["points"]) + 1)] if aup else []
+        return [f"aup-{n}" for n in sorted(cards(org))]
     return [item]
 
 
@@ -257,22 +261,21 @@ def _box(img, d, y: float, bg: str, bar: str, content) -> float:
 
 
 def _aup_point(img, d, org, n: int) -> float:
-    """AUP card (design E:\\aup-card-user.png): the policy point in a yellow
-    box, an AI-awareness tip (Default package card n) in a blue box, then
-    what comes next."""
-    from .aup_store import POINTS, current
+    """Policy card (design E:\\aup-card-user.png): the card's rules in a
+    yellow box, an AI-awareness tip (Default package card n) in a blue box,
+    then what to do."""
+    from .aup_store import point as policy_point
     from .plans import _packages
 
-    aup = current(org)
+    point = policy_point(org, n)
     img.alpha_composite(_badge(org), _xy(PAD, PAD))
-    d.text(_xy(PAD + 56, PAD + 22), f"Acceptable Use · Card {n}", font=_font("Black", 22), fill=INK, anchor="lm")
+    d.text(_xy(PAD + 56, PAD + 22), f"AI policy · point {n}", font=_font("Black", 22), fill=INK, anchor="lm")
     d.line([_xy(PAD, PAD + 58), _xy(W - PAD, PAD + 58)], fill=RULE, width=S)
     y = PAD + 76
     inner = W - 2 * PAD - 34
     x = PAD + 20
-    if aup is None or not 1 <= n <= len(aup["points"]):
+    if point is None:
         return _rich(d, x, y, inner, "The AI policy is still being set up.", size=16) + 10
-    point = aup["points"][n - 1]
 
     def policy(dd, top):
         yy = _rich(dd, x, top, inner, f"**{_plain(point['title'])}**", size=18, line=26) + 2
@@ -297,14 +300,24 @@ def _aup_point(img, d, org, n: int) -> float:
             return _rich(dd, x, yy, inner, f"**→ {action}**", size=15, line=23)
 
         y = _box(img, d, y, "#EEF4FC", "#2B6CD6", awareness) + 14
-    if n < len(aup["points"]):
-        nxt = aup["points"][n]
-        y = _rich(d, PAD, y, W - 2 * PAD, f"Next card: **Point {n + 1} · {_plain(nxt['title'])}**", size=13,
-                  line=20, color=GREY)
-    else:
-        y = _rich(d, PAD, y, W - 2 * PAD, f"**Last of {POINTS} points** — agree to move on to the Traffic Light "
-                  "Check.", size=13, line=20, color=GREY)
+    y = _rich(d, PAD, y, W - 2 * PAD, "Press **I agree** below — it counts towards your AI Driving License.",
+              size=13, line=20, color=GREY)
     return y
+
+
+def _policy_awareness(img, d, org, card_id: str) -> float:
+    """A ready-made awareness card from the AI policy (policy_awareness.py)."""
+    from .policy_awareness import by_id
+
+    card = by_id(card_id) or {"title": "", "lines": []}
+    y = _header(img, d, org, "AI awareness", _book_icon)
+    width = W - PAD - COL
+    y = _tag(d, COL, y + 2, "FROM YOUR AI POLICY", fill="#F1F1F1", color="#616061")
+    y = _rich(d, COL, y, width, f"**{_plain(card['title'])}**", size=22, line=30) + 8
+    for line in card["lines"]:
+        d.ellipse(_xy(COL + 3, y + 9, COL + 8, y + 14), fill=INK)
+        y = _rich(d, COL + 18, y, width - 18, _plain(line), size=16, line=24) + 4
+    return y + 6
 
 
 def _awareness(img, d, org, no: str) -> float:
@@ -370,6 +383,8 @@ def render(kind: str, org) -> bytes:
         bottom = _aup_point(img, d, org, int(kind[4:]))
     elif kind.startswith("pkg-"):
         bottom = _awareness(img, d, org, kind[4:])
+    elif kind.startswith("paw-"):
+        bottom = _policy_awareness(img, d, org, kind[4:])
     else:
         raise ValueError(kind)
     bottom += PAD - 10
@@ -396,15 +411,18 @@ def render(kind: str, org) -> bytes:
 def alt_text(kind: str, org=None) -> str:
     """What screen readers (and Slack notifications) get instead of the image."""
     if kind.startswith("aup-") and org is not None:
-        from .aup_store import current
+        from .aup_store import point as policy_point
 
-        aup = current(org)
-        n = int(kind[4:])
-        if aup is None or n > len(aup["points"]):
-            return "AI Acceptable Use Policy."
-        point = aup["points"][n - 1]
-        text = f"AUP point {n}: {_plain(point['title'])}. " + " ".join(_plain(c["text"]) for c in point.get("clauses") or [])
+        point = policy_point(org, int(kind[4:]))
+        if point is None:
+            return "AI policy card."
+        text = f"Policy card: {_plain(point['title'])}. " + " ".join(_plain(c["text"]) for c in point.get("clauses") or [])
         return text[:1990]
+    if kind.startswith("paw-"):
+        from .policy_awareness import by_id
+
+        c = by_id(kind[4:]) or {"title": "", "lines": []}
+        return _plain(f"{c['title']}. " + " ".join(c["lines"]))[:1990]
     if kind.startswith("pkg-"):
         from .plans import card_by_no
 

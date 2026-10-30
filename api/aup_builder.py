@@ -41,8 +41,33 @@ ORG_PLACEMENT = {"0.1": (1, "start"), "0.6": (14, "end"), "0.7": (14, "end"),
 _KEEP_CASE = {"Company", "Microsoft", "Google", "Slack", "Teams", "WhatsApp", "VPN", "USB", "IT", "HR", "MDM"}
 _SPECIFY = re.compile(r"\s*\((?:please\s+)?specify[^)]*\)\s*", re.I)
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-# Questions in the bank that AIDL doesn't ask (and the policy doesn't use).
-HIDDEN = {"0.8"}  # contact email for questions about the policy
+# Questions in the bank that AIDL doesn't ask (and the policy doesn't use) —
+# the manager's cuts (Oct 2026). General-awareness ones became ready-made
+# awareness cards (policy_awareness.py); the laws question became the laws
+# card (laws.py); the approved AI tools are picked from a list (policy_cards.py).
+HIDDEN = {
+    "0.6",  # laws and standards → laws card from country + industry
+    "0.7",  # which department owns the policy
+    "0.8",  # contact email
+    "1.2",  # which company resources the policy covers
+    "1.4",  # what personal devices must have
+    "2.3",  # who can access monitoring records
+    "2.4",  # how long monitoring logs are kept
+    "3.1",  # is personal use allowed
+    "3.2",  # which personal activities are acceptable
+    "4.1",  # prohibited activities → awareness cards
+    "5.5",  # screen lock time → awareness card
+    "6.6",  # clean desk and printing → awareness card
+    "7.2",  # approved AI tools → picked from a list
+    "7.3",  # never enter into AI tools → awareness card
+    "7.5",  # other free online tools (obvious)
+}
+# Option changes on top of the workbook (kept when it is re-imported).
+_DROP_OPTIONS = {"9.2": ("'report phishing'",)}  # text starts with
+_ADD_OPTIONS = {
+    "5.3": [(4, {"id": "5.3.it", "text": "IT systems (servers, admin and IT tools)", "recommended": True})],
+    "9.2": [(None, {"id": "9.2.x", "text": "Something else (add your own)", "recommended": False})],
+}
 
 
 class AupAnswersError(ValueError):
@@ -56,6 +81,13 @@ class AupAnswersError(ValueError):
 @lru_cache(maxsize=1)
 def bank() -> dict:
     data = json.loads(_BANK_FILE.read_text(encoding="utf-8"))
+    for q in data["questions"]:
+        drop = _DROP_OPTIONS.get(q["id"], ())
+        q["options"] = [o for o in q["options"] if not o["text"].lower().startswith(drop)] if drop else q["options"]
+        for at, opt in _ADD_OPTIONS.get(q["id"], ()):
+            if not any(o["id"] == opt["id"] for o in q["options"]):
+                full = {"note": "", "wording": "", "no_sentence": False, **opt}
+                q["options"].insert(len(q["options"]) if at is None else at, full)
     data["by_id"] = {q["id"]: q for q in data["questions"]}
     for q in data["questions"]:
         q["option_by_id"] = {o["id"]: o for o in q["options"]}
@@ -116,7 +148,10 @@ def visible_questions(answers: dict, section: int | None = None) -> list[dict]:
 # ---------- validation ----------
 
 def _needs_fill(q: dict, opt: dict) -> bool:
-    return bool(_SPECIFY.search(opt["text"])) or "{fill}" in opt.get("wording", "")
+    """A chosen option that asks for typed details ("(specify)", "Other",
+    "Something else (add your own)")."""
+    return (bool(_SPECIFY.search(opt["text"])) or "{fill}" in opt.get("wording", "")
+            or opt["id"].endswith(".x"))
 
 
 def validate(answers: dict, fills: dict | None = None) -> dict[str, str]:

@@ -146,11 +146,11 @@ def onboard_member(org: Organization, slack_user_id: str, *, force: bool = False
         return "already"
     member.refresh_from_db()
 
-    from . import admin_setup, aup_store, employee_flow
+    from . import admin_setup, employee_flow
 
     first = (member.full_name or "there").split()[0]
-    if admin_setup.started(org) and aup_store.is_complete(org):
-        results = [employee_flow.start(org, member)]  # the Welcome card → AUP → Traffic Light → Highway Code
+    if admin_setup.started(org):
+        results = [employee_flow.start(org, member)]  # Welcome → policy cards, Traffic Light, Highway Code
     else:  # the admin hasn't started the programme yet; the Welcome card follows when they do
         results = [slack_client.send_dm(token, org, slack_user_id, text=f"Welcome to AIDL, {first}!",
                                         blocks=user_welcome_blocks(member, org))]

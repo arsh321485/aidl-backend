@@ -110,37 +110,59 @@ def _upload_buttons(st: dict) -> list:
     return [_button("📤 Upload your own AUP", "aidl_aup_upload_open", value="upload")]
 
 
+def _policy_lines(st: dict) -> str:
+    """One line per policy card: sent · n agreed / goes out <day>."""
+    from datetime import date
+
+    out = []
+    for c in st.get("policy") or []:
+        if c["state"] == "sent" and not st["cards_done"]:
+            out.append(f"✅ {c['icon']} *{c['title']}* · approved · goes out when you start the programme")
+        elif c["state"] == "sent":
+            out.append(f"✅ {c['icon']} *{c['title']}* · sent · {c['agreed']} of {st['members']} agreed")
+        else:
+            day = date.fromisoformat(c["send_on"])
+            out.append(f"🗓 {c['icon']} *{c['title']}* · goes out {day:%a} {day.day} {day:%b}")
+    return "\n".join(out)
+
+
 def _step_aup(d: dict, st: dict) -> list:
-    if not st["aup_done"]:
-        blocks = [_section("*1 · Build your AI policy*\n15 short sections, recommended answers already chosen. "
-                           "About 10 minutes. AIDL writes the 14-point policy as you go."
-                           + ("\nAlready have a policy? Upload it and AIDL turns it into the 14 cards."
-                              if st.get("aup_upload_allowed") else ""))]
-        if d["can_policy"]:
-            blocks.append(_actions("aidl_step_aup",
-                                   _button("📝 Build my AI policy →" if st.get("aup_draft_section") is None
-                                           else f"📝 Continue · section {st['aup_draft_section'] + 1} of 15 →",
-                                           "aidl_policy_open", value="policy", style="primary"),
-                                   *_upload_buttons(st)))
-            line = _upload_line(st)
-            if line:
-                blocks.append(line)
-        return blocks
-    state = "approved" if st.get("aup_approved") else "waiting for your approval"
-    rules = st.get("aup_rules") or 0
-    return [b for b in [
-        _section(f"✅  *1 · AI policy*  ·  {state}  ·  v{st.get('aup_number') or 1}  ·  14 points  ·  "
-                 f"{rules} rule{'' if rules == 1 else 's'}"),
-        _context(f"From your uploaded policy _{st['aup_file_name']}_") if st.get("aup_file_name") else None,
-        _context(f"{d['approved_apps']} of {d['total_apps']} AI apps approved") if d["total_apps"] else None,
-        _actions("aidl_step_aup",
-                 _button("📄 View AUP", "aidl_aup_view", value="view"),
-                 _button("✏️ Change AUP", "aidl_policy_open", value="policy") if d["can_policy"] else None,
-                 *(_upload_buttons(st) if d["can_policy"] else []),
-                 _button("🤖 AI apps", "aidl_tab_ai-apps", value="ai-apps") if d["can_apps"] else None,
-                 _button("💻 IT apps", "aidl_tab_it-apps", value="it-apps") if d["can_apps"] else None),
-        _upload_line(st) if d["can_policy"] else None,
-    ] if b]
+    """Step 1 — the AI policy as policy cards (policy_cards.py), sent one
+    topic at a time."""
+    cards = st.get("policy") or []
+    sent = sum(c["state"] == "sent" for c in cards)
+    later = len(cards) - sent
+    if not cards:
+        head = ("*1 · Your AI policy*\nPick a topic, check the answers (they're already picked), approve. Each "
+                "topic becomes one short card your team agrees to — send one today and more any time."
+                + ("\nAlready have a policy? Upload it and AIDL turns it into the cards." if st.get("aup_upload_allowed")
+                   else ""))
+    else:
+        head = (f"✅  *1 · Your AI policy*  ·  {sent} of 14 policy cards {'sent' if st['cards_done'] else 'approved'}"
+                + (f"  ·  {later} scheduled" if later else ""))
+    blocks = [_section(head)]
+    if cards:
+        blocks.append(_context(_policy_lines(st)))
+    if d["total_apps"] and cards:
+        blocks.append(_context(f"{d['approved_apps']} of {d['total_apps']} AI apps approved"))
+    buttons = []
+    if d["can_policy"]:
+        buttons.append(_button("📌 Add a policy card", "aidl_policy_open", value="policy",
+                               style="primary" if not cards else ""))
+        buttons += _upload_buttons(st)
+        if st.get("company_set"):
+            buttons.append(_button("⚖️ Your laws", "aidl_laws_open", value="laws"))
+    if cards:
+        buttons.append(_button("📄 View policy", "aidl_aup_view", value="view"))
+        if d["can_apps"]:
+            buttons += [_button("🤖 AI apps", "aidl_tab_ai-apps", value="ai-apps"),
+                        _button("💻 IT apps", "aidl_tab_it-apps", value="it-apps")]
+    if buttons:
+        blocks.append(_actions("aidl_step_aup", *buttons))
+    line = _upload_line(st) if d["can_policy"] else None
+    if line:
+        blocks.append(line)
+    return blocks
 
 
 def _step_admins(d: dict, st: dict) -> list:
@@ -188,6 +210,9 @@ def _step_approve(d: dict, st: dict) -> list:
         return [_locked(4, "Card approval", "step 1")]
     a = st["approvals"]
     onboarding = "  ·  ".join(f"{'✅' if r['status'] == 'approved' else '⏳'} {r['label']}" for r in st["onboarding"])
+    paw = st.get("paw") or {}
+    if paw:
+        onboarding += f"\n🧭 From your AI policy: *{paw['approved']}* of {paw['total']} awareness cards approved"
     awareness = (f"📘 Awareness cards: *{a['approved']}* of {a['total']} approved"
                  + (f"  ·  ⏳ {a['waiting']} waiting" if a["waiting"] else "")
                  + (f"  ·  ⏭ {a['skipped']} skipped" if a["skipped"] else ""))
@@ -222,32 +247,20 @@ def _step_send(d: dict, st: dict) -> list:
     members = st["members"]
     aup = st["sends"]["aup"]
     if not st["cards_done"]:
-        block = _section("*5 · Start the programme*\nEveryone gets a Welcome card in Slack and moves through the "
-                         f"AUP ({aup_points_label()}), the Traffic Light Check and the Highway Code at their own pace — their AI Driving License is issued at the end. "
-                         "People who join later start automatically.")
+        block = _section("*5 · Start the programme*\nEveryone gets a Welcome card in Slack, your policy cards, the "
+                         "Traffic Light Check and the Highway Code, at their own pace — their AI Driving License is "
+                         "issued at the end. People who join later start automatically.")
         if d["can_send"]:
             block["accessory"] = _button(f"📤 Start for {members}", "aidl_send_item", value="flow", style="primary")
         return [block]
-    blocks = [_section(f"✅  *5 · Programme started*  ·  *{aup['accepted']}* of {members} agreed to the AUP  ·  "
-                       f"*{st.get('licensed', 0)}* of {members} licensed")]
+    blocks = [_section(f"✅  *5 · Programme started*  ·  *{aup['accepted']}* of {members} agreed to every policy card"
+                       f"  ·  *{st.get('licensed', 0)}* of {members} licensed")]
     if d["can_send"]:
-        if aup.get("changed") and not st.get("aup_approved"):
-            blocks.append(_context("⚠️ *The AUP has changed* — approve the new version in step 4, then send it."))
-        elif aup.get("changed"):  # the AUP was changed after it was sent
-            blocks.append(_section("⚠️ *The AUP has changed* — your "
-                                   "team still has the old version.",
-                                   accessory=_button("📤 Send new version", "aidl_send_item", value="aup",
-                                                     style="primary")))
-        elif st.get("licensed", 0) < members:
+        if st.get("licensed", 0) < members:
             blocks.append(_actions("aidl_step_send", _button("🔔 Remind people who haven't finished",
                                                              "aidl_remind_item", value="flow")))
     return blocks
 
-
-def aup_points_label() -> str:
-    from .aup_store import POINTS
-
-    return f"{POINTS} short points"
 
 
 
@@ -555,13 +568,15 @@ def user_welcome_blocks(member, org) -> list:
 
 def licence_progress_blocks(member, org) -> list:
     """License tab before the licence exists: what's left to earn it."""
-    from .aup_store import POINTS, points_accepted
+    from .aup_store import points_accepted, required_points
     from .licensing import ACK_LABELS, LEARNER_REQUIREMENTS, acknowledged_items, missing_for_learner, seats_left
 
     done = acknowledged_items(member)
     lines = [f"{'✅' if item in done else '⬜'}  {ACK_LABELS[item]}" for item in LEARNER_REQUIREMENTS]
-    accepted = len(points_accepted(member, org))
-    lines.append(f"{'✅' if accepted == POINTS else '⬜'}  📄 AI Acceptable Use Policy — {accepted} of {POINTS} points")
+    total = len(required_points(org))
+    if total:
+        accepted = len(points_accepted(member, org))
+        lines.append(f"{'✅' if accepted == total else '⬜'}  📄 Policy cards — {accepted} of {total} agreed")
     blocks = [
         _context(f"*AIDL* · APP  for {org.name}"),
         {"type": "header", "text": {"type": "plain_text", "text": "🪪 Earn your Learner's Permit", "emoji": True}},

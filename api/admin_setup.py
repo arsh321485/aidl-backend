@@ -1,14 +1,15 @@
 """The admin's step-by-step setup (Slack Admin Center):
 
-  1. Create the AI policy (AUP)
+  1. Your AI policy — policy cards, one topic at a time (policy_cards.py);
+     approving a card is its approval, and it goes out today or on a day
   2. Add admins (optional)
   3. Add your team
-  4. Card approval — the onboarding cards (AUP, Traffic Light, Highway Code)
-     and the plan's awareness cards (card_approval.py); nothing is sent
-     without approval
-  5. Start the programme — every employee gets the Welcome card and moves
-     through the AUP, the Traffic Light Check and the Highway Code to their
-     licence (employee_flow.py); people who join later start automatically
+  4. Card approval — the Traffic Light Check, the Highway Code, the
+     awareness cards from the AI policy and the plan's awareness cards
+     (card_approval.py); nothing is sent without approval
+  5. Start the programme — every employee gets the Welcome card, the policy
+     cards, the Traffic Light Check and the Highway Code, and their licence
+     (employee_flow.py); people who join later start automatically
   6. Licences & awareness cards
 
 Progress lives in Organization.setup_state (JSON).
@@ -82,19 +83,13 @@ def started(org: Organization) -> bool:
 
 
 def send_item(org: Organization, item: str) -> tuple[int, int]:
-    """Step 4 "Start" (item "flow"), or "aup" = send the AUP: starts the
-    programme, or — once started — sends everyone the new AUP version.
-    Returns (sent, total)."""
+    """Step 5 "Start the programme": everyone gets the Welcome card.
+    Returns (sent, total). (Policy cards go out on their own when approved.)"""
     from . import employee_flow
-    from .aup_store import version
 
     now = timezone.now().isoformat()
-    if started(org) and item == "aup":
-        update(org, aup_sent=now, aup_sent_version=version(org))
-        return employee_flow.send_new_aup(org)
     # The older dashboard tabs show these cards once "sent".
-    update(org, flow_started=now, aup_sent=now, traffic_light_sent=now, highway_code_sent=now,
-           aup_sent_version=version(org))
+    update(org, flow_started=now, aup_sent=now, traffic_light_sent=now, highway_code_sent=now)
     return employee_flow.start_everyone(org)
 
 
@@ -106,34 +101,27 @@ def remind_item(org: Organization, item: str = "flow") -> tuple[int, int]:
 
 
 def aup_change(org: Organization, st: dict | None = None) -> dict:
-    """{'changed': True, 'sent_version', 'version'} when the AUP was changed
-    (answers or apps) after it was sent to the team."""
-    st = state(org) if st is None else st
-    if not (st.get("aup_sent") and st.get("aup_sent_version")):
-        return {"changed": False}
-    from .aup_store import version
-
-    current = version(org)
-    if current == st["aup_sent_version"]:
-        return {"changed": False}
-    return {"changed": True, "sent_version": st["aup_sent_version"], "version": current}
+    """Policy cards are sent one by one as they're approved, so there is
+    never an unsent "new AUP version" any more."""
+    return {"changed": False}
 
 
 def accepted_count(org: Organization, item: str) -> int:
     from .licensing import ACK_VERSION
 
     ids = [str(pk) for pk in _slack_learners(org).values_list("pk", flat=True)]
-    if item == "aup":  # everyone who accepted all 14 points of the current AUP
-        from .aup_store import POINTS, version
+    if item == "aup":  # everyone who agreed to every policy card sent so far
+        from .aup_store import point_item, required_points
 
-        ver = version(org)
-        if not ver:
+        req = {point_item(n): v for n, v in required_points(org).items()}
+        if not req:
             return 0
         per_user: dict[str, int] = {}
-        for uid in Acknowledgement.objects.filter(user_id__in=ids, version=ver,
-                                                  item__startswith="aup_").values_list("user_id", flat=True):
-            per_user[uid] = per_user.get(uid, 0) + 1
-        return sum(1 for n in per_user.values() if n >= POINTS)
+        for uid, it, ver in Acknowledgement.objects.filter(user_id__in=ids, item__in=list(req)).values_list(
+                "user_id", "item", "version"):
+            if req.get(it) == ver:
+                per_user[uid] = per_user.get(uid, 0) + 1
+        return sum(1 for n in per_user.values() if n >= len(req))
     return Acknowledgement.objects.filter(user_id__in=ids, item=item, version=ACK_VERSION).count()
 
 
@@ -151,7 +139,8 @@ def _upload_summary(org: Organization) -> dict:
 
 def summary(org: Organization) -> dict:
     """Everything the setup steps show."""
-    from .aup_store import current, draft, has_draft, is_complete, published_info
+    from .aup_store import company, is_complete
+    from .policy_cards import summary as policy_summary
 
     st = state(org)
     members = _slack_learners(org).count()
@@ -171,18 +160,17 @@ def summary(org: Organization) -> dict:
     approved_ready = all(r["status"] == card_approval.APPROVED for r in onboarding)
     return {
         "aup_done": aup_done,
-        "aup_draft_section": draft(org)["section"] if not aup_done and has_draft(org) else None,
-        "aup_number": published_info(org)["number"] if aup_done else None,
-        "aup_file_name": published_info(org)["file_name"] if aup_done else "",
+        "policy": policy_summary(org),
+        "paw": {"approved": sum(c["status"] == card_approval.APPROVED for c in card_approval.policy_awareness(org)),
+                "total": len(card_approval.policy_awareness(org))},
+        "company_set": bool(company(org)),
         **_upload_summary(org),
-        "aup_rules": sum(len(p["clauses"]) for p in (current(org) or {}).get("points", [])) if aup_done else 0,
         "admins_done": admins_done,
         "team_done": team_done,
         "cards_done": cards_done,
         "approved_ready": approved_ready,
         "onboarding": onboarding,
         "approvals": approvals,
-        "aup_approved": card_approval.is_approved(org, "aup"),
         "members": members,
         "licensed": licensed,
         "sends": sends,

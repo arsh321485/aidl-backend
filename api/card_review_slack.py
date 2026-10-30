@@ -1,6 +1,7 @@
 """Slack popup: Admin Center step 4 "Review & approve cards" (card_approval.py).
 
-    Onboarding cards   📄 AUP · 🚦 Traffic Light · 📖 Highway Code  [👁 Preview] [✅ Approve]
+    Onboarding cards   🚦 Traffic Light · 📖 Highway Code  [👁 Preview] [✅ Approve]
+    From your AI policy  5 ready-made awareness cards  [👁 Preview] [✅ Approve]
     Awareness cards    counts · [✅ Approve all waiting]
       Month n of N     [← Month n-1] [Month n+1 →] [✅ Approve month n]
         one line per card with a ⋯ menu: Preview · Approve · Skip · Swap
@@ -57,9 +58,6 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
     blocks += [{"type": "divider"}, {"type": "section", "text": _md("*Onboarding cards* — needed before the programme "
                                                                      "starts")}]
     for row in ca.onboarding(org):
-        if not row["exists"]:
-            blocks.append({"type": "section", "text": _md(f"{row['label']}  ·  _create your AUP first (step 1)_")})
-            continue
         who = f" by {row['by']}" if row["status"] == ca.APPROVED and row["by"] else ""
         blocks.append({"type": "section", "text": _md(f"{ICON[row['status']]}  *{row['label']}*  ·  "
                                                       f"{WORD[row['status']]}{who}")})
@@ -67,6 +65,17 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
             _btn("👁 Preview", "aidl_crv_preview", f"onb|{row['item']}"),
             *([_btn("✅ Approve", "aidl_crv_approve_onb", row["item"], "primary")]
               if row["status"] != ca.APPROVED else []),
+        ]})
+
+    blocks += [{"type": "divider"}, {"type": "section", "text": _md(
+        "*From your AI policy* — general rules as ready-made awareness cards. Approved ones follow each licence; "
+        "employees press *Got it*.")}]
+    for c in ca.policy_awareness(org):
+        blocks.append({"type": "section", "text": _md(f"{ICON[c['status']]}  {c['icon']} *{c['title']}*  ·  "
+                                                      f"{WORD[c['status']]}")})
+        blocks.append({"type": "actions", "block_id": f"crv_paw_{c['id']}", "elements": [
+            _btn("👁 Preview", "aidl_crv_preview", f"paw|{c['id']}"),
+            *([_btn("✅ Approve", "aidl_crv_approve_paw", c["id"], "primary")] if c["status"] != ca.APPROVED else []),
         ]})
 
     n = ca.counts(org)
@@ -139,32 +148,31 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
 
 
 def preview_view(org, what: str) -> dict:
-    """what = "onb|<item>" or "<card no>"."""
+    """what = "onb|<item>", "paw|<id>" or "<card no>"."""
     from . import card_image
-    from .aup_store import POINTS, current
 
     blocks = []
     key = ""
     if what.startswith("onb|"):
         item = what[4:]
         label = ca.ONBOARDING_LABEL.get(item, item)
-        if item == "aup":
-            aup = current(org)
-            if aup is None:
-                blocks.append({"type": "section", "text": _md("No AUP yet — create it in step 1.")})
-            else:
-                blocks.append({"type": "context", "elements": [_md(f"Employees accept the {POINTS} points one at a "
-                                                                   "time, each as a card like these.")]})
-                for n in range(1, len(aup["points"]) + 1):
-                    kind = f"aup-{n}"
-                    blocks.append({"type": "image", "image_url": card_image.image_url(kind, org),
-                                   "alt_text": card_image.alt_text(kind, org), "title": _t(f"Point {n}")})
-        else:
-            blocks.append({"type": "image", "image_url": card_image.image_url(item, org),
-                           "alt_text": card_image.alt_text(item)})
+        blocks.append({"type": "image", "image_url": card_image.image_url(item, org),
+                       "alt_text": card_image.alt_text(item)})
         key = f"onb|{item}"
         approved = ca.is_approved(org, item)
         title = label
+    elif what.startswith("paw|"):
+        from .policy_awareness import by_id, key as paw_key
+
+        card = by_id(what[4:]) or {"id": what[4:], "title": "Card", "lines": []}
+        kind = f"paw-{card['id']}"
+        blocks.append({"type": "context", "elements": [_md("From your AI policy · awareness card · employees press "
+                                                           "*Got it*")]})
+        blocks.append({"type": "image", "image_url": card_image.image_url(kind, org),
+                       "alt_text": card_image.alt_text(kind, org)})
+        key = what
+        approved = ca.status(org, paw_key(card["id"])) == ca.APPROVED
+        title = card["title"]
     else:
         from .plans import card_by_no
 
