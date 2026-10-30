@@ -81,30 +81,49 @@ def problems(n: int, a: dict) -> dict[str, str]:
     return out
 
 
+def statuses(org: Organization) -> dict[int, dict]:
+    """{point: sent / scheduled} for every approved card — one database
+    query for all the "n agreed" counts (Slack waits only 3 seconds)."""
+    cards = aup_store.cards(org)
+    counts = agreed_counts(org, cards)
+    out = {}
+    for n, c in cards.items():
+        if not aup_store.is_due(c):
+            out[n] = {"state": "scheduled", "send_on": c["send_on"]}
+        else:
+            out[n] = {"state": "sent", "agreed": counts.get(n, 0), "version": c["version"]}
+    return out
+
+
 def status(org: Organization, n: int) -> dict:
     """For the topic list and Admin Center: sent / scheduled / not yet."""
-    c = aup_store.card(org, n)
-    if c is None:
-        return {"state": "new"}
-    if not aup_store.is_due(c):
-        return {"state": "scheduled", "send_on": c["send_on"]}
-    return {"state": "sent", "agreed": agreed_count(org, n), "version": c["version"]}
+    return statuses(org).get(n) or {"state": "new"}
 
 
-def agreed_count(org: Organization, n: int) -> int:
+def agreed_counts(org: Organization, cards: dict | None = None) -> dict[int, int]:
     from .admin_setup import _slack_learners
     from .models import Acknowledgement
 
-    ver = aup_store.card_version(org, n)
-    if not ver:
-        return 0
+    cards = aup_store.cards(org) if cards is None else cards
+    want = {aup_store.point_item(n): c["version"] for n, c in cards.items()}
+    if not want:
+        return {}
     ids = [str(pk) for pk in _slack_learners(org).values_list("pk", flat=True)]
-    return Acknowledgement.objects.filter(user_id__in=ids, item=aup_store.point_item(n), version=ver).count()
+    out: dict[int, int] = {}
+    for item, ver in Acknowledgement.objects.filter(user_id__in=ids, item__in=list(want)).values_list("item", "version"):
+        if want.get(item) == ver:
+            out[int(item[4:])] = out.get(int(item[4:]), 0) + 1
+    return out
+
+
+def agreed_count(org: Organization, n: int) -> int:
+    return agreed_counts(org).get(n, 0)
 
 
 def summary(org: Organization) -> list[dict]:
     """Approved cards in point order, with their state."""
-    return [{"no": n, "title": SHORT[n], "icon": ICONS[n], **status(org, n)} for n in sorted(aup_store.cards(org))]
+    st = statuses(org)
+    return [{"no": n, "title": SHORT[n], "icon": ICONS[n], **st[n]} for n in sorted(st)]
 
 
 # ---------- approving and sending ----------

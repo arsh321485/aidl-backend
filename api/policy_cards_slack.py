@@ -81,14 +81,16 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
                    "what's different for you. Send as many as you like, in any order.")]
     if notice:
         blocks.append(_ctx(notice))
+    answers = aup_store.answers(org, with_tools=False)["answers"]  # once, not per topic
+    states = pc.statuses(org)
     for n in pc.TOPICS:
-        st = pc.status(org, n)
+        st = states.get(n) or {"state": "new"}
         if st["state"] == "sent":
             line, label = f"✅ Sent · {st['agreed']} agreed", "Edit"
         elif st["state"] == "scheduled":
             line, label = f"🗓 Goes out {_day(st['send_on'])}", "Edit"
         else:
-            qs = len(pc.questions(n, aup_store.answers(org)["answers"])) + (1 if n == 7 else 0)
+            qs = len(pc.questions(n, answers)) + (1 if n == 7 else 0)
             line, label = f"{qs} question{'s' if qs != 1 else ''} · answers already picked", "Choose"
         btn = {"type": "button", "text": _text(label), "action_id": "aidl_pc_pick", "value": str(n)}
         if label == "Choose":
@@ -388,8 +390,22 @@ def submit_company(admin: AIDLUser, org: Organization, view: dict) -> dict:
     aup_store.save_company(org, countries, industry)
     in_background(send_regulator_card, org.pk, admin.pk)
     meta = _meta(view)
-    nxt = topics_view(org, meta) if meta.get("then") == "topics" else regulators_view(org, meta)
-    return {"response_action": "update", "view": nxt}
+    if meta.get("then") != "topics":
+        return {"response_action": "update", "view": regulators_view(org, meta)}
+    # Slack waits only 3 seconds: answer with a short "Loading…" screen, then
+    # fill in the topics.
+    in_background(_show_topics, org.pk, view.get("id", ""), meta)
+    return {"response_action": "update", "view": _modal(TOPICS, "Add a policy card", [
+        {"type": "section", "text": _md("✓ Saved. Loading your topics…")}], meta=_keep(meta))}
+
+
+def _show_topics(org_pk, view_id: str, meta: dict) -> None:
+    from . import slack_client
+
+    org = Organization.objects.get(pk=org_pk)
+    if view_id:
+        slack_client.slack_api("views.update", slack_client.bot_token(org),
+                               json={"view_id": view_id, "view": topics_view(org, meta)})
 
 
 def regulators_view(org: Organization, meta: dict) -> dict:
