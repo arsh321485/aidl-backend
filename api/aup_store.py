@@ -105,16 +105,18 @@ def _starting_tools(org: Organization) -> list[str]:
         return []
 
 
-def answers(org: Organization) -> dict:
+def answers(org: Organization, *, with_tools: bool = True) -> dict:
     """{answers, fills, tools}: what the admin has chosen so far, the
-    recommended answers for everything else."""
+    recommended answers for everything else. The first-time tools list comes
+    from the AI apps list (slow) — with_tools=False skips it."""
     data = _load(org)
     a = aup_builder.recommended_answers()
     a.update(data.get("answers") or {})
     a["0.1"] = a["0.2"] = org.name
     tools = data.get("tools")
-    return {"answers": a, "fills": dict(data.get("fills") or {}),
-            "tools": list(tools) if tools is not None else _starting_tools(org)}
+    if tools is None:
+        tools = _starting_tools(org) if with_tools else []
+    return {"answers": a, "fills": dict(data.get("fills") or {}), "tools": list(tools)}
 
 
 def save_answers(org: Organization, answers: dict, fills: dict, tools: list[str]) -> None:
