@@ -1394,7 +1394,7 @@ class SlackHomeVisualTests(TestCase):
         text = json.dumps(blocks, ensure_ascii=False)
         for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 5 setup steps done",
                       "✅  *1 · Your AI policy*  ·  14 of 14 policy cards approved", "goes out when you start the programme",
-                      "From your AI policy: *0* of 5 awareness cards approved", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
+                      "From your AI policy: *0* of 6 awareness cards approved", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
                       "*2 · Add admins (optional)*", "aidl_open_add-admin", "aidl_setup_skip",
                       "3 · Add your team*  —  _after step 2_"):
             self.assertIn(label, text)
@@ -2389,6 +2389,8 @@ class PolicyCardsSlackTests(TestCase):
         card = self._card(9)
         text = json.dumps(card, ensure_ascii=False)
         self.assertNotIn("Recommended", text)                                     # no label, still pre-selected
+        self.assertNotIn("already picked", text)
+        self.assertNotIn(" law", json.dumps(self._card(12), ensure_ascii=False).replace("permitted by law", ""))
         self.assertNotIn("Report phishing", text)
         self.assertIn("Something else (add your own)", text)
         how = next(b for b in card["blocks"] if b.get("block_id") == "q|9.2")
@@ -2396,7 +2398,7 @@ class PolicyCardsSlackTests(TestCase):
         self.assertTrue(all(b.get("dispatch_action") for b in card["blocks"] if b.get("block_id", "")[:2] in ("q|", "f|")))
         mfa = json.dumps(self._card(5), ensure_ascii=False)
         self.assertIn("IT systems", mfa)
-        for gone in ("Screens must lock", "Which department owns", "laws, regulations", "Other free online tools",
+        for gone in ("Who must follow this policy", "Screens must lock", "Which department owns", "laws, regulations", "Other free online tools",
                      "What must never be entered", "Which personal activities"):
             for n in range(1, 15):
                 self.assertNotIn(gone, json.dumps(self._card(n), ensure_ascii=False), (gone, n))
