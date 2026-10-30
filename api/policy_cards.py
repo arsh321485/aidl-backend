@@ -30,11 +30,11 @@ from .models import AIDLUser, Organization
 
 logger = logging.getLogger(__name__)
 TOPICS = range(1, 15)
-SHORT = {1: "Who this applies to", 2: "Monitoring", 3: "Privacy on company devices", 4: "Installing software",
+SHORT = {1: "Personal devices (BYOD)", 2: "Monitoring", 3: "Privacy on company devices", 4: "Installing software",
          5: "Passwords & sign-in", 6: "Company data", 7: "AI tools at work", 8: "Email, chat & social media",
          9: "Reporting a problem", 10: "Working remotely", 11: "Who owns your work", 12: "Leaving the company",
          13: "If rules are broken", 14: "Agreeing & reviews"}
-ICONS = {1: "👥", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🔒", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
+ICONS = {1: "📱", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🔒", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
          12: "🚪", 13: "⚖️", 14: "✍️"}
 SEND_HOUR = 10
 MAX_DAYS_AHEAD = 110  # Slack schedules messages up to 120 days ahead

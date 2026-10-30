@@ -56,17 +56,16 @@ BY_COUNTRY: dict[str, list[dict]] = {
            "https://digital-strategy.ec.europa.eu/en/policies/ai-office"),
     ],
     "United Arab Emirates": [
-        _r("UAE Data Office", "personal data, under the federal Personal Data Protection Law",
+        _r("UAE Data Office", "how companies across the UAE handle personal data",
            when="you're outside a financial free zone (DIFC and ADGM have their own data regulators)"),
     ],
     "Saudi Arabia": [
-        _r("Saudi Data & AI Authority (SDAIA)", "personal data and AI, under the Personal Data Protection Law",
+        _r("Saudi Data & AI Authority (SDAIA)", "how companies in Saudi Arabia handle personal data and use AI",
            "https://sdaia.gov.sa"),
         _r("National Cybersecurity Authority (NCA)", "cyber security controls", "https://nca.gov.sa"),
     ],
     "Bahrain": [
-        _r("Personal Data Protection Authority", "personal data, under the Personal Data Protection Law (Law No. 30 "
-           "of 2018)"),
+        _r("Personal Data Protection Authority", "how companies in Bahrain handle personal data"),
     ],
     "Singapore": [
         _r("Personal Data Protection Commission (PDPC)", "personal data, under the PDPA", "https://www.pdpc.gov.sg"),

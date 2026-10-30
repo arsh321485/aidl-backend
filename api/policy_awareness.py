@@ -1,6 +1,7 @@
 """Awareness cards made from the general parts of the old AUP questions
-(the manager's cuts, Oct 2026): what never goes into AI tools, what's not
-allowed on company systems, locking your screen, clean desk and printing.
+(the manager's cuts, Oct 2026): who the policy covers, what never goes into
+AI tools, what's not allowed on company systems, locking your screen, clean
+desk and printing.
 
 Ready-made — no questions. Admins approve them in Card approval
 (card_approval keys "paw:<id>"); approved cards go to each employee once
@@ -29,7 +30,11 @@ def cards() -> list[dict]:
              for t in _options("7.3")]
     banned = _options("4.1")
     half = (len(banned) + 1) // 2
+    covers = [o["text"] for o in aup_builder.question("1.1")["options"] if o["recommended"]]
     return [
+        {"id": "who-it-covers", "icon": "👥", "title": "Who this policy covers", "lines":
+            ["This AI policy applies to everyone who works for the company or uses its systems:"] + covers + [
+                "Not sure whether it applies to you? It does — ask your AIDL admin."]},
         {"id": "never-ai", "icon": "🔒", "title": "Never paste into AI", "lines": never + [
             "Not sure? Treat it as private and leave it out."]},
         {"id": "not-allowed-1", "icon": "🚫", "title": "Not allowed on company systems (1 of 2)", "lines": banned[:half]},

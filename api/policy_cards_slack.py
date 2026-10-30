@@ -77,8 +77,7 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
     from .aup_upload import can_upload
 
     blocks = [_banner(org, "Pick one topic · about 1 minute"),
-              _ctx("Each topic is one short card your team agrees to. The answers are already picked — change only "
-                   "what's different for you. Send as many as you like, in any order.")]
+              _ctx("Each topic is one short card your team agrees to. Send as many as you like, in any order.")]
     if notice:
         blocks.append(_ctx(notice))
     answers = aup_store.answers(org, with_tools=False)["answers"]  # once, not per topic
@@ -91,7 +90,7 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
             line, label = f"🗓 Goes out {_day(st['send_on'])}", "Edit"
         else:
             qs = len(pc.questions(n, answers)) + (1 if n == 7 else 0)
-            line, label = f"{qs} question{'s' if qs != 1 else ''} · answers already picked", "Choose"
+            line, label = f"{qs} question{'s' if qs != 1 else ''}", "Choose"
         btn = {"type": "button", "text": _text(label), "action_id": "aidl_pc_pick", "value": str(n)}
         if label == "Choose":
             btn["style"] = "primary"
@@ -182,8 +181,7 @@ def card_view(org: Organization, n: int, a: dict, meta: dict, *, when: str = "to
               rev: int = 0, notice: str = "") -> dict:
     existing = aup_store.card(org, n)
     blocks = [_banner(org, f"{pc.SHORT[n]} · point {n} of 14"),
-              {"type": "header", "text": _text(f"{pc.ICONS[n]} {pc.SHORT[n]}")},
-              _ctx("Answers already picked — change only what's different for your organization.")]
+              {"type": "header", "text": _text(f"{pc.ICONS[n]} {pc.SHORT[n]}")}]
     if existing:
         blocks.append(_ctx("✏️ Already sent. Approving sends a new version that everyone agrees to again."))
     if notice:
@@ -242,7 +240,7 @@ def card_view(org: Organization, n: int, a: dict, meta: dict, *, when: str = "to
         blocks.append({"type": "input", "block_id": "day", "label": _text("Day"),
                        "element": {"type": "datepicker", "action_id": "v",
                                    "initial_date": day or (timezone.localdate() + timedelta(days=1)).isoformat()}})
-    blocks.append(_ctx("AIDL writes the card from your answers. Have it checked against your local law. "
+    blocks.append(_ctx("AIDL writes the card from your answers. Check it against what your regulators expect. "
                        "Not legal advice."))
     blocks.append({"type": "actions", "block_id": "aidl_pc_nav", "elements": [
         {"type": "button", "text": _text("← Topics"), "action_id": "aidl_pc_back", "value": "topics"}]})

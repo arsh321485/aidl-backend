@@ -49,6 +49,7 @@ HIDDEN = {
     "0.6",  # laws and standards → Regulator card from country + industry
     "0.7",  # which department owns the policy
     "0.8",  # contact email
+    "1.1",  # who must follow the policy → a general card for everyone (policy_awareness.py)
     "1.2",  # which company resources the policy covers
     "1.4",  # what personal devices must have
     "2.3",  # who can access monitoring records
