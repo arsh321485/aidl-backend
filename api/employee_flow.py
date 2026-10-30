@@ -273,7 +273,6 @@ def licence(member: AIDLUser, org: Organization) -> dict:
     predraw(licence_image.png_for, member, org)  # drawn before Slack asks for it
     valid = (f" · valid till *{member.licence_expires_at.strftime('%d %B %Y')}*"
              if member.licence_expires_at else "")
-    issued = member.licence_issued_at or timezone.now()
     nxt = (PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
                                           post_at__gt=timezone.now()).order_by("post_at").first())
     when = (f"*<!date^{int(nxt.post_at.timestamp())}^{{date_long_pretty}}|soon>*" if nxt else "*soon*")
@@ -285,8 +284,7 @@ def licence(member: AIDLUser, org: Organization) -> dict:
         _section(f"Here's your *AI Driving License*{valid}."),
         {"type": "image", "image_url": licence_image.image_url(number, version=version),
          "title": _t(f"AI Driving License · {number}"),
-         "alt_text": f"AI Driving License for {member.full_name or member.email}, {number}, issued for {org.name} "
-                     f"on {issued.strftime('%d %B %Y')}."},
+         "alt_text": "AI Driving License"},  # short: Slack shows it as the hover tooltip
         DIVIDER,
         _section(f":white_check_mark: {org.name} policy cards agreed\n:white_check_mark: Traffic Light Check\n"
                  ":white_check_mark: The Highway Code"),

@@ -554,7 +554,7 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
 
         predraw(card_image.png_for, f"pkg-{r.card_no}", org)  # ready before Slack fetches it
         b.append({"type": "image", "image_url": card_image.image_url(f"pkg-{r.card_no}", org),
-                  "alt_text": f"{c['title']}. {c['hook']}"[:1990]})
+                  "alt_text": c["title"][:1990]})
         nav = []
         if m["idx"] > 0:
             nav.append(_btn("← Previous", "mc_prev", "prev"))

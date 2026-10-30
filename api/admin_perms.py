@@ -6,11 +6,14 @@ nobody can remove them or change their permissions.
 
 Other admins have the permissions they were given:
     approve_apps    change the AI / IT app lists
-    access_cards    view and send reference cards
     create_card     request new awareness cards for review
     manage_admins   add, edit and remove admins (not the master admin)
     billing         upgrade the plan
     approve_cards   approve the cards AIDL sends to the team
+
+(No "Access Cards" in Slack any more — the paid reference cards are gone;
+AIDLUser.perm_access_cards is only used by the Teams app. Starting the
+programme and reminders go with "Approve cards".)
 
 An admin can only give the permissions they have themselves. Every change
 made by someone other than the master admin is reported to them by DM.
@@ -22,7 +25,6 @@ from .models import AIDLUser, Organization
 
 PERMS = (
     ("approve_apps", "perm_approve_apps", "Approve Apps", "change the AI / IT app lists"),
-    ("access_cards", "perm_access_cards", "Access Cards", "view and send reference cards"),
     ("create_card", "perm_create_card", "Request New Cards", "request new awareness cards for review"),
     ("manage_admins", "perm_manage_admins", "Manage admins", "add, edit and remove admins"),
     ("billing", "perm_billing", "Manage plan & billing", "upgrade the plan"),

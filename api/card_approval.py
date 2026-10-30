@@ -321,3 +321,42 @@ def remind(org: Organization, now=None) -> int:
             told += 1 if res.get("ok") or res.get("fallback_ok") else 0
     update(org, approval_reminded_at=now.isoformat())
     return told
+
+
+# ---------- asking another admin to approve (delegation) ----------
+# setup_state["card_assign"] = {card key: {"to": admin id, "by": admin id, "at": iso}}
+# Keys: "pkg:<card no>" (awareness cards) and "paw:<id>" (the AI policy's
+# awareness cards). An admin can approve / skip the cards assigned to them
+# even without the "Approve cards" permission.
+
+def assignments(org: Organization) -> dict:
+    from .admin_setup import state
+
+    return dict(state(org).get("card_assign") or {})
+
+
+def assign(org: Organization, keys: list[str], to: AIDLUser, by: AIDLUser | None) -> int:
+    from .admin_setup import update
+
+    data = assignments(org)
+    now = timezone.now().isoformat()
+    for k in keys:
+        data[k] = {"to": str(to.pk), "by": str(by.pk) if by else "", "at": now}
+    update(org, card_assign=data)
+    return len(keys)
+
+
+def assigned_keys(org: Organization, user: AIDLUser) -> list[str]:
+    return [k for k, a in assignments(org).items() if a.get("to") == str(user.pk)]
+
+
+def is_assigned(org: Organization, key: str, user: AIDLUser) -> bool:
+    return (assignments(org).get(key) or {}).get("to") == str(user.pk)
+
+
+def assignee_names(org: Organization) -> dict[str, str]:
+    """{card key: name of the admin it's assigned to}."""
+    data = assignments(org)
+    ids = {a.get("to") for a in data.values()}
+    names = {str(u.pk): (u.full_name or u.email) for u in AIDLUser.objects.filter(pk__in=[i for i in ids if i])}
+    return {k: names.get(a.get("to"), "") for k, a in data.items()}

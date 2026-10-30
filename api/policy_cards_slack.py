@@ -2,7 +2,7 @@
 E:\\AIDL Policy Cards (Slack).html.
 
     Admin Center step 1 "📌 Add a policy card"
-      → About your company (once: countries + industry → the laws card DM)
+      → About your company (once: countries + industry → the Regulator card DM)
       → Pick a topic (14 topics: sent · n agreed / goes out <day> / Choose)
       → the topic's card: its questions (answers already picked), the AI
         tools picker on "AI tools at work", "Your team will see" (redrawn on
@@ -10,7 +10,7 @@ E:\\AIDL Policy Cards (Slack).html.
       → Sent ("📌 Add another card")
 
 Callbacks: aidl_policy_topics, aidl_policy_card, aidl_policy_sent,
-aidl_company, aidl_laws_view. Block ids on the card: q|<qid>, f|<option id>,
+aidl_company, aidl_regulators_view. Block ids on the card: q|<qid>, f|<option id>,
 tools_<rev>, paste_<rev>, when, day.
 """
 
@@ -22,14 +22,14 @@ from datetime import date, timedelta
 
 from django.utils import timezone
 
-from . import aup_banner, aup_store, laws, policy_cards as pc
+from . import aup_banner, aup_store, policy_cards as pc, regulators
 from .models import AIDLUser, Organization
 
 TOPICS = "aidl_policy_topics"
 CARD = "aidl_policy_card"
 SENT = "aidl_policy_sent"
 COMPANY = "aidl_company"
-LAWS = "aidl_laws_view"
+REGULATORS = "aidl_regulators_view"
 _OPT_MAX = 75
 _SPECIFY = re.compile(r"\s*\((?:please\s+)?specify[^)]*\)\s*", re.I)
 
@@ -67,7 +67,7 @@ def _keep(meta: dict) -> dict:
 
 def _banner(org: Organization, label: str) -> dict:
     sent = len(aup_store.cards(org))
-    return {"type": "image", "alt_text": f"AI policy · {label}",
+    return {"type": "image", "alt_text": "AI policy",
             "image_url": aup_banner.url(label, f"{sent} of 14 cards", org.name, sent, 14)}
 
 
@@ -95,7 +95,8 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
             btn["style"] = "primary"
         blocks.append({"type": "section", "block_id": f"topic_{n}",
                        "text": _md(f"{pc.ICONS[n]} *{pc.SHORT[n]}*  ·  _point {n}_\n{line}"), "accessory": btn})
-    extra = [{"type": "button", "text": _text("⚖️ Your laws"), "action_id": "aidl_laws_open", "value": "laws"}]
+    extra = [{"type": "button", "text": _text("🏛 Your regulators"), "action_id": "aidl_regulators_open",
+              "value": "regulators"}]
     if can_upload(org):
         extra.insert(0, {"type": "button", "text": _text("📤 Upload your own AUP instead"),
                          "action_id": "aidl_aup_upload_open", "value": "upload"})
@@ -351,23 +352,23 @@ def sent_view(org: Organization, n: int, meta: dict, uploaded: bool = False) -> 
     return _modal(SENT, "Policy card", blocks, close="Done", meta=_keep(meta))
 
 
-# ---------- company + laws ----------
+# ---------- company + regulators ----------
 
 def company_view(org: Organization, meta: dict, then: str = "topics") -> dict:
     co = aup_store.company(org)
     opt = lambda t: {"text": _text(t, 75), "value": t}  # noqa: E731
     countries = {"type": "multi_static_select", "action_id": "v", "placeholder": _text("Choose countries"),
-                 "options": [opt(c) for c in laws.COUNTRIES]}
+                 "options": [opt(c) for c in regulators.COUNTRIES]}
     if co.get("countries"):
-        countries["initial_options"] = [opt(c) for c in co["countries"] if c in laws.COUNTRIES]
+        countries["initial_options"] = [opt(c) for c in co["countries"] if c in regulators.COUNTRIES]
     industry = {"type": "static_select", "action_id": "v", "placeholder": _text("Choose one"),
-                "options": [opt(i) for i in laws.INDUSTRIES]}
-    if co.get("industry") in laws.INDUSTRIES:
+                "options": [opt(i) for i in regulators.INDUSTRIES]}
+    if co.get("industry") in regulators.INDUSTRIES:
         industry["initial_option"] = opt(co["industry"])
     blocks = [{"type": "image", "alt_text": "Your company",
                "image_url": aup_banner.url("Your company · asked once", "2 answers", org.name, 0, 14)},
-              _ctx(f"AIDL already knows *{org.name}* from Slack. These two answers tell us which laws apply to you — "
-                   "you'll get them as a private card."),
+              _ctx(f"AIDL already knows *{org.name}* from Slack. These two answers tell us which regulators may oversee "
+                   "you — AIDL works that out and sends it to you as a private card."),
               {"type": "input", "block_id": "countries", "label": _text("Where do you operate?"), "element": countries},
               {"type": "input", "block_id": "industry", "label": _text("Your industry"), "element": industry}]
     return _modal(COMPANY, "About your company", blocks, submit="Next →" if then == "topics" else "Save",
@@ -385,20 +386,21 @@ def submit_company(admin: AIDLUser, org: Organization, view: dict) -> dict:
     if not industry:
         return {"response_action": "errors", "errors": {"industry": "Choose your industry."}}
     aup_store.save_company(org, countries, industry)
-    in_background(send_laws_card, org.pk, admin.pk)
+    in_background(send_regulator_card, org.pk, admin.pk)
     meta = _meta(view)
-    nxt = topics_view(org, meta) if meta.get("then") == "topics" else laws_view(org, meta)
+    nxt = topics_view(org, meta) if meta.get("then") == "topics" else regulators_view(org, meta)
     return {"response_action": "update", "view": nxt}
 
 
-def laws_view(org: Organization, meta: dict) -> dict:
+def regulators_view(org: Organization, meta: dict) -> dict:
     co = aup_store.company(org)
-    return _modal(LAWS, "Your laws", laws.card_blocks(org.name, co.get("countries") or [], co.get("industry", "")),
+    return _modal(REGULATORS, "Your regulators",
+                  regulators.card_blocks(org.name, co.get("countries") or [], co.get("industry", "")),
                   meta=_keep(meta))
 
 
-def send_laws_card(org_pk, admin_pk) -> None:
-    """The private laws card, by DM to the admin who answered."""
+def send_regulator_card(org_pk, admin_pk) -> None:
+    """The private Regulator card, by DM to the admin who answered."""
     from . import slack_client
 
     org = Organization.objects.get(pk=org_pk)
@@ -407,8 +409,8 @@ def send_laws_card(org_pk, admin_pk) -> None:
         return
     co = aup_store.company(org)
     slack_client.send_dm(slack_client.bot_token(org), org, admin.microsoft_id.split(":")[-1],
-                         text=f"The laws and rules that apply to {org.name}",
-                         blocks=laws.card_blocks(org.name, co.get("countries") or [], co.get("industry", "")))
+                         text=f"Regulators that may oversee {org.name}",
+                         blocks=regulators.card_blocks(org.name, co.get("countries") or [], co.get("industry", "")))
 
 
 # ---------- clicks inside these popups ----------

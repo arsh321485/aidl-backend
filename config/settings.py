@@ -389,7 +389,7 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 NVIDIA_STATUS_URL = os.getenv("NVIDIA_STATUS_URL", "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status")
-NVIDIA_TIMEOUT = int(os.getenv("NVIDIA_TIMEOUT", "300"))  # seconds for one generation, retries included
+NVIDIA_TIMEOUT = int(os.getenv("NVIDIA_TIMEOUT", "600"))  # seconds for one generation, retries included
 NVIDIA_MAX_TOKENS = int(os.getenv("NVIDIA_MAX_TOKENS", "8000"))
 NVIDIA_TEMPERATURE = float(os.getenv("NVIDIA_TEMPERATURE", "0.2"))
 try:  # extra request fields the chosen model needs, e.g. {"chat_template_kwargs": {"thinking": false}}
@@ -402,3 +402,8 @@ if not isinstance(NVIDIA_EXTRA_BODY, dict):
 AUP_UPLOAD_PLANS = {p.strip() for p in os.getenv("AUP_UPLOAD_PLANS", "basic,enterprise").split(",") if p.strip()}
 AUP_UPLOAD_MAX_BYTES = int(os.getenv("AUP_UPLOAD_MAX_BYTES", str(10 * 1024 * 1024)))
 AUP_UPLOAD_MAX_CHARS = int(os.getenv("AUP_UPLOAD_MAX_CHARS", "120000"))
+# Regulator card (regulators.py): show regulator entries that haven't been through AIDL's compliance review yet,
+# marked DRAFT. For AIDL's own test workspaces only — leave off for customers.
+REGULATORS_PREVIEW = os.getenv("REGULATORS_PREVIEW", "False").lower() in ("1", "true", "yes")
+# "Request a new card" (Card approval) is emailed here (empty = BILLING_SALES_EMAIL; both empty = saved only).
+CARD_REQUEST_EMAIL = os.getenv("CARD_REQUEST_EMAIL", "")

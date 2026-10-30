@@ -3,9 +3,14 @@
     Onboarding cards   🚦 Traffic Light · 📖 Highway Code  [👁 Preview] [✅ Approve]
     From your AI policy  5 ready-made awareness cards  [👁 Preview] [✅ Approve]
     Awareness cards    counts · [✅ Approve all waiting]
-      Month n of N     [← Month n-1] [Month n+1 →] [✅ Approve month n]
-        one line per card with a ⋯ menu: Preview · Approve · Skip · Swap
-    Extra reference cards (optional) → the old Send Cards popup
+      Month n of N     [← Month n-1] [Month n+1 →] [✅ Approve month n] [👤 Ask an admin]
+        one line per card with a ⋯ menu: Preview · Approve · Skip · Swap · Ask an admin
+    Your AI policy     the policy cards sent / scheduled · [📌 Add a policy card] [＋ Request a new card]
+
+"Ask another admin to approve" (card_approval.assign) hands a card or a
+month to another admin; they get a DM and see only those cards
+(mine_view), which they can approve or skip without the full permission.
+The paid extra reference cards are gone from this flow.
 
 Button / menu clicks (action ids aidl_crv_*) redraw the popup in place;
 Preview pushes a popup with the card image as the team will see it.
@@ -42,8 +47,11 @@ def _opt(text, value):
     return {"text": _t(text), "value": value}
 
 
-def review_view(org, month: int = 1, notice: str = "") -> dict:
+def review_view(org, month: int = 1, notice: str = "", *, can_request: bool = False) -> dict:
     from .plans import PACKAGE_LABELS, plan_key
+    from .policy_cards import summary as policy_summary
+
+    assignee = ca.assignee_names(org)
 
     total_months = ca.months(org)
     month = min(max(1, month), total_months)
@@ -71,11 +79,13 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
         "*From your AI policy* — general rules as ready-made awareness cards. Approved ones follow each licence; "
         "employees press *Got it*.")}]
     for c in ca.policy_awareness(org):
+        mine = assignee.get(f"paw:{c['id']}") if c["status"] != ca.APPROVED else ""
         blocks.append({"type": "section", "text": _md(f"{ICON[c['status']]}  {c['icon']} *{c['title']}*  ·  "
-                                                      f"{WORD[c['status']]}")})
+                                                      f"{WORD[c['status']]}" + (f"  ·  👤 {mine}" if mine else ""))})
         blocks.append({"type": "actions", "block_id": f"crv_paw_{c['id']}", "elements": [
             _btn("👁 Preview", "aidl_crv_preview", f"paw|{c['id']}"),
-            *([_btn("✅ Approve", "aidl_crv_approve_paw", c["id"], "primary")] if c["status"] != ca.APPROVED else []),
+            *([_btn("✅ Approve", "aidl_crv_approve_paw", c["id"], "primary"),
+               _btn("👤 Ask an admin", "aidl_crv_assign", f"paw:{c['id']}")] if c["status"] != ca.APPROVED else []),
         ]})
 
     n = ca.counts(org)
@@ -108,6 +118,7 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
         nav.append(_btn(f"Month {month + 1} →", "aidl_crv_month", month + 1))
     if waiting_here:
         nav.append(_btn(f"✅ Approve month {month}", "aidl_crv_approve_month", month, "primary"))
+        nav.append(_btn("👤 Ask an admin", "aidl_crv_assign", f"month:{month}"))
     blocks.append({"type": "section", "text": _md(f"*Month {month} of {total_months}*  ·  cards "
                                                   f"{cards[0]['position'] if cards else 0}–"
                                                   f"{cards[-1]['position'] if cards else 0}")})
@@ -123,9 +134,12 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
         else:
             options.append(_opt("↩️ Undo skip", f"unskip|{c['no']}"))
         options.append(_opt("🔄 Swap for another card", f"swap|{c['no']}"))
+        if c["approval"] == ca.WAITING:
+            options.append(_opt("👤 Ask another admin", f"assign|{c['no']}"))
+        mine = assignee.get(f"pkg:{c['no']}") if c["approval"] == ca.WAITING else ""
         blocks.append({"type": "section",
                        "text": _md(f"{ICON[c['approval']]}  *{c['position']}. {c['title']}*\n"
-                                   f"{c['category']} · {c['type']}{swapped}"),
+                                   f"{c['category']} · {c['type']}{swapped}" + (f"  ·  👤 {mine}" if mine else "")),
                        "accessory": {"type": "overflow", "action_id": "aidl_crv_card", "options": options}})
         if acks["sent"]:
             rate = acks["card_rates"].get(c["no"])
@@ -137,14 +151,132 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
                 note = "not sent yet"
             blocks.append({"type": "context", "elements": [_md(f"📘 {note}")]})
 
+    policy = policy_summary(org)
+    sent = sum(c["state"] == "sent" for c in policy)
+    later = len(policy) - sent
+    line = (f"{sent} of 14 policy cards approved" + (f" · {later} scheduled" if later else "")) if policy else \
+        "No policy cards yet — each topic of your AI policy is one short card your team agrees to."
+    buttons = [_btn("📌 Add a policy card", "aidl_policy_open", "policy")]
+    if can_request:
+        buttons.append(_btn("＋ Request a new card", "aidl_card_new", "new"))
     blocks += [
         {"type": "divider"},
-        {"type": "section", "text": _md("*Extra reference cards (optional)* — 10 quick-reference cards you can send "
-                                        "into the channel yourself."),
-         "accessory": _btn("📬 Extra cards", "aidl_open_cards", "cards")},
+        {"type": "section", "text": _md(f"*Your AI policy* — approved when you send each card.\n{line}")},
+        {"type": "actions", "block_id": "crv_policy", "elements": buttons},
     ]
+    if can_request:
+        blocks.append({"type": "context", "elements": [_md("Need a card that isn't here? Request it — AIDL's team "
+                                                           "reviews every request.")]})
     return {"type": "modal", "callback_id": CALLBACK, "title": _t("Approve cards"), "close": _t("Done"),
             "private_metadata": json.dumps({"month": month}), "blocks": blocks[:100]}
+
+
+def mine_view(org, user, notice: str = "") -> dict:
+    """The cards another admin asked `user` to approve."""
+    from .plans import card_by_no
+    from .policy_awareness import by_id
+
+    rows = ca._rows(org)
+    blocks = [{"type": "section", "text": _md("*Cards you've been asked to approve.* Nothing reaches your team "
+                                              "until it's approved.")}]
+    if notice:
+        blocks.append({"type": "context", "elements": [_md(notice)]})
+    keys = ca.assigned_keys(org, user)
+    for key in keys:
+        status = ca.status(org, key, rows)
+        if key.startswith("pkg:"):
+            card = card_by_no(key[4:]) or {"title": key[4:], "category": "", "type": ""}
+            options = [_opt("👁 Preview", f"preview|{key[4:]}")]
+            if status != ca.APPROVED:
+                options.append(_opt("✅ Approve", f"approve|{key[4:]}"))
+            if status != ca.SKIPPED:
+                options.append(_opt("⏭ Skip (never send)", f"skip|{key[4:]}"))
+            blocks.append({"type": "section", "text": _md(f"{ICON[status]}  *{card['title']}*\n"
+                                                          f"{card.get('category', '')} · {card.get('type', '')}"),
+                           "accessory": {"type": "overflow", "action_id": "aidl_crv_card", "options": options}})
+        elif key.startswith("paw:"):
+            card = by_id(key[4:]) or {"id": key[4:], "icon": "", "title": key[4:]}
+            blocks.append({"type": "section", "text": _md(f"{ICON[status]}  {card['icon']} *{card['title']}*  ·  "
+                                                          "from your AI policy")})
+            blocks.append({"type": "actions", "block_id": f"crv_mine_{card['id']}", "elements": [
+                _btn("👁 Preview", "aidl_crv_preview", f"paw|{card['id']}"),
+                *([_btn("✅ Approve", "aidl_crv_approve_paw", card["id"], "primary")] if status != ca.APPROVED else [])]})
+    if not keys:
+        blocks.append({"type": "section", "text": _md("_No cards are waiting for you._")})
+    return {"type": "modal", "callback_id": CALLBACK, "title": _t("Your cards to approve"), "close": _t("Done"),
+            "private_metadata": json.dumps({"mine": True}), "blocks": blocks[:100]}
+
+
+ASSIGN = "aidl_crv_assign"
+
+
+def assign_view(org, user, what: str, meta: dict | None = None) -> dict:
+    """Pick the admin who should approve `what` ("month:<n>", "<card no>"
+    or "paw:<id>")."""
+    from .models import AIDLUser
+
+    admins = [a for a in AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN,
+                                                 is_active=True).order_by("full_name") if a.pk != user.pk]
+    if what.startswith("month:"):
+        n = int(what[6:] or 1)
+        label = f"the waiting cards of month {n} ({sum(c['approval'] == ca.WAITING for c in ca.month_cards(org, n))})"
+    elif what.startswith("paw:"):
+        from .policy_awareness import by_id
+
+        label = f"*{(by_id(what[4:]) or {}).get('title', 'this card')}*"
+    else:
+        from .plans import card_by_no
+
+        label = f"*{(card_by_no(what) or {}).get('title', 'this card')}*"
+    if not admins:
+        return {"type": "modal", "callback_id": PREVIEW, "title": _t("Ask an admin"), "close": _t("Back"),
+                "blocks": [{"type": "section", "text": _md("There's no other admin yet. Add one in step 2 of the "
+                                                           "Admin Center, then ask them here.")}]}
+    options = [_opt(a.full_name or a.email, str(a.pk)) for a in admins[:100]]
+    return {"type": "modal", "callback_id": ASSIGN, "title": _t("Ask an admin"), "submit": _t("Ask them"),
+            "close": _t("Back"), "private_metadata": json.dumps({**(meta or {}), "what": what}), "blocks": [
+                {"type": "section", "text": _md(f"Who should approve {label}? They get a message and can approve "
+                                                "or skip just these cards — they don't need the *Approve cards* "
+                                                "permission.")},
+                {"type": "input", "block_id": "admin", "label": _t("Admin"),
+                 "element": {"type": "static_select", "action_id": "v", "options": options,
+                             "placeholder": _t("Choose an admin")}}]}
+
+
+def assign_keys(org, what: str) -> list[str]:
+    if what.startswith("month:"):
+        return [f"pkg:{c['no']}" for c in ca.month_cards(org, int(what[6:] or 1)) if c["approval"] == ca.WAITING]
+    if what.startswith("paw:"):
+        return [what]
+    return [f"pkg:{what}"]
+
+
+def submit_assign(caller, org, view: dict) -> dict:
+    """Save who approves these cards and tell them."""
+    from . import slack_client
+    from .admin_perms import notify_master
+    from .models import AIDLUser
+
+    meta = json.loads(view.get("private_metadata") or "{}")
+    picked = (((view.get("state") or {}).get("values") or {}).get("admin") or {}).get("v") or {}
+    admin_id = (picked.get("selected_option") or {}).get("value", "")
+    to = AIDLUser.objects.filter(pk=admin_id, organization_id=str(org.pk), role=AIDLUser.Role.ADMIN).first()
+    if to is None:
+        return {"response_action": "errors", "errors": {"admin": "Choose an admin."}}
+    keys = assign_keys(org, meta.get("what", ""))
+    if not keys:
+        return {"response_action": "errors", "errors": {"admin": "These cards don't need approving any more."}}
+    ca.assign(org, keys, to, caller)
+    who = caller.full_name or caller.email
+    if to.microsoft_id.startswith("slack:"):
+        slack_client.send_dm(slack_client.bot_token(org), org, to.microsoft_id.split(":")[-1],
+                             text=f"{who} asked you to approve {len(keys)} AIDL card(s)", blocks=[
+            {"type": "section", "text": _md(f"🗂️ *{who}* asked you to approve *{len(keys)}* card"
+                                            f"{'s' if len(keys) != 1 else ''} for {org.name}'s team.")},
+            {"type": "actions", "block_id": "crv_mine_dm", "elements": [
+                _btn("📋 Review my cards", "aidl_cards_review", "mine", "primary")]}])
+    notify_master(org, caller, f"👤 *{who}* asked *{to.full_name or to.email}* to approve {len(keys)} card(s).")
+    return {"notice": f"👤 Asked {to.full_name or to.email} to approve {len(keys)} card(s)."}
 
 
 def preview_view(org, what: str) -> dict:

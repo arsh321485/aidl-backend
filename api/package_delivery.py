@@ -101,7 +101,7 @@ def card_blocks(org: Organization, card: dict, position: int, total: int, acked_
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
             f"📘 *Card {position} of {total}*  ·  {card['category']}  ·  {card['type']}"}]},
         {"type": "section", "text": {"type": "mrkdwn", "text": f"*{card['title']}* · {card['hook']}"}},
-        {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": f"{card['title']}. {card['hook']}"[:1990]},
+        {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": card["title"][:1990]},  # short hover tooltip
     ]
     if card.get("local_link"):
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": _local_line(org, card)}})

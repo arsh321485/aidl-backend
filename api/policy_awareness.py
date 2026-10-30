@@ -80,7 +80,7 @@ def blocks(org: Organization, c: dict, acked: bool = False) -> list:
                    "action_id": "aidl_my_cards", "value": "0"}]})
     return [
         {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*AI awareness · {c['icon']} {c['title']}*"}]},
-        {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": f"{c['title']}. " + " ".join(c["lines"])},
+        {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": c["title"]},  # short hover tooltip
         action,
     ]
 

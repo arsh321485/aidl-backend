@@ -43,10 +43,10 @@ _SPECIFY = re.compile(r"\s*\((?:please\s+)?specify[^)]*\)\s*", re.I)
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # Questions in the bank that AIDL doesn't ask (and the policy doesn't use) —
 # the manager's cuts (Oct 2026). General-awareness ones became ready-made
-# awareness cards (policy_awareness.py); the laws question became the laws
-# card (laws.py); the approved AI tools are picked from a list (policy_cards.py).
+# awareness cards (policy_awareness.py); the laws question became the Regulator
+# card (regulators.py); the approved AI tools are picked from a list (policy_cards.py).
 HIDDEN = {
-    "0.6",  # laws and standards → laws card from country + industry
+    "0.6",  # laws and standards → Regulator card from country + industry
     "0.7",  # which department owns the policy
     "0.8",  # contact email
     "1.2",  # which company resources the policy covers

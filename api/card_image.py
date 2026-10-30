@@ -409,27 +409,21 @@ def render(kind: str, org) -> bytes:
 
 
 def alt_text(kind: str, org=None) -> str:
-    """What screen readers (and Slack notifications) get instead of the image."""
-    if kind.startswith("aup-") and org is not None:
-        from .aup_store import point as policy_point
+    """The image's alt text: just the card's name. Slack shows it as the
+    tooltip when the mouse is over the image, so it stays short (it can't be
+    empty); the card's words are in the image and the message text."""
+    if kind.startswith("aup-"):
+        from .policy_cards import SHORT
 
-        point = policy_point(org, int(kind[4:]))
-        if point is None:
-            return "AI policy card."
-        text = f"Policy card: {_plain(point['title'])}. " + " ".join(_plain(c["text"]) for c in point.get("clauses") or [])
-        return text[:1990]
+        return f"Policy card · {SHORT.get(int(kind[4:]), 'AI policy')}"
     if kind.startswith("paw-"):
         from .policy_awareness import by_id
 
-        c = by_id(kind[4:]) or {"title": "", "lines": []}
-        return _plain(f"{c['title']}. " + " ".join(c["lines"]))[:1990]
+        return (by_id(kind[4:]) or {}).get("title") or "AI awareness"
     if kind.startswith("pkg-"):
         from .plans import card_by_no
 
-        c = card_by_no(kind[4:]) or {}
-        return _plain(f"{c.get('title', '')}. {c.get('hook', '')} {c.get('message', '')} {c.get('action', '')}")[:1990]
+        return _plain((card_by_no(kind[4:]) or {}).get("title", "")) or "Awareness card"
     if kind == "highway_code":
-        return "The Highway Code. " + " ".join(f"{t}: {b.replace('**', '')}" for _k, t, b in HIGHWAY["rules"])
-    return "Traffic Light Check. " + " ".join(
-        f"{title}, {sub} For example: {', '.join(items)}. {action.lstrip('→ ')}"
-        for _n, title, sub, items, action in TRAFFIC["lights"])
+        return "The Highway Code"
+    return "Traffic Light Check"

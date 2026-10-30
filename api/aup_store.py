@@ -8,7 +8,7 @@ on each one.
 Organization.aup_data (JSON) holds
     answers, fills, tools   the admin's answers, shared by all cards (a
                             question on one card can depend on another's)
-    company                 {countries, industry} — for the laws card (laws.py)
+    company                 {countries, industry} — for the Regulator card (regulators.py)
     cards                   {"<n>": {title, lines, version, number, send_on,
                             sent_at, approved_by, source, file_name}}
                             — every card the admin approved; send_on is ""
