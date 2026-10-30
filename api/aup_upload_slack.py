@@ -5,8 +5,9 @@
     → when the model is done, that popup turns into the review (if it's still
     open) and the admin gets a DM with "Review cards" either way.
     Review (callback aidl_aup_upload_review): the 14 cards with ⚠ for points
-    the policy doesn't cover and quotes AIDL couldn't find in the file →
-    "Use these cards" publishes them → the AUP-ready popup (Approve AUP).
+    the policy doesn't cover and quotes AIDL couldn't find in the file, and
+    when they should go out → "Use these cards" approves them as the 14
+    policy cards (policy_cards.py) and sends them today or on that day.
 """
 
 from __future__ import annotations
@@ -125,8 +126,18 @@ def review_view(org: Organization, upload: AupUpload | None, notice: str = "") -
         {"type": "actions", "block_id": "aidl_aup_upload_again", "elements": [
             {"type": "button", "text": _text("Upload another file"), "action_id": "aidl_aup_upload_open",
              "value": "again"}]},
-        {"type": "context", "elements": [_md(_LEGAL)]},
     ]
+    if not published:
+        blocks += [{"type": "divider"},
+                   {"type": "input", "block_id": "when", "label": _text("When should the cards go out?"),
+                    "element": {"type": "radio_buttons", "action_id": "v",
+                                "initial_option": {"text": _text("Today, now"), "value": "today"},
+                                "options": [{"text": _text("Today, now"), "value": "today"},
+                                            {"text": _text("On a day"), "value": "day",
+                                             "description": _text("Pick it below · 10:00 in each person's time zone")}]}},
+                   {"type": "input", "block_id": "day", "label": _text("Day (if not today)"), "optional": True,
+                    "element": {"type": "datepicker", "action_id": "v"}}]
+    blocks.append({"type": "context", "elements": [_md(_LEGAL)]})
     return _modal(REVIEW, "Your AUP cards", blocks, submit="" if published else "Use these cards",
                   meta={"upload_id": str(upload.pk)})
 
@@ -189,17 +200,30 @@ def _show(org: Organization, view_id: str, view: dict) -> bool:
 
 
 def submit_review(admin: AIDLUser, org: Organization, view: dict) -> dict:
-    from .aup_slack import report_view
+    from django.utils import timezone
+
+    from .policy_cards import check_day
+    from .policy_cards_slack import sent_view
 
     meta = json.loads(view.get("private_metadata") or "{}")
     upload = AupUpload.objects.filter(pk=meta.get("upload_id"), organization_id=str(org.pk)).first()
     if upload is None:
         return {"response_action": "update", "view": review_view(org, None)}
+    values = (view.get("state") or {}).get("values") or {}
+    when = (((values.get("when") or {}).get("v") or {}).get("selected_option") or {}).get("value", "today")
+    day = ((values.get("day") or {}).get("v") or {}).get("selected_date") or ""
+    send_on = ""
+    if when == "day":
+        why = check_day(day)
+        if why:
+            return {"response_action": "errors", "errors": {"day": why}}
+        send_on = "" if day == timezone.localdate().isoformat() else day
     try:
-        aup = aup_upload.publish(org, upload, admin)
+        aup_upload.publish(org, upload, admin, send_on)
     except aup_upload.UploadError as exc:
         return {"response_action": "update", "view": review_view(org, upload, notice=f"⚠ {exc.message}")}
-    return {"view": report_view(org, aup), "published": True}
+    return {"view": sent_view(org, 1, meta, uploaded=True), "published": True,
+            "notice": f"✅ The 14 policy cards from _{upload.file_name}_ are approved."}
 
 
 def notify_done(upload: AupUpload) -> None:

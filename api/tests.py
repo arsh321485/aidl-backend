@@ -51,14 +51,18 @@ AUP_FILLS = {"6.2.b": "SharePoint", "9.2.a": "security@acme.example"}
 
 
 def _answer_policy(org: Organization, **changes) -> dict:
-    """Publish a complete question-bank AUP (recommended answers)."""
-    from . import aup_builder, aup_store
+    """Approve all 14 policy cards (recommended answers) — sent at once if
+    the programme has started."""
+    from . import aup_builder, aup_store, policy_cards
 
     answers = aup_builder.recommended_answers()
     answers.update(AUP_BASE)
     answers.update(changes)
-    aup_store.save_draft(org, answers, dict(AUP_FILLS), 14)
-    return aup_store.publish(org)
+    a = {"answers": answers, "fills": dict(AUP_FILLS), "tools": ["ChatGPT Enterprise"]}
+    for n in policy_cards.TOPICS:
+        policy_cards.approve(org, None, n, a, deliver=False)
+    org.refresh_from_db()
+    return aup_store.current(org)
 
 
 def _approve_all(org: Organization) -> None:
@@ -71,7 +75,7 @@ def _approve_all(org: Organization) -> None:
 
 
 def _accept_aup(member: AIDLUser, org: Organization) -> None:
-    """The employee accepts all 14 points (publishes an AUP if needed)."""
+    """The employee agrees to every policy card (approves the 14 if there are none)."""
     from . import aup_store
     from .licensing import acknowledge
 
@@ -79,8 +83,8 @@ def _accept_aup(member: AIDLUser, org: Organization) -> None:
     if not aup_store.is_complete(org):
         _answer_policy(org)
         org.refresh_from_db()
-    for n in range(1, aup_store.POINTS + 1):
-        acknowledge(member, aup_store.point_item(n), aup_store.version(org))
+    for n, ver in aup_store.required_points(org).items():
+        acknowledge(member, aup_store.point_item(n), ver)
 
 
 def make_user(org: Organization, *, role=AIDLUser.Role.ADMIN, **kwargs) -> AIDLUser:
@@ -1428,7 +1432,8 @@ class SlackHomeVisualTests(TestCase):
         self.assertFalse(any(b.get("block_id") == "aidl_tabs" for b in blocks))
         text = json.dumps(blocks, ensure_ascii=False)
         for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 5 setup steps done",
-                      "✅  *1 · AI policy*  ·  waiting for your approval  ·  v1  ·  14 points", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
+                      "✅  *1 · Your AI policy*  ·  14 of 14 policy cards approved", "goes out when you start the programme",
+                      "From your AI policy: *0* of 5 awareness cards approved", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
                       "*2 · Add admins (optional)*", "aidl_open_add-admin", "aidl_setup_skip",
                       "3 · Add your team*  —  _after step 2_"):
             self.assertIn(label, text)
@@ -1547,6 +1552,7 @@ class SlackOnboardingTests(TestCase):
         self.assertFalse(AIDLUser.objects.filter(microsoft_id__in=["slack:T9:U8", "slack:T9:U9"]).exists())
 
     def test_acknowledging_both_issues_the_learner_licence(self):
+        _answer_policy(self.org)                              # the admin approved policy cards
         self._event("U7")
         self._click("U7", "highway_code")
         user = AIDLUser.objects.get(microsoft_id="slack:T9:U7")
@@ -2248,7 +2254,7 @@ class PopupTimingTests(TestCase):
                 self.client.post("/api/slack/interactions/", body, content_type="application/x-www-form-urlencoded",
                                  HTTP_X_SLACK_REQUEST_TIMESTAMP=ts, HTTP_X_SLACK_SIGNATURE=sig)
         self.assertEqual(order[0], "views.open:aidl_loading")     # before the slow Admin Center data
-        self.assertIn("views.update:aidl_aup_section", order)
+        self.assertIn("views.update:aidl_company", order)        # first time: about your company
 
 
 class AupBuilderTests(SimpleTestCase):
@@ -2317,9 +2323,10 @@ class AupBuilderTests(SimpleTestCase):
     def test_other_option_uses_typed_text(self):
         from . import aup_builder
 
-        answers = self._answers(**{"4_1": ["4.1.a", "4.1.x"]})
-        text = aup_builder.as_text(aup_builder.generate(answers, {**self.FILLS, "4.1.x": "Using AI to write exam answers"}))
-        self.assertIn("Using AI to write exam answers", text)
+        answers = self._answers(**{"9_2": ["9.2.a", "9.2.x"]})              # "Something else (add your own)"
+        text = aup_builder.as_text(aup_builder.generate(answers, {**self.FILLS, "9.2.x": "the #security Slack channel"}))
+        self.assertIn("the #security Slack channel", text)
+        self.assertEqual(aup_builder.validate(answers, self.FILLS).get("9.2"), "Please fill in: Email / phone / portal link.")
 
     def test_preview_endpoint(self):
         resp = self.client.post("/api/aup/preview/", {"use_recommended": True, "answers": self.BASE, "fills": self.FILLS},
@@ -2333,9 +2340,11 @@ class AupBuilderTests(SimpleTestCase):
 
 
 
-class AupQuestionnaireSlackTests(TestCase):
-    """Create AUP in Slack from the question bank: 15 screens, then one AUP
-    point per card for employees; the licence needs all 14 points."""
+class PolicyCardsSlackTests(TestCase):
+    """The AI policy as policy cards (policy_cards.py, design E:\\AIDL Policy
+    Cards (Slack).html): about your company → laws card, pick a topic, the
+    card with its questions (answers already picked) and a live preview,
+    approve & send today or on a day; employees press I agree on each card."""
 
     SECRET = "shh"
     _signed = SlackOnboardingTests._signed
@@ -2357,11 +2366,10 @@ class AupQuestionnaireSlackTests(TestCase):
         return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
                             "application/x-www-form-urlencoded")
 
-    def _screen(self, section=0):
-        from . import aup_slack, aup_store
+    def _card(self, n):
+        from . import aup_store, policy_cards_slack
 
-        d = aup_store.draft(self.org)
-        return aup_slack.section_view(self.org, section, d["answers"], d.get("fills") or {}, {})
+        return policy_cards_slack.card_view(self.org, n, aup_store.answers(self.org), {})
 
     def _values(self, view):
         """What Slack sends back for a screen: the pre-selected / pre-filled values."""
@@ -2386,227 +2394,178 @@ class AupQuestionnaireSlackTests(TestCase):
     def _submit(self, view, values):
         return self._post({"type": "view_submission", "view": {**view, "state": {"values": values}}}).json()
 
-    def test_first_screen_has_recommended_answers_and_profile(self):
-        view = self._screen(0)
-        self.assertEqual(view["callback_id"], "aidl_aup_section")
-        self.assertEqual(view["submit"]["text"], "Next →")
-        text = json.dumps(view, ensure_ascii=False)
-        self.assertIn("Organization Profile", text)
-        self.assertIn('"initial_value": "Acme"', text)              # organization name pre-filled
-        policy = next(b for b in self._screen(2)["blocks"] if b.get("block_id") == "q|2.1")
-        self.assertEqual(policy["element"]["initial_option"]["value"], "2.1.a")   # recommended pre-selected
-        self.assertTrue(policy["dispatch_action"])                  # changing it shows / hides follow-ups
+    def _home(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
 
-    def test_show_if_hides_follow_ups_on_redraw(self):
+        return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
+
+    def test_first_time_asks_company_then_sends_laws_card(self):
+        self._post({"type": "block_actions", "trigger_id": "TR", "channel": {"id": "C42"},
+                    "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]})
+        company = _shown_views(self.calls)[-1]
+        self.assertEqual(company["callback_id"], "aidl_company")
+        resp = self._submit(company, {"countries": {"v": {"selected_options": [{"value": "India"}]}},
+                                      "industry": {"v": {"selected_option": {"value": "Banking & financial services"}}}})
+        self.assertEqual(resp["view"]["callback_id"], "aidl_policy_topics")       # then the topics
+        dm = json.dumps([b for m, b in self.calls if m == "chat.postMessage"], ensure_ascii=False)
+        for law in ("DPDP Act", "CERT-In", "PCI DSS", "not legal advice"):
+            self.assertIn(law, dm)
+        self.calls.clear()
+        self._post({"type": "block_actions", "trigger_id": "TR2", "channel": {"id": "C42"},
+                    "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]})
+        self.assertEqual(_shown_views(self.calls)[-1]["callback_id"], "aidl_policy_topics")  # asked once
+
+    def test_topics_list_and_card_questions(self):
+        from .policy_cards_slack import topics_view
+
+        topics = json.dumps(topics_view(self.org, {}), ensure_ascii=False)
+        for label in ("AI tools at work", "Passwords & sign-in", "Reporting a problem", "aidl_pc_pick"):
+            self.assertIn(label, topics)
+        card = self._card(9)
+        text = json.dumps(card, ensure_ascii=False)
+        self.assertNotIn("Recommended", text)                                     # no label, still pre-selected
+        self.assertNotIn("Report phishing", text)
+        self.assertIn("Something else (add your own)", text)
+        how = next(b for b in card["blocks"] if b.get("block_id") == "q|9.2")
+        self.assertEqual([o["value"] for o in how["element"]["initial_options"]], ["9.2.a"])
+        self.assertTrue(all(b.get("dispatch_action") for b in card["blocks"] if b.get("block_id", "")[:2] in ("q|", "f|")))
+        mfa = json.dumps(self._card(5), ensure_ascii=False)
+        self.assertIn("IT systems", mfa)
+        for gone in ("Screens must lock", "Which department owns", "laws, regulations", "Other free online tools",
+                     "What must never be entered", "Which personal activities"):
+            for n in range(1, 15):
+                self.assertNotIn(gone, json.dumps(self._card(n), ensure_ascii=False), (gone, n))
+
+    def test_ai_tools_picker_and_paste(self):
         from . import aup_store
 
-        view = self._screen(2)
-        self.assertIn("q|2.2", [b.get("block_id") for b in view["blocks"]])
-        values = self._values(view)
-        values["q|2.1"] = {"v": {"selected_option": {"value": "2.1.c"}}}     # No monitoring
-        self._post({"type": "block_actions", "view": {**view, "id": "V1", "hash": "h", "state": {"values": values}},
-                    "actions": [{"action_id": "v", "block_id": "q|2.1"}]})
-        update = next(b for m, b in self.calls if m == "views.update")
-        self.assertNotIn("q|2.2", [b.get("block_id") for b in update["view"]["blocks"]])
-        self.org.refresh_from_db()
-        self.assertEqual(aup_store.draft(self.org)["answers"]["2.1"], "2.1.c")
-
-    def test_next_validates_then_moves_on(self):
-        view = self._screen(0)
-        values = self._values(view)
-        resp = self._submit(view, values)                           # email / date / laws still empty
-        self.assertEqual(resp["response_action"], "errors")
-        self.assertIn("q|0.9", resp["errors"])
-        self.assertNotIn("q|0.8", [b.get("block_id") for b in view["blocks"]])   # contact email: not asked
-        values.update({"q|0.3": {"v": {"selected_option": {"value": "0.3.a"}}},
-                       "q|0.4": {"v": {"selected_option": {"value": "0.4.b"}}},
-                       "q|0.5": {"v": {"value": "Bahrain"}}, "q|0.6": {"v": {"selected_options": [{"value": "0.6.b"}]}},
-                       "q|0.8": {"v": {"value": "it@acme.example"}}, "q|0.9": {"v": {"selected_date": "2026-11-01"}}})
-        resp = self._submit(view, values)
-        self.assertEqual(resp["response_action"], "update")
-        self.assertIn("Scope & Applicability", json.dumps(resp["view"]))
-        self.assertEqual(json.loads(resp["view"]["private_metadata"])["section"], 1)
-
-    def test_last_screen_reviews_then_generates_ready_report(self):
-        from . import aup_builder, aup_store
-
-        answers = aup_builder.recommended_answers()
-        answers.update(AUP_BASE)
-        aup_store.save_draft(self.org, answers, dict(AUP_FILLS), 14)
-        view = self._screen(14)
-        self.assertEqual(view["submit"]["text"], "Review →")
-        resp = self._submit(view, self._values(view))
-        review = resp["view"]
-        self.assertEqual(review["callback_id"], "aidl_aup_review")
-        text = json.dumps(review, ensure_ascii=False)
-        for label in ("Your policy at a glance", "✓  *1 · Scope & Applicability*", "rules written",
-                      "Generate policy", "/api/aup/banner.png"):
-            self.assertIn(label, text)
-        self.assertNotIn("Go to section", text)                     # nothing missing
-        resp = self._post({"type": "view_submission", "view": {**review, "state": {"values": {}}}}).json()
-        self.assertEqual(resp["response_action"], "update")
-        text = json.dumps(resp["view"], ensure_ascii=False)
-        for label in ("Your AI policy is ready", "Built from", "Nothing is sent to your team until you approve it",
-                      "*Policy points*\\n14", "*Version*\\nv1", "What happens after you approve",
-                      "aidl_crv_approve_onb", "aidl_aup_view", "aidl_aup_edit", "Not legal advice"):
-            self.assertIn(label, text)
-        self.org.refresh_from_db()
-        self.assertTrue(aup_store.is_complete(self.org))
-
-    def test_review_sends_to_missing_section_and_back(self):
-        from . import aup_builder, aup_store
-        from .aup_slack import review_view
-
-        answers = aup_builder.recommended_answers()
-        answers.update(AUP_BASE)
-        q = next(q for q in aup_builder.visible_questions(answers, 9) if q["required"] and q["type"] == "single")
-        good = answers[q["id"]]
-        answers[q["id"]] = ""                                        # one question left in point 9
-        aup_store.save_draft(self.org, answers, dict(AUP_FILLS), 14)
-        d = aup_store.draft(self.org)
-        review = review_view(self.org, d["answers"], d["fills"], {})
-        row = next(b for b in review["blocks"] if b.get("block_id") == "rv|9")
-        self.assertIn("⚠", row["text"]["text"])
-        self.assertEqual(row["accessory"]["text"]["text"], "Go to section 10")
-        resp = self._post({"type": "view_submission", "view": {**review, "state": {"values": {}}}}).json()
-        self.assertIn("Answer section 10 first", json.dumps(resp["view"], ensure_ascii=False))
-        self.assertFalse(aup_store.is_complete(self.org))
-
-        self._post({"type": "block_actions", "view": {**review, "id": "V1", "hash": "h"},
-                    "actions": [{"action_id": "aidl_aup_goto", "block_id": "rv|9", "value": "9"}]})
-        section = next(b for m, b in self.calls if m == "views.update")["view"]
-        self.assertEqual(section["title"]["text"], "AI policy · 10 of 15")
-        self.assertEqual(section["submit"]["text"], "Save and return →")
-        self.assertIn("← Back to review", json.dumps(section, ensure_ascii=False))
-        values = self._values(section)
-        values[f"q|{q['id']}"] = {"v": {"selected_option": {"value": good}}}
-        resp = self._submit(section, values)
-        self.assertEqual(resp["view"]["callback_id"], "aidl_aup_review")    # back to the review
-        self.assertNotIn("Go to section", json.dumps(resp["view"], ensure_ascii=False))
-
-    def test_section_shows_live_policy_text(self):
-        from . import aup_builder
-        from .aup_slack import section_view
-
-        answers = aup_builder.recommended_answers()
-        answers.update(AUP_BASE)
-        view = section_view(self.org, 7, answers, dict(AUP_FILLS), {})
-        self.assertEqual(view["title"]["text"], "AI policy · 8 of 15")
-        self.assertEqual(view["blocks"][0]["type"], "image")
-        text = json.dumps(view, ensure_ascii=False)
-        self.assertIn("Becomes point 7 of your policy", text)
-        self.assertIn("*What this adds to your policy*", text)
-        clause = aup_builder.generate(answers, AUP_FILLS)["points"][6]["clauses"][0]["text"]
-        self.assertIn("> " + clause[:40], text)
-        self.assertTrue(all(b.get("dispatch_action") for b in view["blocks"] if b["type"] == "input"))
-        self.assertIn('"Recommended"', text)                        # the recommended option is marked
-        self.assertLessEqual(len(view["blocks"]), 100)
-
-    def test_banner_png_is_signed(self):
-        from urllib.parse import urlparse
-
-        from . import aup_banner
-
-        url = urlparse(aup_banner.url("Section 1 of 15 · about 8 min left", "0 rules written", "Acme", 0))
-        resp = self.client.get(url.path + "?" + url.query)
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp["Content-Type"], "image/png")
-        self.assertEqual(self.client.get(url.path + "?" + url.query.replace("Acme", "Evil")).status_code, 404)
-
-    def test_edit_answers_reopens_the_builder(self):
-        from .aup_slack import report_view
-
-        _answer_policy(self.org)
-        view = report_view(self.org)
-        self._post({"type": "block_actions", "view": {**view, "id": "V1", "hash": "h"},
-                    "actions": [{"action_id": "aidl_aup_edit", "block_id": "aidl_aup_next", "value": "edit"}]})
+        card = self._card(7)
+        ids = [b.get("block_id") for b in card["blocks"]]
+        self.assertIn("tools_0", ids)
+        self.assertIn("paste_0", ids)
+        values = self._values(card)
+        values["paste_0"] = {"v": {"value": "Claude\nGoogle Gemini, Perplexity"}}
+        self._post({"type": "block_actions", "view": {**card, "id": "V1", "hash": "h", "state": {"values": values}},
+                    "actions": [{"action_id": "aidl_pc_paste", "block_id": "aidl_pc_paste_0", "value": "paste"}]})
         new = next(b for m, b in self.calls if m == "views.update")["view"]
-        self.assertEqual(new["callback_id"], "aidl_aup_section")
-        self.assertEqual(new["title"]["text"], "AI policy · 1 of 15")
+        self.assertIn("tools_1", [b.get("block_id") for b in new["blocks"]])     # redrawn with the pasted tools
+        self.org.refresh_from_db()
+        self.assertEqual(aup_store.answers(self.org)["tools"][-3:], ["Claude", "Google Gemini", "Perplexity"])
+        self.assertIn("Approved AI tools:", json.dumps(new, ensure_ascii=False))
 
-    def test_admin_center_create_then_view(self):
-        from .slack_blocks import admin_card_blocks
-        from .slack_cards import build_admin_cards_context
+    def test_answer_change_redraws_live_preview(self):
+        card = self._card(2)
+        values = self._values(card)
+        values["q|2.1"] = {"v": {"selected_option": {"value": "2.1.c"}}}             # no monitoring
+        self._post({"type": "block_actions", "view": {**card, "id": "V1", "hash": "h", "state": {"values": values}},
+                    "actions": [{"action_id": "v", "block_id": "q|2.1"}]})
+        new = next(b for m, b in self.calls if m == "views.update")["view"]
+        self.assertNotIn("q|2.2", [b.get("block_id") for b in new["blocks"]])      # follow-up hidden
+        self.assertIn("does not monitor", json.dumps(new))
 
-        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-        self.assertIn("Build my AI policy →", home)
-        _answer_policy(self.org)
-        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-        self.assertIn("View AUP", home)
-        self.assertIn("Change AUP", home)
-        self.assertNotIn("Build my AI policy →", home)
-
-    def test_continue_where_left_off(self):
+    def test_approve_validates_then_sends_today(self):
         from . import aup_store
-        from .slack_blocks import admin_card_blocks
-        from .slack_cards import build_admin_cards_context
 
-        d = aup_store.draft(self.org)
-        aup_store.save_draft(self.org, d["answers"], {}, 4)
-        home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-        self.assertIn("Continue · section 5 of 15 →", home)
+        card = self._card(8)
+        resp = self._submit(card, self._values(card))
+        self.assertEqual(resp["response_action"], "errors")
+        self.assertIn("q|8.5", resp["errors"])                                     # who speaks for the company
+        values = self._values(card)
+        values["q|8.5"] = {"v": {"value": "the Communications team"}}
+        resp = self._submit(card, values)
+        self.assertEqual(resp["response_action"], "update")
+        self.assertEqual(resp["view"]["callback_id"], "aidl_policy_sent")
+        self.org.refresh_from_db()
+        c = aup_store.card(self.org, 8)
+        self.assertTrue(c["version"].startswith("P8-"))
+        self.assertIn("Only the Communications team may make public statements on behalf of the Company.", c["lines"])
+        self.assertIn("goes out when you start the programme", self._home())
 
-    def test_employee_accepts_one_point_at_a_time_then_licence(self):
-        from . import aup_store
+    def test_schedule_a_day_and_licence_needs_only_due_cards(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import aup_store, policy_cards
         from .admin_setup import update
-        from .slack_blocks import user_dashboard_blocks
+        from .licensing import acknowledge, issue_learner_if_ready
 
-        _answer_policy(self.org)
-        update(self.org, aup_sent="2026-10-13")
+        _approve_all(self.org)
+        update(self.org, flow_started="2026-10-14")
         self._event("U5")
         member = AIDLUser.objects.get(microsoft_id="slack:T9:U5")
-        self.assertIn("point 1 of 14", json.dumps(user_dashboard_blocks(member, self.org, "aup")))
-        for item in ("highway_code", "traffic_light"):
-            self._post({"type": "block_actions", "user": {"id": "U5", "team_id": "T9"},
-                        "container": {"channel_id": "D5", "message_ts": "1.1"},
-                        "actions": [{"action_id": f"aidl_ack_{item}", "value": item}]})
-        member.refresh_from_db()
-        self.assertFalse(member.licence_issued)                     # AUP not accepted yet
+        a = aup_store.answers(self.org)
+        a["answers"]["8.5"] = "the Communications team"
+        with self.settings(SLACK_REPLY_SYNC=True), patch("api.slack_client.slack_api", side_effect=self._fake):
+            policy_cards.approve(self.org, self.owner, 7, a)                                   # today
+            day = (timezone.localdate() + timedelta(days=5)).isoformat()
+            policy_cards.approve(self.org, self.owner, 5, a, send_on=day)                      # in 5 days
+        self.assertTrue(any(m == "chat.postMessage" and "/api/cards/aup-7/" in json.dumps(b) for m, b in self.calls))
+        self.assertTrue(any(m == "chat.scheduleMessage" and "/api/cards/aup-5/" in json.dumps(b) for m, b in self.calls))
+        self.assertEqual(set(aup_store.required_points(self.org)), {7})                         # 5 isn't due yet
+        acknowledge(member, "traffic_light")
+        acknowledge(member, "highway_code")
+        self.assertEqual(issue_learner_if_ready(member, self.org), "not_ready")
+        acknowledge(member, "aup_7", aup_store.card_version(self.org, 7))
+        self.assertEqual(issue_learner_if_ready(member, self.org), "issued")
+        self.assertIn("goes out", self._home())
+        self.assertEqual(policy_cards.check_day("2001-01-01"), "Pick today or a later day.")
+
+    def test_new_version_must_be_agreed_again(self):
+        from . import aup_store, policy_cards
+        from .licensing import acknowledge
+
+        member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5")
+        a = aup_store.answers(self.org)
+        policy_cards.approve(self.org, self.owner, 4, a, deliver=False)
+        acknowledge(member, "aup_4", aup_store.card_version(self.org, 4))
+        self.assertTrue(aup_store.all_points_accepted(member, self.org))
+        a["answers"]["4.2"] = "4.2.b"
+        policy_cards.approve(self.org, self.owner, 4, a, deliver=False)
+        self.assertFalse(aup_store.all_points_accepted(member, self.org))
+        self.assertEqual(aup_store.card(self.org, 4)["number"], 2)
+
+    def test_old_published_aup_becomes_cards_and_keeps_agreements(self):
+        from . import aup_builder, aup_store
+        from .card_approval import _decide, APPROVED
+        from .licensing import acknowledge
+
+        answers = aup_builder.recommended_answers()
+        answers.update(AUP_BASE)
+        ver = aup_builder.generate(answers, AUP_FILLS)["version"]
+        self.org.aup_data = json.dumps({"published": {"answers": answers, "fills": AUP_FILLS, "version": ver,
+                                                      "number": 1, "published_at": "2026-10-20T10:00:00"}})
+        self.org.save()
+        _decide(self.org, f"aup:{ver}", APPROVED, None)
+        member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5")
+        for n in range(1, 15):
+            acknowledge(member, f"aup_{n}", ver)
+        self.assertEqual(len(aup_store.cards(self.org)), 14)
+        self.assertTrue(aup_store.all_points_accepted(member, self.org))
+
+    def test_policy_awareness_cards_approved_then_sent_after_licence(self):
+        from . import policy_awareness
+        from .card_approval import approve_policy_awareness
+
+        member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", licence_issued=True)
+        self.assertEqual(policy_awareness.approved(self.org), [])
+        approve_policy_awareness(self.org, "never-ai", self.owner)
+        with patch("api.slack_client.slack_api", side_effect=self._fake):
+            self.assertEqual(policy_awareness.send_to(self.org, member), 1)
+            self.assertEqual(policy_awareness.send_to(self.org, member), 0)                     # only once
+        sent = json.dumps([b for m, b in self.calls if m == "chat.postMessage"])
+        self.assertIn("/api/cards/paw-never-ai/", sent)
+        self.assertIn("aidl_paw_ack", sent)
         self._post({"type": "block_actions", "user": {"id": "U5", "team_id": "T9"},
                     "container": {"channel_id": "D5", "message_ts": "1.1"},
-                    "actions": [{"action_id": "aidl_ack_aup", "value": "aup_3"}]})   # out of order → ignored
-        self.assertEqual(aup_store.points_accepted(member, self.org), set())
-        for n in range(1, 15):
-            self._post({"type": "block_actions", "user": {"id": "U5", "team_id": "T9"},
-                        "container": {"channel_id": "D5", "message_ts": "1.1"},
-                        "actions": [{"action_id": "aidl_ack_aup", "value": f"aup_{n}"}]})
-            if n == 1:
-                last = [b for m, b in self.calls if m == "chat.update"][-1]
-                self.assertIn("point 2 of 14", json.dumps(last["blocks"]))   # next point appears at once
-        member.refresh_from_db()
-        self.assertTrue(member.licence_issued)
-        self.assertTrue(member.aup_signed)
+                    "actions": [{"action_id": "aidl_paw_ack", "value": "never-ai"}]})
+        from .models import Acknowledgement
 
-    def test_changed_aup_shows_send_new_version(self):
-        from .admin_setup import aup_change, send_item
-        from .aup_slack import report_view
-        from .slack_blocks import admin_card_blocks
-        from .slack_cards import build_admin_cards_context
-
-        _answer_policy(self.org)
-        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5", full_name="Jordan")
-        from .admin_setup import update
-
-        update(self.org, admins_step="skipped")
-        _approve_all(self.org)
-        with patch("api.slack_client.slack_api", return_value={"ok": True}):
-            send_item(self.org, "aup")
-        self.assertFalse(aup_change(self.org)["changed"])
-        _answer_policy(self.org, **{"2.1": "2.1.c"})               # Change AUP
-        self.org.refresh_from_db()
-        self.assertTrue(aup_change(self.org)["changed"])
-
-        def home():
-            return json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
-
-        self.assertIn("approve the new version in step 4", home())    # the new version needs approval first
-        self.assertNotIn("Send new version", home())
-        self.assertIn("aidl_crv_approve_onb", json.dumps(report_view(self.org)))
-        from . import card_approval
-
-        card_approval.approve_onboarding(self.org, "aup", self.owner)
-        self.assertIn("Send new version", home())
-        self.assertIn("Your updated AI policy is approved", json.dumps(report_view(self.org)))
+        self.assertTrue(Acknowledgement.objects.filter(user_id=str(member.pk), item="paw_never-ai").exists())
+        path = __import__("api.card_image", fromlist=["x"]).image_url("paw-never-ai", self.org).split("onrender.com", 1)[-1]
+        resp = self.client.get(path)
+        self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
 
     def test_fresh_reset_clears_acceptances_and_licences(self):
         from django.core.management import call_command
@@ -3006,23 +2965,25 @@ class EmployeeFlowTests(TestCase):
         return [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U5"]
 
     def test_full_flow_to_licence(self):
+        from . import aup_store
+
         self.calls.clear()
         self._press("aidl_flow_start", "start")
-        card = self._posted()[-1]
-        aup = json.dumps(card)                                                   # the AUP first, as image cards
-        self.assertIn("Card 1 of 3", aup)
-        self.assertIn("/api/cards/aup-1/", aup)
-        self.assertEqual(card["attachments"][0]["color"], "#14140F")               # design's coloured bar
-        for n in range(1, 15):
-            self._press("aidl_flow_aup", f"aup_{n}")
-        update = [b for m, b in self.calls if m == "chat.update"][-1]
-        self.assertIn("AGREED", json.dumps(update))
-        tl = json.dumps(self._posted()[-1])                                      # then the Traffic Light
-        self.assertIn("Card 2 of 3", tl)
-        self.assertIn("Traffic Light Check", tl)
+        posted = self._posted()
+        cards = [c for c in posted if "/api/cards/aup-" in json.dumps(c)]        # the policy cards, one message each
+        self.assertEqual(len(cards), 14)
+        self.assertEqual(cards[0]["attachments"][0]["color"], "#14140F")          # design's coloured bar
+        self.assertIn("I agree", json.dumps(cards[0]))
+        self.assertIn("Traffic Light Check", json.dumps(posted[-1]))             # and the Traffic Light
         self._press("aidl_flow_tl", "next")
-        self.assertIn("Card 3 of 3", json.dumps(self._posted()[-1]))             # then the Highway Code
+        self.assertIn("Highway Code", json.dumps(self._posted()[-1]))
         self._press("aidl_flow_hc", "next")
+        self.member.refresh_from_db()
+        self.assertFalse(self.member.licence_issued)                             # policy cards still to agree to
+        self.assertIn("One more step for your licence", json.dumps(self._posted()[-1]))
+        for n, ver in aup_store.required_points(self.org).items():
+            self._press("aidl_flow_aup", f"aup_{n}|{ver}")
+        self.assertIn("Agreed", json.dumps([b for m, b in self.calls if m == "chat.update"][-1]))
         self.member.refresh_from_db()
         self.assertTrue(self.member.licence_issued)
         self.assertEqual((self.member.licence_expires_at - self.member.licence_issued_at).days, 365)
@@ -3082,11 +3043,14 @@ class EmployeeFlowTests(TestCase):
         resp = self.client.get(gone)                                              # revoked / reset licence
         self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
 
-    def test_points_must_be_in_order(self):
+    def test_old_version_of_a_card_does_not_count(self):
         from . import aup_store
 
-        self._press("aidl_flow_aup", "aup_5")
+        self._press("aidl_flow_aup", "aup_5|P5-OLD000")                         # a card that was replaced
         self.assertEqual(aup_store.points_accepted(self.member, self.org), set())
+        self.assertIn("This card was updated", json.dumps(self.calls))
+        self._press("aidl_flow_aup", f"aup_5|{aup_store.card_version(self.org, 5)}")
+        self.assertEqual(aup_store.points_accepted(self.member, self.org), {5})
 
     def test_licence_image_endpoint(self):
         import base64
@@ -3356,11 +3320,11 @@ class CardApprovalTests(TestCase):
         member = AIDLUser.objects.get(microsoft_id="slack:T9:U5")
         with patch("api.slack_client.slack_api", side_effect=self._fake):
             employee_flow.advance(self.org, member, "aidl_flow_start", "start", "D5", "1.1")
-        self.assertIn("waiting for approval", json.dumps(self.calls[-1]))
+        self.assertIn("waiting for approval", json.dumps(self.calls[-1]))      # the Traffic Light isn't approved
         self.calls.clear()
-        self._review("aidl_crv_approve_onb", "aup")
+        self._review("aidl_crv_approve_onb", "traffic_light")
         posted = [b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U5"]
-        self.assertIn("/api/cards/aup-1/", json.dumps(posted))                   # sent once approved
+        self.assertIn("/api/cards/traffic_light/", json.dumps(posted))           # sent once approved
 
     def test_card_images_render(self):
         from . import card_image
@@ -4008,24 +3972,24 @@ class AupUploadTests(TestCase):
         self.assertFalse(aup_upload.busy(self.org))
 
     # publishing + approval
-    def test_publish_goes_through_card_approval(self):
-        from . import aup_store, aup_upload, card_approval
-        from .aup_slack import report_view
+    def test_use_these_cards_makes_the_14_policy_cards(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import aup_store, aup_upload
 
         up = self._upload([_model_cards(uncovered=(11,))])
         up.refresh_from_db()
-        aup = aup_upload.publish(self.org, up, self.owner)
+        day = (timezone.localdate() + timedelta(days=3)).isoformat()
+        aup_upload.publish(self.org, up, self.owner, send_on=day)                 # "Use these cards", on a day
         self.org.refresh_from_db()
-        current = aup_store.current(self.org)
-        self.assertEqual(current["version"], aup["version"])
-        self.assertEqual(len(current["points"]), 14)
-        self.assertEqual(current["points"][10]["clauses"][0]["text"], aup_upload.NOT_COVERED)
-        self.assertFalse(card_approval.is_approved(self.org, "aup"))      # nothing reaches employees yet
-        self.assertIn("aidl_crv_approve_onb", json.dumps(report_view(self.org)))
-        self.assertIn("policy.txt", json.dumps(report_view(self.org)))
-        card_approval.approve_onboarding(self.org, "aup", self.owner)
-        self.assertTrue(card_approval.is_approved(self.org, "aup"))
-        self.assertIn("0.1", aup_store.draft(self.org)["answers"])        # Change AUP starts the builder fresh
+        cards = aup_store.cards(self.org)
+        self.assertEqual(len(cards), 14)
+        self.assertEqual(cards[11]["lines"], [aup_upload.NOT_COVERED])
+        self.assertEqual({c["source"] for c in cards.values()}, {"upload"})
+        self.assertEqual(aup_store.required_points(self.org), {})                 # not due before that day
+        self.assertIn("0.1", aup_store.answers(self.org)["answers"])              # Add a policy card still works
 
     def test_point_cards_carry_the_logo_watermark(self):
         import io
@@ -4083,7 +4047,8 @@ class AupUploadTests(TestCase):
         self.assertEqual(review["submit"]["text"], "Use these cards")
         resp = self._post({"type": "view_submission", "view": {**review, "state": {"values": {}}}}).json()
         self.assertEqual(resp["response_action"], "update")
-        self.assertIn("Your AI policy is ready", json.dumps(resp["view"]))
+        self.assertEqual(resp["view"]["callback_id"], "aidl_policy_sent")
+        self.assertIn("All 14 policy cards from your file", json.dumps(resp["view"]))
         up.refresh_from_db()
         self.assertEqual(up.status, AupUpload.Status.PUBLISHED)
 

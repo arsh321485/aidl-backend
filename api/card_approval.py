@@ -1,9 +1,12 @@
 """Admins approve every card before the team gets it.
 
 Two kinds of card:
-- Onboarding: the Traffic Light Check, the Highway Code and the AUP (each
-  AUP version is approved on its own: "aup:<version>"). The programme can't
-  start until all three are approved.
+- Onboarding: the Traffic Light Check and the Highway Code. The programme
+  can't start until both are approved. (Policy cards are approved as the
+  admin sends them — policy_cards.py; "aup:<version>" rows are from older
+  AUPs built in one go.)
+- From the AI policy: ready-made awareness cards (policy_awareness.py),
+  "paw:<id>" — approved cards follow each licence.
 - Awareness: the plan's package (plans.package_cards), "pkg:<card no>".
   Admins approve, skip (never sent) or swap (replaced by the next unused
   card from the same topic, which then needs approving) each card, a month
@@ -25,7 +28,7 @@ from django.utils import timezone
 
 from .models import AIDLUser, CardApproval, Organization
 
-ONBOARDING = ("aup", "traffic_light", "highway_code")
+ONBOARDING = ("traffic_light", "highway_code")
 ONBOARDING_LABEL = {"traffic_light": "🚦 Traffic Light Check", "highway_code": "📖 The Highway Code",
                     "aup": "📄 AI Acceptable Use Policy"}
 APPROVED, SKIPPED, WAITING = "approved", "skipped", "waiting"
@@ -153,6 +156,27 @@ def approve_onboarding(org: Organization, item: str, by: AIDLUser | None) -> boo
     _decide(org, key, APPROVED, by)
     warm(org, onboarding_kinds(org, item))
     return True
+
+
+def approve_policy_awareness(org: Organization, card_id: str, by: AIDLUser | None) -> bool:
+    """A ready-made awareness card from the AI policy (policy_awareness.py)."""
+    from .policy_awareness import by_id, key
+
+    if by_id(card_id) is None:
+        return False
+    _decide(org, key(card_id), APPROVED, by)
+    from .card_image import warm
+
+    warm(org, [f"paw-{card_id}"])
+    return True
+
+
+def policy_awareness(org: Organization) -> list[dict]:
+    """The policy's awareness cards with their approval status."""
+    from .policy_awareness import cards, key
+
+    rows = _rows(org)
+    return [{**c, "status": status(org, key(c["id"]), rows)} for c in cards()]
 
 
 def approve(org: Organization, nos: list[str], by: AIDLUser | None) -> int:

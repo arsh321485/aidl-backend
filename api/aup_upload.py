@@ -4,13 +4,13 @@ model (nvidia_ai.py).
     start(org, admin, file_name, data)   check + read the file, save an AupUpload
                                          (processing) and generate in the background
     generate(upload)                     the NVIDIA call(s) → 14 checked cards (ready / failed)
-    publish(org, upload, admin)          the cards become the organization's AUP
+    publish(org, upload, admin, day)     "Use these cards": the 14 policy cards,
+                                         sent today or on that day
 
-Once published, the cards are the AUP everywhere the question-bank AUP is
-used (aup_store.current): the point card images (card_image "aup-<n>", with
-the company logo watermark on paid plans), card approval ("aup:<version>"
-— nothing reaches employees until an admin approves it), the employee flow
-(one point at a time) and the licence.
+Published cards are the organization's policy cards (policy_cards.py), the
+same as cards answered in Slack: the card images (card_image "aup-<n>", with
+the company logo watermark on paid plans), "I agree" for each one, and the
+licence. "Use these cards" is the admin's approval.
 
 Faithfulness: the model may only use the policy text; each card carries a
 word-for-word quote from the policy, and AIDL checks the quote is really in
@@ -357,10 +357,13 @@ def to_points(cards: list[dict]) -> list[dict]:
     return points
 
 
-def publish(org: Organization, upload: AupUpload, admin: AIDLUser | None) -> dict:
-    """The upload's cards become the organization's AUP (waiting for
-    approval like every AUP version)."""
-    from . import aup_store
+def publish(org: Organization, upload: AupUpload, admin: AIDLUser | None, send_on: str = "") -> dict:
+    """The upload's cards become the organization's 14 policy cards, sent
+    today (send_on "") or on that day — "Use these cards" is the admin's
+    approval, like Approve & send on a card."""
+    from . import aup_store, policy_cards
+    from .admin_setup import started
+    from .slack_modals import in_background
 
     if upload.organization_id != str(org.pk) or upload.status not in (AupUpload.Status.READY,
                                                                       AupUpload.Status.PUBLISHED):
@@ -368,14 +371,13 @@ def publish(org: Organization, upload: AupUpload, admin: AIDLUser | None) -> dic
     cards = cards_of(upload)
     if len(cards) != POINTS:
         raise UploadError("These cards are incomplete. Upload the file again.")
-    aup = aup_store.publish_points(org, to_points(cards), admin, source={
-        "upload_id": str(upload.pk), "file_name": upload.file_name, "model": upload.model,
-        "started_at": upload.created_at.isoformat()})
+    for p in to_points(cards):
+        policy_cards.approve(org, admin, p["no"], {}, send_on, card_lines=[c["text"] for c in p["clauses"]],
+                             source="upload", file_name=upload.file_name, deliver=False)
+    if started(org):
+        in_background(policy_cards.deliver_cards, org.pk, [c["no"] for c in cards])
     upload.status, upload.published_at = AupUpload.Status.PUBLISHED, timezone.now()
     upload.save(update_fields=["status", "published_at"])
-    return aup
+    return {"version": aup_store.version(org) or "scheduled", "cards": len(cards)}
 
 
-def fingerprint(points: list[dict]) -> str:
-    digest = hashlib.sha256(json.dumps(points, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    return "AUP-" + digest[:6].upper()
