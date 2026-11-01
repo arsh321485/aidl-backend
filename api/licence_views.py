@@ -51,7 +51,9 @@ def card_png(request, kind: str, org_id: str):
 
 @require_GET
 def aup_banner_png(request):
-    params = {k: request.GET.get(k, "") for k in ("l", "r", "o", "at", "n", "v")}
+    params = {k: request.GET.get(k, "") for k in aup_banner.FIELDS if k != "d"}
+    if "d" in request.GET:  # positions already done (policy cards)
+        params["d"] = request.GET["d"]
     if (not params["at"].isdigit() or not params["n"].isdigit()
             or not hmac.compare_digest(request.GET.get("s", ""), aup_banner.signature(params))):
         raise Http404
