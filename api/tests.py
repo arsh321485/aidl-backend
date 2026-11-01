@@ -2594,6 +2594,24 @@ class PolicyCardsSlackTests(TestCase):
                     "actions": [{"action_id": "aidl_crv_card", "selected_option": {"value": f"approve|{other}"}}]})
         self.assertNotEqual(card_approval.status(self.org, f"pkg:{other}"), card_approval.APPROVED)
 
+    def test_strip_shows_sent_topics_at_their_positions(self):
+        from urllib.parse import parse_qs, urlparse
+
+        from . import aup_store, policy_cards
+
+        a = aup_store.answers(self.org)
+        for n in (5, 7):
+            policy_cards.approve(self.org, self.owner, n, a, deliver=False)
+        self.org.refresh_from_db()
+        urls = {n: next(b["image_url"] for b in self._card(n)["blocks"] if b["type"] == "image") for n in (5, 14)}
+        q14 = parse_qs(urlparse(urls[14]).query)
+        self.assertEqual((q14["at"], q14["d"], q14["r"]), (["13"], ["5,7"], ["2 of 14 sent"]))
+        self.assertEqual(parse_qs(urlparse(urls[5]).query)["at"], ["4"])          # each topic its own position
+        resp = self.client.get(urlparse(urls[14]).path + "?" + urlparse(urls[14]).query)
+        self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
+        bad = urlparse(urls[14]).query.replace("d=5%2C7", "d=1%2C2")
+        self.assertEqual(self.client.get(urlparse(urls[14]).path + "?" + bad).status_code, 404)  # signed
+
     def test_images_have_short_hover_text(self):
         from . import card_image
 

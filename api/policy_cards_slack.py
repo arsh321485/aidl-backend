@@ -65,10 +65,13 @@ def _keep(meta: dict) -> dict:
     return {k: v for k, v in meta.items() if k == "channel_id"}
 
 
-def _banner(org: Organization, label: str) -> dict:
-    sent = len(aup_store.cards(org))
+def _banner(org: Organization, label: str, at: int | None = None) -> dict:
+    """The brand strip: yellow = the topics already sent, at their own
+    positions; outlined = the topic on screen (`at` = point number)."""
+    done = sorted(aup_store.cards(org))
     return {"type": "image", "alt_text": "AI policy",
-            "image_url": aup_banner.url(label, f"{sent} of 14 cards", org.name, sent, 14)}
+            "image_url": aup_banner.url(label, f"{len(done)} of 14 sent", org.name,
+                                        (at - 1) if at else 14, 14, done=done)}
 
 
 # ---------- topics ----------
@@ -180,7 +183,7 @@ def _tools_options(org: Organization, chosen: list[str]) -> list[dict]:
 def card_view(org: Organization, n: int, a: dict, meta: dict, *, when: str = "today", day: str = "",
               rev: int = 0, notice: str = "") -> dict:
     existing = aup_store.card(org, n)
-    blocks = [_banner(org, f"{pc.SHORT[n]} · point {n} of 14"),
+    blocks = [_banner(org, f"{pc.SHORT[n]} · point {n} of 14", at=n),
               {"type": "header", "text": _text(f"{pc.ICONS[n]} {pc.SHORT[n]}")}]
     if existing:
         blocks.append(_ctx("✏️ Already sent. Approving sends a new version that everyone agrees to again."))
