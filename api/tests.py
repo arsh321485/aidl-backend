@@ -4288,9 +4288,14 @@ class CardDesignSystemTests(SimpleTestCase):
             for kind in kinds:
                 img = Image.open(io.BytesIO(ci.render(kind, org))).convert("RGBA")
                 x1, h = (ci.W - ci.PAD) * s, img.height - (ci.SHADOW + 2) * s
-                self.assertGreater(disc(img, (x1 - ci.HEADER_LOGO * s, 30 * s, x1, 94 * s)), 2000, kind)  # header
+                head = disc(img, (x1 - ci.HEADER_LOGO * s, 30 * s, x1, 94 * s))         # header
+                if kind == "highway_code":
+                    self.assertEqual(head, 0)
+                else:
+                    self.assertGreater(head, 2000, kind)
                 self.assertGreater(disc(img, (ci.PAD * s, h - 38 * s, (ci.PAD + 28) * s, h - 10 * s)), 300, kind)  # footer
-                with patch("api.card_image._aidl_watermark") as none:
+                company = kind == "highway_code" and org.logo_data and org.plan != "trial"
+                with patch("api.card_image.logo_watermark" if company else "api.card_image._aidl_watermark") as none:
                     without = Image.open(io.BytesIO(ci.render(kind, org))).convert("RGBA")
                 none.assert_called_once()
                 self.assertIsNotNone(ImageChops.difference(img.convert("RGB"), without.convert("RGB")).getbbox(), kind)
@@ -4389,3 +4394,31 @@ class LicenceDesignTests(TestCase):
         card = _licence_card_visual(full_name="", org_name="Secureitlab", user=self.member)
         self.assertEqual(card["type"], "Image")
         self.assertIn("/cards/learners-permit/download/?email=", card["url"])
+
+    def test_highway_code_has_the_company_logo_behind_everything(self):
+        from . import card_image as ci
+
+        org = self._org(plan="enterprise", logo=self._logo())
+        order = []
+        real_draw, real_mark = ci._draw, ci.logo_watermark
+        with patch("api.card_image._draw", side_effect=lambda *a: (order.append("draw"), real_draw(*a))[1]), \
+                patch("api.card_image.logo_watermark", side_effect=lambda *a, **k: (order.append("mark"), real_mark(*a, **k))[1]) as mark, \
+                patch("api.card_image.text_watermark") as name, patch("api.card_image._aidl_watermark") as aidl:
+            ci.render("highway_code", org)
+        self.assertEqual(order, ["draw", "mark", "draw"])                        # measured, marked, drawn on top
+        self.assertEqual(mark.call_args.kwargs, ci.HIGHWAY_MARK)
+        name.assert_not_called()
+        aidl.assert_not_called()
+        self.assertGreaterEqual(ci.HIGHWAY_MARK["opacity"], 0.15)
+        self.assertLessEqual(ci.HIGHWAY_MARK["opacity"], 0.3)
+
+    def test_highway_code_without_a_company_logo_keeps_its_watermark(self):
+        from . import card_image as ci
+
+        for org, by_name in ((self._org(plan="trial", logo=self._logo()), 0), (self._org(), 1)):
+            with patch("api.card_image.logo_watermark") as logo, patch("api.card_image.text_watermark") as name, \
+                    patch("api.card_image._aidl_watermark") as aidl:
+                ci.render("highway_code", org)
+            logo.assert_not_called()
+            aidl.assert_called_once()
+            self.assertEqual(name.call_count, by_name, org.plan)
