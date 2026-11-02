@@ -3586,6 +3586,29 @@ class CardAckTests(TestCase):
         opened = card_ack.my_cards_view(self.org, self.member, open_no=self.cards[0]["no"])
         self.assertIn(f"/api/cards/pkg-{self.cards[0]['no']}/", json.dumps(opened))   # opens on that card
 
+    def test_my_cards_empty_message_says_why(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import card_ack
+        from .models import PackageDelivery
+        from .plans import package_cards
+
+        PackageDelivery.objects.filter(user_id=str(self.member.pk)).delete()
+        text = lambda: json.dumps(card_ack.my_cards_view(self.org, self.member), ensure_ascii=False)
+        self.assertIn("still approving", text())                                # licence, nothing approved
+        self.assertNotIn("once your licence is issued", text())
+        self.assertNotIn("on its way", text())
+        PackageDelivery.objects.create(organization_id=str(self.org.pk), user_id=str(self.member.pk), package="basic",
+                                       card_no=package_cards(self.org)[0]["no"], post_order=1,
+                                       post_at=timezone.now() + timedelta(days=3), status="scheduled")
+        self.assertIn("Next card", text())                                      # scheduled: says when
+        self.assertNotIn("still approving", text())
+        self.member.licence_issued = False
+        self.member.save()
+        self.assertIn("once your licence is issued", text())                    # no licence yet
+
     def test_my_cards_says_when_the_next_card_arrives(self):
         from datetime import timedelta
 
@@ -4402,25 +4425,22 @@ class LicenceDesignTests(TestCase):
 
         return Image.open(io.BytesIO(png)).size
 
-    def test_status_on_the_licence(self):
-        from .licence_image import status_of
+    def test_licence_has_no_status(self):
+        from unittest.mock import patch as mock_patch
 
-        self.assertEqual(status_of(self.member), "ACTIVE")
-        self.member.licence_expires_at = timezone.now() - timedelta(days=1)
-        self.assertEqual(status_of(self.member), "EXPIRED")
-        self.member.slack_left_at = timezone.now()
-        self.assertEqual(status_of(self.member), "SUSPENDED")
+        from PIL import ImageDraw
 
-    def test_image_changes_when_the_licence_expires(self):
-        from . import image_cache, licence_image
+        from . import licence_image as li
 
-        active_url = licence_image.url_version(self.member, self.org)
-        active = licence_image.png_for(self.member, self.org)
-        self.member.licence_expires_at = timezone.now() - timedelta(days=1)
-        self.member.save()
-        self.assertNotEqual(licence_image.url_version(self.member, self.org), active_url)
-        self.assertNotEqual(licence_image.png_for(self.member, self.org), active)
-        image_cache._MEMORY.clear()
+        drawn = []
+        real = ImageDraw.ImageDraw.text
+        now = timezone.now()
+        with mock_patch.object(ImageDraw.ImageDraw, "text",
+                               lambda d, xy, t, *a, **k: (drawn.append(t), real(d, xy, t, *a, **k))[1]):
+            li.render(name="Your Name", org_name="Org", number="AIDL-L-1234-5678", issued=now,
+                      expires=now + timedelta(days=365))
+        self.assertIn("4. LICENCE NO.", drawn)
+        self.assertEqual([t for t in drawn if "STATUS" in t or t in ("ACTIVE", "EXPIRED", "SUSPENDED")], [])
 
     def test_every_case_draws_at_one_size(self):
         from . import licence_image as li
@@ -4428,8 +4448,7 @@ class LicenceDesignTests(TestCase):
         now = timezone.now()
         for kw in ({"name": "Your Name", "org_name": "Your Org Name"},
                    {"name": "Sam Rivera", "org_name": ""},
-                   {"name": "A Very Long Name That Goes On And On And On Past The Edge Of The Card", "org_name": "O" * 80},
-                   {"name": "Priya Raman", "org_name": "Northwind", "status": "SUSPENDED"}):
+                   {"name": "A Very Long Name That Goes On And On And On Past The Edge Of The Card", "org_name": "O" * 80}):
             png = li.render(number="AIDL-L-1234-5678", issued=now, expires=now + timedelta(days=365), **kw)
             self.assertEqual(self._size(png), (li.W * li.S, li.H * li.S), kw)
 

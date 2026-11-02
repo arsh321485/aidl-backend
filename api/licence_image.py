@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 S = 2  # draw at 2x for a crisp image
 W, H = 800, 468
 CARD_W, CARD_H = 787, 456  # the rest of W, H is the hard shadow
-INK, YELLOW, CREAM, GREEN, RED = "#14140F", "#FFCC00", "#F5ECD2", "#1A7F37", "#C62F24"
-NAVY, PALE, LABEL, PHOTO_BG, SILHOUETTE, AMBER = "#16233A", "#E8EEF7", "#8E97A8", "#D1D8E2", "#7E8898", "#FFB000"
+INK, YELLOW, CREAM = "#14140F", "#FFCC00", "#F5ECD2"
+NAVY, PALE, LABEL, PHOTO_BG, SILHOUETTE = "#16233A", "#E8EEF7", "#8E97A8", "#D1D8E2", "#7E8898"
 
 
 def _mix(color: str, over: str, amount: float) -> tuple:
@@ -52,26 +52,18 @@ def image_url(number: str, *, download: bool = False, version: str = "") -> str:
     return url + (f"&v={version}" if version else "") + ("&download=1" if download else "")
 
 
-LICENCE_DESIGN = "5"  # bump when the licence's look changes (new image links → Slack refetches)
+LICENCE_DESIGN = "6"  # bump when the licence's look changes (new image links → Slack refetches)
 
 
 def avatar_version(member) -> str:
     return hashlib.sha256((member.avatar_data or "").encode()).hexdigest()[:8] if member.avatar_data else ""
 
 
-def status_of(member) -> str:
-    """What the licence says today: it changes without the licence being edited."""
-    if getattr(member, "slack_left_at", None):
-        return "SUSPENDED"
-    expires = member.licence_expires_at
-    return "EXPIRED" if expires is not None and expires < datetime.now(expires.tzinfo) else "ACTIVE"
-
-
 def url_version(member, org=None) -> str:
     """Everything that changes the licence picture (for its link and cache)."""
     from .card_image import logo_version
 
-    parts = [LICENCE_DESIGN, status_of(member).lower(), avatar_version(member) or "noavatar",
+    parts = [LICENCE_DESIGN, avatar_version(member) or "noavatar",
              logo_version(org) if org is not None else "aidl",
              hashlib.sha256(f"{member.full_name}|{org.name if org else ''}|{member.licence_issued_at}|"
                             f"{member.licence_expires_at}".encode()).hexdigest()[:6]]
@@ -85,7 +77,7 @@ def png_for(member, org) -> bytes:
     return png(f"lic:{member.licence_number}:{url_version(member, org)}", lambda: render(
         name=member.full_name or member.email, org_name=org.name if org else "", number=member.licence_number,
         issued=member.licence_issued_at, expires=member.licence_expires_at, org=org,
-        avatar_data=member.avatar_data or "", status=status_of(member)))
+        avatar_data=member.avatar_data or ""))
 
 
 def _font(size: int, weight: str = "Bold") -> ImageFont.FreeTypeFont:
@@ -218,9 +210,7 @@ def _photo(card: Image.Image, avatar: Image.Image | None, x: int, y: int, w: int
 
 
 def render(*, name: str, org_name: str, number: str, issued: datetime | None, expires: datetime | None = None,
-           org=None, avatar_url: str = "", avatar_data: str = "", status: str = "") -> bytes:
-    if not status:
-        status = "EXPIRED" if expires is not None and expires < datetime.now(expires.tzinfo) else "ACTIVE"
+           org=None, avatar_url: str = "", avatar_data: str = "") -> bytes:
     card = Image.new("RGBA", (CARD_W * S, CARD_H * S), INK)
     d = ImageDraw.Draw(card)
 
@@ -263,13 +253,6 @@ def render(*, name: str, org_name: str, number: str, issued: datetime | None, ex
     d.text(_xy(372, 276), expires.strftime("%d/%m/%Y") if expires else "—", font=_font(22, "Bold"), fill=PALE, anchor="ls")
     label(x, 321, "4. LICENCE NO.")
     d.text(_xy(x, 352), number, font=_mono(25), fill=YELLOW, anchor="ls")
-    label(540, 321, "5. STATUS")
-    pill, fg = {"ACTIVE": (GREEN, "#FFFFFF"), "EXPIRED": (RED, "#FFFFFF")}.get(status, (AMBER, INK))
-    font = _font(14, "Black")
-    width = d.textlength(status, font=font) / S + 42
-    d.rounded_rectangle(_xy(540, 331, 540 + width, 359), radius=14 * S, fill=pill)
-    d.ellipse(_xy(552, 341, 560, 349), fill=fg)
-    d.text(_xy(568, 350), status, font=font, fill=fg, anchor="ls")
 
     # rounded corners + hard shadow
     mask = Image.new("L", card.size, 0)

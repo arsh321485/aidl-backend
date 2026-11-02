@@ -303,8 +303,7 @@ def teams_licence_download(request):
     if user is not None and user.licence_issued and user.licence_number:
         png = licence_image.png_for(user, get_organization_for_user(user))
     else:
-        png = licence_image.render(name=facts["name"], org_name=org_name, number=facts["licence_number"], issued=None,
-                                   status=facts["status"])
+        png = licence_image.render(name=facts["name"], org_name=org_name, number=facts["licence_number"], issued=None)
     response = HttpResponse(png, content_type="image/png")
     response["Content-Disposition"] = f'attachment; filename="{facts["licence_number"] or "aidl-licence"}.png"'
     return response
