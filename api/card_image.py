@@ -43,7 +43,7 @@ from .licence_image import brand_logo, text_watermark
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "7"
+DESIGN_VERSION = "8"
 
 
 def valid_kind(kind: str) -> bool:
@@ -337,7 +337,7 @@ def _footer(d, y, press: str, disc: bool = True) -> float:
     if disc:  # else _add_logos puts the AIDL logo here
         d.ellipse(_xy(PAD, y + 12, PAD + 24, y + 36), fill=YELLOW, outline=INK, width=3 * S)
         d.text(_xy(PAD + 12, y + 24.5), "AI", font=_font("sign", 9), fill=INK, anchor="mm")
-    d.text(_xy(PAD + 38, y + 24), "AIDL · AI DRIVING LICENSE", font=_font("mono", 10), fill=MUTED, anchor="lm")
+    d.text(_xy(PAD + 38, y + 24), "AIDL · AI DRIVING LICENCE", font=_font("mono", 10), fill=MUTED, anchor="lm")
     d.text(_xy(W - PAD, y + 24), f"PRESS  {press}  BELOW", font=_font("mono", 10), fill=MUTED, anchor="rm")
     return y + 48
 
