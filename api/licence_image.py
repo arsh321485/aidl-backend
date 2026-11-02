@@ -28,7 +28,7 @@ S = 2  # draw at 2x for a crisp image
 W, H = 800, 468
 CARD_W, CARD_H = 787, 456  # the rest of W, H is the hard shadow
 INK, YELLOW, CREAM, GREEN, RED = "#14140F", "#FFCC00", "#F5ECD2", "#1A7F37", "#C62F24"
-NAVY, PALE, LABEL, PHOTO_BG, SILHOUETTE, AMBER = "#16233A", "#E7EDF6", "#8E97A8", "#D1D8E2", "#7E8898", "#FFB000"
+NAVY, PALE, LABEL, PHOTO_BG, SILHOUETTE, AMBER = "#16233A", "#E8EEF7", "#8E97A8", "#D1D8E2", "#7E8898", "#FFB000"
 
 
 def _mix(color: str, over: str, amount: float) -> tuple:
@@ -52,7 +52,7 @@ def image_url(number: str, *, download: bool = False, version: str = "") -> str:
     return url + (f"&v={version}" if version else "") + ("&download=1" if download else "")
 
 
-LICENCE_DESIGN = "4"  # bump when the licence's look changes (new image links → Slack refetches)
+LICENCE_DESIGN = "5"  # bump when the licence's look changes (new image links → Slack refetches)
 
 
 def avatar_version(member) -> str:
