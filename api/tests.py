@@ -4137,3 +4137,137 @@ class AupUploadTests(TestCase):
         resp = self.client.post("/api/aup/upload/publish/", {"upload_id": got["upload"]["id"]},
                                 content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {token}")
         self.assertEqual(resp.status_code, 200)
+
+
+class CardDesignSystemTests(SimpleTestCase):
+    """The whole card library in one design (card_image.py)."""
+
+    def _org(self, plan="basic", name="Secureitlab", logo="", lines_for=None):
+        from . import aup_builder, policy_cards as pc
+
+        a = {"answers": {**aup_builder.recommended_answers(), "0.1": name, "0.2": name, "8.5": "the Communications team",
+                         "5.4": "5.4.c"},
+             "fills": {"6.2.b": "Microsoft OneDrive", "9.2.a": "security@secureitlab.org"},
+             "tools": ["ChatGPT Enterprise", "Microsoft 365 Copilot"]}
+        cards = {str(n): {"title": pc.SHORT[n], "lines": lines_for(n) if lines_for else pc.lines(n, a),
+                          "version": f"P{n}-AAAAAA", "number": 1, "send_on": "", "sent_at": "", "source": "builder"}
+                 for n in pc.TOPICS}
+        return Organization(name=name, plan=plan, logo_data=logo, aup_data=json.dumps({**a, "cards": cards}))
+
+    def _rules(self, org, n):
+        from . import aup_store, policy_cards as pc
+
+        return pc.card_rules(org, n, aup_store.card(org, n)["lines"])
+
+    def _logo(self):
+        import io
+
+        from PIL import Image
+
+        from .licence_image import save_logo
+
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 40), "#336699").save(buf, "PNG")
+        return save_logo(buf.getvalue())
+
+    def test_layout_follows_the_topic_and_the_content(self):
+        from . import card_image as ci
+
+        org = self._org()
+        got = {n: ci._layout(n, self._rules(org, n)) for n in range(1, 15)}
+        self.assertEqual(got, {1: "D", 2: "A", 3: "D", 4: "D", 5: "A", 6: "A", 7: "B", 8: "A", 9: "A", 10: "B", 11: "D",
+                               12: "C", 13: "C", 14: "C"})
+        self.assertEqual(ci._layout(7, [("text", "Follow the rules.")]), "A")    # no go + stop: numbered rules
+        self.assertEqual(ci._layout(1, [("text", "One. Two. Three. Four. Five.")]), "A")  # too much for one big rule
+
+    def test_lists_keep_the_approved_words(self):
+        from . import aup_store
+
+        org = self._org()
+        for n in range(1, 15):
+            approved = " ".join(aup_store.card(org, n)["lines"]).lower()
+            for rule in self._rules(org, n):
+                if rule[0] == "list":
+                    self.assertIn(rule[3].lower(), approved, n)
+                    for item in rule[2]:
+                        self.assertIn(item.lower(), approved, n)
+
+    def test_answers_edited_since_approval_show_the_approved_lines(self):
+        from . import policy_cards as pc
+
+        base = json.loads(self._org().aup_data)
+        lines = pc.lines(5, base) + ["An extra approved line."]
+        org = self._org(lines_for=lambda n: lines)
+        self.assertEqual(self._rules(org, 5), [("text", line) for line in lines])
+
+    def test_uploaded_cards_go_on_the_go_stop_layout(self):
+        from . import aup_upload, card_image as ci
+
+        points = {p["no"]: [c["text"] for c in p["clauses"]] for p in aup_upload.to_points(
+            [{"no": n, "title": "T", "covered": True, "headline": "H", "summary": "In short.", "do": ["Check it"],
+              "dont": ["Paste secrets"]} for n in range(1, 15)])}
+        org = self._org(lines_for=lambda n: points[n])
+        rules = self._rules(org, 5)
+        self.assertEqual(ci._layout(5, rules), "B")
+        self.assertEqual(ci._uploaded(rules), (["Check it"], ["Paste secrets"], ["In short."]))
+        self.assertEqual(ci.render("aup-5", org)[1:4], b"PNG")
+
+    def test_every_kind_of_card_draws_at_one_width(self):
+        import io
+
+        from PIL import Image
+
+        from . import card_image as ci, policy_awareness
+        from .plans import library
+
+        org = self._org()
+        by_type = {}
+        for card in library():
+            by_type.setdefault(card["type"], card["no"])
+        self.assertEqual(set(by_type), set(ci.TYPE_MARK))                        # each type has its badge
+        kinds = [f"aup-{n}" for n in range(1, 15)] + list(ci.KINDS) + [f"pkg-{no}" for no in by_type.values()] + \
+            [f"paw-{c['id']}" for c in policy_awareness.cards()]
+        for kind in kinds:
+            self.assertEqual(Image.open(io.BytesIO(ci.render(kind, org))).width, (ci.W + ci.SHADOW + 2) * ci.S, kind)
+
+    def test_very_long_card_is_not_cut_off(self):
+        import io
+
+        from PIL import Image
+
+        from . import card_image as ci
+
+        org = self._org(lines_for=lambda n: ["A long approved sentence about the rules of this policy. " * 6] * 40)
+        self.assertGreater(Image.open(io.BytesIO(ci.render("aup-2", org))).height, 1400 * ci.S)
+
+    def test_no_approved_card_yet(self):
+        from . import card_image as ci
+
+        self.assertEqual(ci.render("aup-1", Organization(name="Acme", plan="basic"))[1:4], b"PNG")
+
+    def test_watermark_by_plan(self):
+        from . import card_image as ci
+
+        cases = ((self._org(plan="trial", logo=self._logo()), 0, 0), (self._org(plan="basic"), 1, 0),
+                 (self._org(plan="enterprise", logo=self._logo()), 0, 1))
+        for org, by_name, by_logo in cases:
+            with patch("api.card_image.text_watermark") as name, patch("api.card_image.logo_watermark") as logo:
+                ci.render("traffic_light", org)
+            self.assertEqual((name.call_count, logo.call_count), (by_name, by_logo), org.plan)
+
+    def test_image_link_changes_with_the_company_brand(self):
+        from . import card_image as ci
+
+        self.assertEqual(ci.logo_version(self._org(plan="trial", name="A")), "aidl")
+        self.assertEqual(ci.logo_version(self._org(plan="trial", name="B")), "aidl")
+        versions = {ci.logo_version(self._org(name="A")), ci.logo_version(self._org(name="B")),
+                    ci.logo_version(self._org(name="A", logo=self._logo()))}
+        self.assertEqual(len(versions), 3)
+
+    def test_sentences_end_once(self):
+        from . import card_image as ci
+
+        self.assertEqual(ci._sentence("check it"), "Check it.")
+        self.assertEqual(ci._sentence("Check it."), "Check it.")
+        self.assertEqual(ci._sentence("Ready?"), "Ready?")
+        self.assertEqual(ci._sentence('end with "ask me first."'), 'End with "ask me first."')
