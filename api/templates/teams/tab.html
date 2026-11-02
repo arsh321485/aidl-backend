@@ -103,19 +103,7 @@
       color: var(--aidl-muted);
     }
     .level-tile.active { background: var(--aidl-yellow); color: var(--aidl-text); }
-    .licence-card {
-      background: var(--aidl-yellow);
-      border-radius: 12px;
-      padding: 18px;
-      margin: 14px 0;
-    }
-    .licence-kicker { font-weight: 700; }
-    .licence-sub { font-size: 13px; color: #5c4a00; }
-    .licence-name { font-size: 26px; font-weight: 800; margin: 14px 0; }
-    .licence-grid { display: flex; gap: 24px; margin: 10px 0; }
-    .licence-grid > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-    .licence-grid .label { font-size: 11px; color: #5c4a00; margin-top: 8px; }
-    .licence-number { font-size: 12px; color: #5c4a00; margin-top: 10px; }
+    .licence-img { display: block; width: 100%; height: auto; margin: 14px 0; }
     .hc-row { display: flex; gap: 14px; align-items: flex-start; margin: 16px 0; }
     .hc-icon {
       flex: 0 0 56px;
@@ -284,22 +272,7 @@
           '<div class="level-tile active">L · Learner</div>' +
           '<div class="level-tile">F · Full</div>' +
         '</div>' +
-        '<div class="licence-card">' +
-          '<div class="licence-kicker">AI DRIVING LICENSE</div>' +
-          '<div class="licence-sub">ISSUED FOR ' + escapeHtml((data.org || "").toUpperCase()) + '</div>' +
-          '<div class="licence-name">' + escapeHtml(data.name) + '</div>' +
-          '<div class="licence-grid">' +
-            '<div>' +
-              '<span class="label">CLASS</span><strong>' + escapeHtml(data.class_label) + '</strong>' +
-              '<span class="label">EXPIRES</span><strong>' + escapeHtml(data.expires) + '</strong>' +
-            '</div>' +
-            '<div>' +
-              '<span class="label">ISSUED</span><strong>' + escapeHtml(data.issued) + '</strong>' +
-              '<span class="label">STATUS</span><strong>' + escapeHtml(data.status) + '</strong>' +
-            '</div>' +
-          '</div>' +
-          '<div class="licence-number">' + escapeHtml(data.card_number) + '</div>' +
-        '</div>' +
+        '<img class="licence-img" src="' + escapeHtml(data.download_url) + '" alt="AI Driving Licence ' + escapeHtml(data.card_number) + ' for ' + escapeHtml(data.name) + ', status ' + escapeHtml(data.status) + '">' +
         '<p>' + mdBold(data.body) + '</p>' +
         (data.download_url
           ? '<a class="btn action" href="' + escapeHtml(data.download_url) + '" download>Download Licence</a>'

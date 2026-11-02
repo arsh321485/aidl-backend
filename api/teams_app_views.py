@@ -31,7 +31,7 @@ from .teams_cards import (
 from .teams_channel_tabs import ensure_aidl_channel_tabs, is_aidl_dashboard_channel, target_channel_name
 from .teams_messaging import send_channel_adaptive_card
 from .teams_invites import send_user_invite
-from .org_service import build_user_dashboard_payload, replace_welcome_card
+from .org_service import build_user_dashboard_payload, get_organization_for_user, replace_welcome_card
 
 
 def _teams_base_url(request) -> str:
@@ -292,36 +292,21 @@ def teams_tab_content_json(request, tab: str):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def teams_licence_download(request):
-    """Downloadable image of the learner's licence card — an SVG (needs no
-    image/PDF library) with the same real licence_number/issued/expires
-    fields the Learner's Permit tab shows on screen."""
-    from django.utils.html import escape
+    """The learner's licence as a PNG (licence_image.py). Someone without a
+    licence yet gets the same card with what the Learner's Permit tab shows."""
+    from . import licence_image
 
     user_bits = _request_user_bits(request)
     org_name = org_display_name(user_bits.get("org_name", ""))
-    facts = _licence_facts(
-        full_name=user_bits.get("full_name", ""),
-        org_name=org_name,
-        user=user_bits.get("user"),
-    )
-    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="640" height="380" viewBox="0 0 640 380">
-  <rect width="640" height="380" rx="20" fill="#ffd335"/>
-  <text x="32" y="48" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">AI DRIVING LICENSE</text>
-  <text x="32" y="70" font-family="Segoe UI, sans-serif" font-size="12" fill="#5c4a00">ISSUED FOR {escape(org_name.upper())}</text>
-  <text x="32" y="130" font-family="Segoe UI, sans-serif" font-size="34" font-weight="800" fill="#201f36">{escape(facts["name"])}</text>
-  <text x="32" y="200" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">CLASS</text>
-  <text x="32" y="222" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">Learner's Permit</text>
-  <text x="32" y="256" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">EXPIRES</text>
-  <text x="32" y="278" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">{escape(facts["expires"])}</text>
-  <text x="330" y="200" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">ISSUED</text>
-  <text x="330" y="222" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">{escape(facts["issued"])}</text>
-  <text x="330" y="256" font-family="Segoe UI, sans-serif" font-size="11" fill="#5c4a00">STATUS</text>
-  <text x="330" y="278" font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#201f36">{escape(facts["status"])}</text>
-  <text x="32" y="340" font-family="Segoe UI, sans-serif" font-size="12" fill="#5c4a00">{escape(facts["licence_number"])}</text>
-</svg>"""
-    response = HttpResponse(svg, content_type="image/svg+xml")
-    filename = f"{facts['licence_number'] or 'aidl-licence'}.svg"
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    user = user_bits.get("user")
+    facts = _licence_facts(full_name=user_bits.get("full_name", ""), org_name=org_name, user=user)
+    if user is not None and user.licence_issued and user.licence_number:
+        png = licence_image.png_for(user, get_organization_for_user(user))
+    else:
+        png = licence_image.render(name=facts["name"], org_name=org_name, number=facts["licence_number"], issued=None,
+                                   status=facts["status"])
+    response = HttpResponse(png, content_type="image/png")
+    response["Content-Disposition"] = f'attachment; filename="{facts["licence_number"] or "aidl-licence"}.png"'
     return response
 
 

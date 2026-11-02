@@ -364,102 +364,17 @@ def _licence_facts(*, full_name: str = "", org_name: str = "", user=None) -> dic
 
 
 def _licence_card_visual(*, full_name: str, org_name: str, user=None) -> dict:
+    """The licence picture (licence_image.py), as on every other surface."""
+    from urllib.parse import quote
+
     facts = _licence_facts(full_name=full_name, org_name=org_name, user=user)
-    name = facts["name"]
+    email = (user.email if user else "").strip()
     return {
-        "type": "Container",
-        "style": "emphasis",
-        "backgroundImage": {"url": _YELLOW_BG, "fillMode": "repeat"},
+        "type": "Image",
+        "url": f"{_tabs_base_url()}/cards/learners-permit/download/" + (f"?email={quote(email)}" if email else ""),
+        "altText": f"AI Driving Licence {facts['licence_number']} for {facts['name']}, status {facts['status']}",
+        "size": "Stretch",
         "spacing": "Medium",
-        "items": [
-            {
-                "type": "ColumnSet",
-                "columns": [
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": "AI DRIVING LICENSE",
-                                "weight": "Bolder",
-                                "size": "Medium",
-                                "spacing": "None",
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": f"ISSUED FOR {org_name.upper()}",
-                                "size": "Small",
-                                "isSubtle": True,
-                                "spacing": "None",
-                                "wrap": True,
-                            },
-                        ],
-                    },
-                    {
-                        "type": "Column",
-                        "width": "auto",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": "L",
-                                "weight": "Bolder",
-                                "horizontalAlignment": "Center",
-                            }
-                        ],
-                        "style": "default",
-                    },
-                ],
-            },
-            {
-                "type": "TextBlock",
-                "text": name,
-                "weight": "Bolder",
-                "size": "ExtraLarge",
-                "spacing": "Medium",
-                "wrap": True,
-            },
-            {
-                "type": "ColumnSet",
-                "spacing": "Medium",
-                "columns": [
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {"type": "TextBlock", "text": "CLASS", "size": "Small", "isSubtle": True, "spacing": "None"},
-                            {"type": "TextBlock", "text": "Learner's Permit", "weight": "Bolder", "spacing": "None"},
-                            {"type": "TextBlock", "text": "EXPIRES", "size": "Small", "isSubtle": True, "spacing": "Medium"},
-                            {"type": "TextBlock", "text": facts["expires"], "weight": "Bolder", "spacing": "None"},
-                        ],
-                    },
-                    {
-                        "type": "Column",
-                        "width": "stretch",
-                        "items": [
-                            {"type": "TextBlock", "text": "ISSUED", "size": "Small", "isSubtle": True, "spacing": "None"},
-                            {"type": "TextBlock", "text": facts["issued"], "weight": "Bolder", "spacing": "None"},
-                            {"type": "TextBlock", "text": "STATUS", "size": "Small", "isSubtle": True, "spacing": "Medium"},
-                            {"type": "TextBlock", "text": facts["status"], "weight": "Bolder", "spacing": "None"},
-                        ],
-                    },
-                ],
-            },
-            {
-                "type": "Container",
-                "style": "default",
-                "spacing": "Medium",
-                "items": [
-                    {
-                        "type": "TextBlock",
-                        "text": facts["licence_number"],
-                        "size": "Small",
-                        "isSubtle": True,
-                        "spacing": "None",
-                    }
-                ],
-            },
-        ],
     }
 
 
