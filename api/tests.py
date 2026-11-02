@@ -4271,3 +4271,36 @@ class CardDesignSystemTests(SimpleTestCase):
         self.assertEqual(ci._sentence("Check it."), "Check it.")
         self.assertEqual(ci._sentence("Ready?"), "Ready?")
         self.assertEqual(ci._sentence('end with "ask me first."'), 'End with "ask me first."')
+
+    def test_policy_cards_and_highway_code_carry_the_aidl_logo_and_watermark(self):
+        import io
+
+        from PIL import Image, ImageChops
+
+        from . import card_image as ci
+
+        def disc(img, box):                                                      # the logo's yellow
+            return sum(1 for r, g, b, a in img.crop(box).getdata() if r > 230 and 190 < g < 235 and b < 130 and a == 255)
+
+        kinds = [f"aup-{n}" for n in range(1, 15)] + ["highway_code"]
+        s = ci.S
+        for org in (self._org(plan="trial"), self._org(), self._org(plan="enterprise", logo=self._logo())):
+            for kind in kinds:
+                img = Image.open(io.BytesIO(ci.render(kind, org))).convert("RGBA")
+                x1, h = (ci.W - ci.PAD) * s, img.height - (ci.SHADOW + 2) * s
+                self.assertGreater(disc(img, (x1 - ci.HEADER_LOGO * s, 30 * s, x1, 94 * s)), 2000, kind)  # header
+                self.assertGreater(disc(img, (ci.PAD * s, h - 38 * s, (ci.PAD + 28) * s, h - 10 * s)), 300, kind)  # footer
+                with patch("api.card_image._aidl_watermark") as none:
+                    without = Image.open(io.BytesIO(ci.render(kind, org))).convert("RGBA")
+                none.assert_called_once()
+                self.assertIsNotNone(ImageChops.difference(img.convert("RGB"), without.convert("RGB")).getbbox(), kind)
+
+    def test_watermark_stays_faint_and_the_logo_keeps_one_size(self):
+        from . import card_image as ci
+
+        mark = ci._aidl_logo(ci.WATERMARK_LOGO, ci.WATERMARK_OPACITY)
+        self.assertLessEqual(mark.getchannel("A").getextrema()[1], int(255 * 0.1))
+        self.assertEqual(mark.width, ci.WATERMARK_LOGO * ci.S)
+        self.assertEqual(ci._aidl_logo(ci.HEADER_LOGO).width, ci.HEADER_LOGO * ci.S)
+        self.assertFalse(ci._branded("traffic_light"))
+        self.assertTrue(ci._branded("highway_code") and ci._branded("aup-14"))
