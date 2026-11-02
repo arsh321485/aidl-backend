@@ -372,7 +372,7 @@ def _licence_card_visual(*, full_name: str, org_name: str, user=None) -> dict:
     return {
         "type": "Image",
         "url": f"{_tabs_base_url()}/cards/learners-permit/download/" + (f"?email={quote(email)}" if email else ""),
-        "altText": f"AI Driving Licence {facts['licence_number']} for {facts['name']}, status {facts['status']}",
+        "altText": f"AI Driving Licence {facts['licence_number']} for {facts['name']}",
         "size": "Stretch",
         "spacing": "Medium",
     }

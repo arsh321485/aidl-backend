@@ -491,9 +491,16 @@ def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, op
     total = len(rows)
     nxt = next_card_line(org, member, total)
     if not rows:
-        blocks = [{"type": "section", "text": _md(
-            "*No cards yet.* Your awareness cards appear here once your licence is issued.")}]
-        if nxt:
+        scheduled = nxt.startswith("📅 *Next card:*")
+        if not member.licence_issued:
+            empty = "*No cards yet.* Your awareness cards appear here once your licence is issued."
+        elif scheduled:
+            empty = "*No cards yet.* Your first card is scheduled."
+        else:
+            empty = ("*No cards yet.* Your admin is still approving your awareness cards, and they'll appear here "
+                     "once they're sent.")
+        blocks = [{"type": "section", "text": _md(empty)}]
+        if scheduled:
             blocks.append({"type": "context", "elements": [_md(nxt)]})
         return {"type": "modal", "callback_id": "aidl_my_cards", "title": _t("My cards"), "close": _t("Close"),
                 "private_metadata": json.dumps(m), "blocks": blocks}
