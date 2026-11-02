@@ -4304,3 +4304,88 @@ class CardDesignSystemTests(SimpleTestCase):
         self.assertEqual(ci._aidl_logo(ci.HEADER_LOGO).width, ci.HEADER_LOGO * ci.S)
         self.assertFalse(ci._branded("traffic_light"))
         self.assertTrue(ci._branded("highway_code") and ci._branded("aup-14"))
+
+
+class LicenceDesignTests(TestCase):
+    """The licence design (licence_image.py) on every surface."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Secureitlab", plan="basic", slack_team_id="TLIC")
+        self.member = make_user(self.org, role=AIDLUser.Role.LEARNER, licence_issued=True,
+                                licence_number="AIDL-L-1234-5678", licence_issued_at=timezone.now(),
+                                licence_expires_at=timezone.now() + timedelta(days=365))
+
+    def _size(self, png):
+        import io
+
+        from PIL import Image
+
+        return Image.open(io.BytesIO(png)).size
+
+    def test_status_on_the_licence(self):
+        from .licence_image import status_of
+
+        self.assertEqual(status_of(self.member), "ACTIVE")
+        self.member.licence_expires_at = timezone.now() - timedelta(days=1)
+        self.assertEqual(status_of(self.member), "EXPIRED")
+        self.member.slack_left_at = timezone.now()
+        self.assertEqual(status_of(self.member), "SUSPENDED")
+
+    def test_image_changes_when_the_licence_expires(self):
+        from . import image_cache, licence_image
+
+        active_url = licence_image.url_version(self.member, self.org)
+        active = licence_image.png_for(self.member, self.org)
+        self.member.licence_expires_at = timezone.now() - timedelta(days=1)
+        self.member.save()
+        self.assertNotEqual(licence_image.url_version(self.member, self.org), active_url)
+        self.assertNotEqual(licence_image.png_for(self.member, self.org), active)
+        image_cache._MEMORY.clear()
+
+    def test_every_case_draws_at_one_size(self):
+        from . import licence_image as li
+
+        now = timezone.now()
+        for kw in ({"name": "Your Name", "org_name": "Your Org Name"},
+                   {"name": "Sam Rivera", "org_name": ""},
+                   {"name": "A Very Long Name That Goes On And On And On Past The Edge Of The Card", "org_name": "O" * 80},
+                   {"name": "Priya Raman", "org_name": "Northwind", "status": "SUSPENDED"}):
+            png = li.render(number="AIDL-L-1234-5678", issued=now, expires=now + timedelta(days=365), **kw)
+            self.assertEqual(self._size(png), (li.W * li.S, li.H * li.S), kw)
+
+    def test_long_name_shrinks_to_fit(self):
+        from PIL import Image, ImageDraw
+
+        from . import licence_image as li
+
+        d = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
+        name = "MAXIMILIANA FEATHERSTONEHAUGH-CHOLMONDELEY DE LA CRUZ"
+        self.assertLessEqual(d.textlength(name, font=li._fitted(d, name, "Black", 38, 537)), 537 * li.S)
+
+    def test_download_link_returns_the_licence_png(self):
+        resp = self.client.get(f"/api/licenses/{self.member.licence_number}.png"
+                               f"?s={__import__('api.licence_image', fromlist=['x']).signature(self.member.licence_number)}&download=1")
+        self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
+        self.assertIn("attachment", resp["Content-Disposition"])
+
+    def test_teams_download_is_the_same_design(self):
+        from urllib.parse import quote
+
+        from . import licence_image as li
+
+        resp = self.client.get(f"/api/teams/cards/learners-permit/download/?email={quote(self.member.email)}")
+        self.assertEqual((resp.status_code, resp["Content-Type"]), (200, "image/png"))
+        self.assertEqual(resp.content, li.png_for(self.member, self.org))
+        self.assertIn(".png", resp["Content-Disposition"])
+        preview = self.client.get("/api/teams/cards/learners-permit/download/")  # no signed-in user
+        self.assertEqual((preview.status_code, preview.content[1:4]), (200, b"PNG"))
+
+    def test_user_page_and_teams_card_show_the_picture(self):
+        from .teams_cards import _licence_card_visual
+
+        page = self.client.get("/api/slack/cards/user/").content.decode()
+        self.assertIn('src="/api/teams/cards/learners-permit/download/"', page)
+        self.assertNotIn("lc-strip", page)
+        card = _licence_card_visual(full_name="", org_name="Secureitlab", user=self.member)
+        self.assertEqual(card["type"], "Image")
+        self.assertIn("/cards/learners-permit/download/?email=", card["url"])

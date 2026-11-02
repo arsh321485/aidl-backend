@@ -9,6 +9,7 @@ Ellis") so the design can be previewed without Slack.
 
 from __future__ import annotations
 
+from urllib.parse import quote
 from datetime import timedelta
 
 from django.conf import settings
@@ -535,6 +536,8 @@ def build_user_cards_context(user: AIDLUser | None, lights: list[str] | None = N
             "first_name": first_name(data["full_name"]),
             "curriculum_version": CURRICULUM_VERSION,
             "verify_url": _verify_url(data["licence_number"]),
+            "licence_image_url": "/api/teams/cards/learners-permit/download/" + (
+                f"?email={quote(user.email)}" if user is not None and user.email else ""),
             "highway_code": _highway_code(fx),
             "lights": _traffic_lights(fx, lights),
             "training_note": fx["training_note"],
