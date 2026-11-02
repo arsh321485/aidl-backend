@@ -13,8 +13,10 @@ whole library (design: E:\\AIDL Card Design System.html), drawn with Pillow:
              slanted and faint. Trial cards show AIDL only
              (licence_image.brand_logo).
     AIDL     policy cards and the Highway Code also carry the official AIDL
-             logo (static/aidl/logo-transparent.png): in the header, the footer
-             and, faint, behind the card's content (_branded).
+             logo (static/aidl/logo-transparent.png): in the footer and, faint,
+             behind the card's content (_branded), plus the header on policy
+             cards. A Highway Code with a company logo has that logo as a large
+             watermark behind everything instead (HIGHWAY_MARK).
 
 The body changes with the content; policy cards pick one of four layouts
 (_layout). The approved words are never rewritten: lists from the question
@@ -43,7 +45,7 @@ from .licence_image import brand_logo, text_watermark
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "8"
+DESIGN_VERSION = "9"
 
 
 def valid_kind(kind: str) -> bool:
@@ -71,6 +73,7 @@ _AIDL_LOGO = Path(__file__).resolve().parent / "static" / "aidl" / "logo-transpa
 HEADER_LOGO, FOOTER_LOGO, WATERMARK_LOGO = 66, 28, 300  # widths, the same on every card
 WATERMARK_OPACITY = 0.06
 LOGO_EDGE = W - PAD - HEADER_LOGO - 12
+HIGHWAY_MARK = {"angle": 35, "width_ratio": 1.0, "opacity": 0.26}  # company logo on the Highway Code
 
 HIGHWAY = {
     "title": "The Highway Code",
@@ -597,7 +600,7 @@ def _road_sign(d, cx, cy, shape: str) -> None:
 
 def _highway_code(d, org) -> float:
     y = _header(d, "onboarding", "2", "AIDL · onboarding · card 2 of 2 · section A", HIGHWAY["title"],
-                right="learner rules", edge=LOGO_EDGE)
+                right="learner rules")
     y = _para(d, PAD, y - 4, HIGHWAY["intro"], "medium", 18, W - 2 * PAD, line=25) + 10
     x = PAD + 104
     for i, (shape, title, body) in enumerate(HIGHWAY["rules"], 1):
@@ -688,10 +691,11 @@ def _aidl_watermark(img: Image.Image) -> None:
     img.alpha_composite(mark, ((img.width - mark.width) // 2, max(0, (img.height - mark.height) // 2)))
 
 
-def _add_logos(img: Image.Image) -> None:
+def _add_logos(img: Image.Image, header: bool = True) -> None:
     """The AIDL logo in the header (level with the badge) and the footer."""
-    head = _aidl_logo(HEADER_LOGO)
-    img.alpha_composite(head, ((W - PAD) * S - head.width, 62 * S - head.height // 2))
+    if header:
+        head = _aidl_logo(HEADER_LOGO)
+        img.alpha_composite(head, ((W - PAD) * S - head.width, 62 * S - head.height // 2))
     foot = _aidl_logo(FOOTER_LOGO)
     img.alpha_composite(foot, (PAD * S, img.height - 24 * S - foot.height // 2))
 
@@ -749,12 +753,16 @@ def _draw(kind: str, d, org) -> float:
 def render(kind: str, org) -> bytes:
     bottom = _measure(lambda d: _draw(kind, d, org))
     body = Image.new("RGBA", (W * S, int(bottom * S)), WHITE)
-    if _branded(kind):
+    company = brand_logo(org) if kind == "highway_code" else None
+    if company is not None:
+        logo_watermark(body, company, **HIGHWAY_MARK)  # first, so everything sits on top of it
+    elif _branded(kind):
         _aidl_watermark(body)
     _draw(kind, ImageDraw.Draw(body), org)
     if _branded(kind):
-        _add_logos(body)
-    _watermark(body, org)
+        _add_logos(body, header=kind != "highway_code")
+    if company is None:
+        _watermark(body, org)
     return _png(_frame(body))
 
 
