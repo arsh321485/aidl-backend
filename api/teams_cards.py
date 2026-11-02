@@ -4,6 +4,8 @@ from urllib.parse import quote
 
 from django.conf import settings
 
+from .licensing import licence_status
+
 TEAMS_TABS = (
     ("home", "Home", "🏠"),
     ("learners-permit", "Learner's Permit", "🪪"),
@@ -352,7 +354,7 @@ def _licence_facts(*, full_name: str = "", org_name: str = "", user=None) -> dic
             "licence_number": user.licence_number,
             "issued": issued_at.strftime("%d %b %Y") if issued_at else "—",
             "expires": expires_at.strftime("%d %b %Y") if expires_at else "—",
-            "status": "ACTIVE",
+            "status": licence_status(user),
         }
     return {
         "name": name,

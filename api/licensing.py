@@ -111,6 +111,17 @@ def new_licence_number() -> str:
     return f"AIDL-L-{secrets.randbelow(10**4):04d}-{secrets.randbelow(10**4):04d}"
 
 
+def licence_status(member: AIDLUser) -> str:
+    """NOT_ISSUED, ACTIVE, EXPIRED or SUSPENDED (left the channel). For checking
+    a licence; it isn't printed on the licence image."""
+    if not member.licence_issued:
+        return "NOT_ISSUED"
+    if member.slack_left_at:
+        return "SUSPENDED"
+    expires = member.licence_expires_at
+    return "EXPIRED" if expires is not None and expires < timezone.now() else "ACTIVE"
+
+
 def issue_learner_if_ready(member: AIDLUser, org: Organization) -> str:
     """'issued', 'already', 'left', 'not_ready' or 'no_seats'."""
     if member.licence_issued:

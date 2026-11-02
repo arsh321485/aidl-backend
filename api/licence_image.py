@@ -16,19 +16,20 @@ import hashlib
 import hmac
 import io
 import logging
+import math
 from datetime import datetime
 
 import requests
 from django.conf import settings
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
 S = 2  # draw at 2x for a crisp image
-W, H = 800, 468
-CARD_W, CARD_H = 787, 456  # the rest of W, H is the hard shadow
+CARD_W, CARD_H, SHADOW = 800, 470, 13
+W, H = CARD_W + SHADOW, CARD_H + SHADOW
 INK, YELLOW, CREAM = "#14140F", "#FFCC00", "#F5ECD2"
-NAVY, PALE, LABEL, PHOTO_BG, SILHOUETTE = "#16233A", "#E8EEF7", "#8E97A8", "#D1D8E2", "#7E8898"
+NAVY, PALE, PHOTO_BG, SILHOUETTE = "#16233A", "#E8EEF7", "#E9E2C6", "#8A8468"
 
 
 def _mix(color: str, over: str, amount: float) -> tuple:
@@ -52,7 +53,7 @@ def image_url(number: str, *, download: bool = False, version: str = "") -> str:
     return url + (f"&v={version}" if version else "") + ("&download=1" if download else "")
 
 
-LICENCE_DESIGN = "6"  # bump when the licence's look changes (new image links → Slack refetches)
+LICENCE_DESIGN = "7"  # bump when the licence's look changes (new image links → Slack refetches)
 
 
 def avatar_version(member) -> str:
@@ -179,87 +180,137 @@ def _contain(img: Image.Image, w: int, h: int) -> Image.Image:
     return canvas
 
 
-def _mono(size: int) -> ImageFont.FreeTypeFont:
+def _card_font(kind: str, size: int) -> ImageFont.FreeTypeFont:
+    """The licence's fonts, the closest open fonts to the website's Arial Black
+    (heavy), Arial Bold (sans) and Courier New Bold (mono)."""
     from pathlib import Path
 
-    return ImageFont.truetype(str(Path(__file__).resolve().parent / "data" / "fonts" / "JetBrainsMono-Bold.ttf"), size * S)
+    fonts = Path(__file__).resolve().parent / "data" / "fonts"
+    if kind == "heavy":
+        return ImageFont.truetype(str(fonts / "ArchivoBlack-Regular.ttf"), size * S)
+    if kind == "mono":
+        return ImageFont.truetype(str(fonts / "CourierPrime-Bold.ttf"), size * S)
+    font = ImageFont.truetype(str(fonts / "Arimo.ttf"), size * S)
+    font.set_variation_by_name("Bold")
+    return font
 
 
-def _fitted(d, text: str, weight: str, size: int, width: int) -> ImageFont.FreeTypeFont:
+def _spaced(d, x: float, y: float, text: str, font, fill, spacing: float = 0) -> None:
+    """Text from baseline (x, y), with letter-spacing as on the website."""
+    px = x * S
+    for ch in text:
+        d.text((px, y * S), ch, font=font, fill=fill, anchor="ls")
+        px += d.textlength(ch, font=font) + spacing * S
+
+
+def _spaced_width(d, text: str, font, spacing: float = 0) -> float:
+    return sum(d.textlength(ch, font=font) for ch in text) / S + spacing * len(text)
+
+
+def _fitted(d, text: str, kind: str, size: int, width: int) -> ImageFont.FreeTypeFont:
     """The font at `size`, or smaller until `text` fits in `width`."""
-    while size > 14 and d.textlength(text, font=_font(size, weight)) > width * S:
+    while size > 14 and _spaced_width(d, text, _card_font(kind, size)) > width:
         size -= 1
-    return _font(size, weight)
+    return _card_font(kind, size)
 
 
-def _photo(card: Image.Image, avatar: Image.Image | None, x: int, y: int, w: int, h: int) -> None:
-    """The avatar the holder created (else a silhouette) in a pale frame."""
-    pic = Image.new("RGBA", (w * S, h * S), PHOTO_BG)
+def _photo(card: Image.Image, avatar: Image.Image | None) -> None:
+    """The avatar the holder created, narrower than the frame so the panel shows
+    above and below it (as designed), else a silhouette."""
+    x, y, w, h = 40, 148, 150, 188
+    pic = Image.new("RGBA", (w * S, h * S), (0, 0, 0, 0))
     if avatar is not None:
-        pic.alpha_composite(_fit(avatar, w * S, h * S))
+        pic.alpha_composite(_contain(avatar, w * S, h * S))
     else:
+        pic.paste(PHOTO_BG, (0, 0, pic.width, pic.height))
         d = ImageDraw.Draw(pic)
-        cx = w * S // 2
-        d.ellipse((cx - 34 * S, 34 * S, cx + 34 * S, 102 * S), fill=SILHOUETTE)
-        d.pieslice((cx - 62 * S, 112 * S, cx + 62 * S, (h + 62) * S), 180, 360, fill=SILHOUETTE)
+        d.ellipse(_xy(77 - x, 184 - y, 153 - x, 260 - y), fill=SILHOUETTE)
+        d.pieslice(_xy(50 - x, 268 - y, 180 - x, 268 - y + 136), 180, 360, fill=SILHOUETTE)
     mask = Image.new("L", pic.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, pic.width - 1, pic.height - 1), radius=9 * S, fill=255)
-    card.paste(pic, (x * S, y * S), mask)
-    ImageDraw.Draw(card).rounded_rectangle((x * S, y * S, (x + w) * S, (y + h) * S), radius=9 * S, outline=PALE,
-                                           width=4 * S)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, pic.width - 1, pic.height - 1), radius=10 * S, fill=255)
+    mask = ImageChops.multiply(mask, pic.getchannel("A"))
+    card.paste(pic, _xy(x, y), mask)
+    ImageDraw.Draw(card).rounded_rectangle(_xy(x - 2, y - 2, x + w + 2, y + h + 2), radius=12 * S, outline=PALE, width=4 * S)
+
+
+def _texture(card: Image.Image) -> None:
+    """Faint rings across the panel: 18px apart, the grid turned 30 degrees."""
+    layer = Image.new("L", card.size, 0)
+    d = ImageDraw.Draw(layer)
+    cos, sin = math.cos(math.radians(30)), math.sin(math.radians(30))
+    for i in range(-40, 80):
+        for j in range(-40, 80):
+            px, py = 9 + 18 * i, 9 + 18 * j
+            cx, cy = px * cos - py * sin, px * sin + py * cos
+            if -9 < cx < CARD_W + 9 and 100 < cy < 420:
+                d.ellipse(_xy(cx - 7, cy - 7, cx + 7, cy + 7), outline=15, width=S)
+    tint = Image.new("RGBA", card.size, PALE)
+    tint.putalpha(layer)
+    card.alpha_composite(tint)
 
 
 def render(*, name: str, org_name: str, number: str, issued: datetime | None, expires: datetime | None = None,
            org=None, avatar_url: str = "", avatar_data: str = "") -> bytes:
-    card = Image.new("RGBA", (CARD_W * S, CARD_H * S), INK)
+    card = Image.new("RGBA", _xy(CARD_W, CARD_H), NAVY)
+    _texture(card)
     d = ImageDraw.Draw(card)
 
-    # header: AIDL logo, title, who issued it
+    # header band, hazard stripe
+    d.rectangle(_xy(0, 0, CARD_W, 112), fill=INK)
+    period = 22 * math.sqrt(2)
+    for k in range(0, 40):
+        c = k * period
+        d.polygon([_xy(c, 124), _xy(c + period / 2, 124), _xy(c + period / 2 + 12, 112),
+                   _xy(c + 12, 112)], fill=INK)
+    d.ellipse(_xy(24, 16, 104, 96), fill=YELLOW)
     badge_src = _aidl_logo()
     if badge_src is not None:
-        badge = _contain(badge_src.crop(badge_src.getbbox()), 84 * S, 84 * S)
-        card.alpha_composite(badge, _xy(20, 13))
-    d.text(_xy(121, 56), "AI DRIVING LICENCE", font=_font(36, "Black"), fill=YELLOW, anchor="ls")
+        size = 72 * S
+        badge = badge_src.resize((size, size), Image.LANCZOS)
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+        card.paste(badge, _xy(28, 20), ImageChops.multiply(mask, badge.getchannel("A")))
+    _spaced(d, 122, 54, "AI DRIVING LICENCE", _card_font("heavy", 32), YELLOW, 1)
     who = f"ISSUED FOR {org_name.upper()}" if org_name else "ISSUED UNDER THE AIDL PUBLIC REGISTRY"
     who = who if len(who) <= 44 else who[:43].rstrip() + "…"
-    d.text(_xy(122, 85), " ".join(who), font=_font(12, "Black"), fill=CREAM, anchor="ls")
+    _spaced(d, 124, 84, who, _card_font("sans", 15), CREAM, 2)
 
-    # hazard stripe, navy panel
-    d.rectangle(_xy(8, 110, 778, 123), fill=INK)
-    for x in range(8, 778, 19):
-        d.polygon([_xy(x, 123), _xy(min(x + 10, 778), 123), _xy(min(x + 20, 778), 110), _xy(min(x + 10, 778), 110)], fill=NAVY)
-    d.rectangle(_xy(8, 123, 778, 403), fill=NAVY)
     if brand_logo(org) is not None:  # company name, large and faint, behind the details
-        body = card.crop(_xy(200, 124, 778, 402))
+        body = card.crop(_xy(220, 126, CARD_W, 408))
         text_watermark(body, org_name, opacity=0.07, width_ratio=0.9, color=PALE)
-        card.paste(body, _xy(200, 124))
+        card.paste(body, _xy(220, 126))
 
-    # road: centre line
-    for x in range(8, 770, 39):
-        d.rectangle(_xy(x, 431, x + 23, 433), fill=YELLOW)
+    _photo(card, _avatar(avatar_url, avatar_data))
 
-    _photo(card, _avatar(avatar_url, avatar_data), 38, 144, 151, 189)
+    label_ink = _mix(PALE, NAVY, 0.62)
 
     def label(x, y, text):
-        d.text(_xy(x, y), text, font=_font(11, "Black"), fill=LABEL, anchor="ls")
+        _spaced(d, x, y, text, _card_font("sans", 13), label_ink, 1.2)
 
-    x = 217
-    label(x, 164, "1. NAME")
+    label(220, 168, "1. NAME")
     shown = name.upper()
-    d.text(_xy(x, 204), shown, font=_fitted(d, shown, "Black", 38, 778 - x - 24), fill=PALE, anchor="ls")
-    label(x, 248, "2. ISSUED")
-    d.text(_xy(x, 276), issued.strftime("%d/%m/%Y") if issued else "—", font=_font(22, "Bold"), fill=PALE, anchor="ls")
-    label(372, 248, "3. VALID UNTIL")
-    d.text(_xy(372, 276), expires.strftime("%d/%m/%Y") if expires else "—", font=_font(22, "Bold"), fill=PALE, anchor="ls")
-    label(x, 321, "4. LICENCE NO.")
-    d.text(_xy(x, 352), number, font=_mono(25), fill=YELLOW, anchor="ls")
+    _spaced(d, 220, 208, shown, _fitted(d, shown, "heavy", 38, CARD_W - 220 - 24), PALE)
+    label(220, 252, "2. ISSUED")
+    _spaced(d, 220, 280, issued.strftime("%d/%m/%Y") if issued else "—", _card_font("sans", 22), PALE)
+    label(380, 252, "3. VALID UNTIL")
+    _spaced(d, 380, 280, expires.strftime("%d/%m/%Y") if expires else "—", _card_font("sans", 22), PALE)
+    label(220, 326, "4. LICENCE NO.")
+    _spaced(d, 220, 356, number, _card_font("mono", 26), YELLOW, 1)
 
-    # rounded corners + hard shadow
+    # road footer: centre line
+    d.rectangle(_xy(0, 410, CARD_W, CARD_H), fill=INK)
+    for x in range(0, CARD_W, 42):
+        d.rectangle(_xy(x, 438.5, x + 26, 441.5), fill=YELLOW)
+
+    # rounded card edge + hard shadow
+    edge = (0, 0, CARD_W * S - 1, CARD_H * S - 1)
     mask = Image.new("L", card.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, card.width - 1, card.height - 1), radius=26 * S, fill=255)
+    ImageDraw.Draw(mask).rounded_rectangle(edge, radius=27 * S, fill=255)
     out = Image.new("RGBA", _xy(W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(out).rounded_rectangle(_xy(11, 10, 798, 466), radius=26 * S, fill=INK)
+    draw = ImageDraw.Draw(out)
+    draw.rounded_rectangle(_xy(SHADOW, SHADOW, W, H), radius=27 * S, fill=INK)
     out.paste(card, (0, 0), mask)
+    draw.rounded_rectangle(edge, radius=27 * S, outline=INK, width=6 * S)
     buf = io.BytesIO()
     out.save(buf, "PNG", compress_level=6)  # optimize=True takes seconds on the server
     return buf.getvalue()

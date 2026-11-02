@@ -9,6 +9,7 @@ card page with a short-lived link only the clicking admin can see.
 
 from __future__ import annotations
 
+from .licensing import licence_status
 from .slack_cards import ADMIN_TABS
 
 _DOT = {"g": "🟢", "a": "🟡", "r": "🔴"}
@@ -608,7 +609,7 @@ def user_license_blocks(member, org) -> list:
         "text": _md(f"*AI DRIVING LICENSE* · issued for {org.name}\n*{(member.full_name or '').upper()}*"),
         "fields": [
             _md("*CLASS*\nLearner's Permit (L)"),
-            _md(f"*STATUS*\n{'ACTIVE' if member.licence_issued else 'PENDING'}"),
+            _md(f"*STATUS*\n{licence_status(member) if member.licence_issued else 'PENDING'}"),
             _md(f"*ISSUED*\n{issued}"),
             _md(f"*EXPIRES*\n{expires}"),
         ],

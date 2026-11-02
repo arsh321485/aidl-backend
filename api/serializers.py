@@ -53,6 +53,12 @@ class AIDLUserSerializer(serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
     # Guide 4.7 — has this user's organization answered the 8 policy questions?
     policy_completed = serializers.SerializerMethodField()
+    licence_status = serializers.SerializerMethodField()
+
+    def get_licence_status(self, user) -> str:
+        from .licensing import licence_status
+
+        return licence_status(user)
 
     def get_policy_completed(self, user) -> bool:
         from .org_policy import policy_completed
@@ -86,6 +92,7 @@ class AIDLUserSerializer(serializers.ModelSerializer):
             "licence_number",
             "licence_issued_at",
             "licence_expires_at",
+            "licence_status",
             "aup_signed",
             "aup_signed_at",
             "teams_team_id",

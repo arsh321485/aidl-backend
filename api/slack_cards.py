@@ -9,13 +9,14 @@ Ellis") so the design can be previewed without Slack.
 
 from __future__ import annotations
 
-from urllib.parse import quote
 from datetime import timedelta
+from urllib.parse import quote
 
 from django.conf import settings
 from django.utils import timezone
 
 from .cards_catalog_data import MONTHLY_CARD_QUOTA
+from .licensing import licence_status
 from . import admin_perms
 from .plans import usage
 from .models import AIDLUser, CardRequest, RegisteredApp
@@ -524,7 +525,7 @@ def build_user_cards_context(user: AIDLUser | None, lights: list[str] | None = N
             "licence_class": "L",
             "issued": issued.strftime("%m/%d/%Y") if issued else "—",
             "expires": expires.strftime("%m/%d/%Y") if expires else "—",
-            "status": "ACTIVE" if user.licence_issued else "PENDING",
+            "status": licence_status(user) if user.licence_issued else "PENDING",
             "avatar_url": user.avatar_url,
             "policy_version": DEFAULT_POLICY_VERSION,
         }
