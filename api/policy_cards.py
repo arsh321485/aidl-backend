@@ -68,6 +68,55 @@ def lines(n: int, a: dict) -> list[str]:
     return out
 
 
+def _rules(n: int, a: dict) -> list[tuple]:
+    """The same card as lines(), keeping its lists apart for the card image:
+    ("text", sentence) or ("list", heading, items, the original sentence)."""
+    aup = aup_builder.generate(a["answers"], a["fills"], strict=False)
+    pt = next((p for p in aup["points"] if p["no"] == n), None)
+    out = []
+    for c in (pt or {}).get("clauses") or []:
+        if not c.get("qid") or aup_builder.question(c["qid"])["section"] != n:
+            continue
+        q = aup_builder.question(c["qid"])
+        template = q.get("template", "").strip()
+        items = c.get("items")
+        if items and template == "{%s}." % q["id"]:
+            out += [("text", _capital(i) + ".") for i in items]
+        elif items and ":" in template.split("{")[0] and len(items) > 1:
+            head = template.split("{")[0].split(":")[0].strip()
+            tail = template.split("}")[-1].strip(" .,")
+            out.append(("list", f"{head} ({tail})" if tail else head, [_capital(i) for i in items], c["text"]))
+        elif items and len(items) == 1 and ":" in template:
+            head = template.split("{")[0].split(":")[0].strip()
+            out.append(("text", f"{head} {items[0].rstrip('.')}."))
+        else:
+            out.append(("text", c["text"]))
+        if c["qid"] == "7.1" and a["answers"].get("7.1") == APPROVED_AI:
+            if a["tools"]:
+                out.append(("list", "Approved AI tools", list(a["tools"]), f"Approved AI tools: {_join(a['tools'])}."))
+            else:
+                out.append(("text", "Approved AI tools: ask your AIDL admin."))
+    return out
+
+
+def _capital(text: str) -> str:
+    text = text.strip().rstrip(".").strip()
+    return text[:1].upper() + text[1:]
+
+
+def card_rules(org: Organization, n: int, approved: list[str]) -> list[tuple]:
+    """What the card image shows. Lists are only split up when the current
+    answers still give exactly the approved words; anything else (an uploaded
+    policy, answers edited since) is shown line by line, as approved."""
+    try:
+        a = aup_store.answers(org, with_tools=False)
+        if lines(n, a) == approved:
+            return _rules(n, a)
+    except Exception:  # noqa: BLE001 — the approved words can always be shown
+        logger.warning("policy card %s: showing the approved lines as they are", n, exc_info=True)
+    return [("text", line) for line in approved]
+
+
 def _join(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 

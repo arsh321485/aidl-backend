@@ -91,13 +91,13 @@ def _lato(weight: str, px: int) -> ImageFont.FreeTypeFont:
 
 
 def text_watermark(img: Image.Image, text: str, *, angle: float = 0, color: str = "#14140F",
-                   opacity: float = 0.08, width_ratio: float = 0.8, spacing: float = 0.12) -> None:
+                   opacity: float = 0.08, width_ratio: float = 0.8, spacing: float = 0.12, font=None) -> None:
     """A large, faint company-name watermark across the middle of `img`
     (rotated by `angle` degrees — slanted on the Highway Code / AUP cards)."""
     text = (text or "").upper().strip()
     if not text:
         return
-    font = _lato("Black", 200)
+    font = font or _lato("Black", 200)
     probe = ImageDraw.Draw(Image.new("L", (1, 1)))
     gap = 200 * spacing
     widths = [probe.textlength(ch, font=font) for ch in text]
