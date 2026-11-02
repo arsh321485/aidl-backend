@@ -4439,8 +4439,44 @@ class LicenceDesignTests(TestCase):
                                lambda d, xy, t, *a, **k: (drawn.append(t), real(d, xy, t, *a, **k))[1]):
             li.render(name="Your Name", org_name="Org", number="AIDL-L-1234-5678", issued=now,
                       expires=now + timedelta(days=365))
-        self.assertIn("4. LICENCE NO.", drawn)
-        self.assertEqual([t for t in drawn if "STATUS" in t or t in ("ACTIVE", "EXPIRED", "SUSPENDED")], [])
+        text = "".join(drawn)                                                    # drawn letter by letter
+        self.assertIn("4. LICENCE NO.", text)
+        for word in ("STATUS", "ACTIVE", "EXPIRED", "SUSPENDED"):
+            self.assertNotIn(word, text)
+
+    def test_status_is_kept_on_the_account(self):
+        from .licensing import licence_status
+        from .serializers import AIDLUserSerializer
+        from .teams_cards import _licence_facts
+
+        self.assertEqual(licence_status(self.member), "ACTIVE")
+        self.assertEqual(AIDLUserSerializer(self.member).data["licence_status"], "ACTIVE")
+        self.member.licence_expires_at = timezone.now() - timedelta(days=1)
+        self.assertEqual(licence_status(self.member), "EXPIRED")
+        self.assertEqual(_licence_facts(full_name="", org_name="", user=self.member)["status"], "EXPIRED")
+        self.member.slack_left_at = timezone.now()
+        self.assertEqual(licence_status(self.member), "SUSPENDED")
+        self.member.licence_issued = False
+        self.assertEqual(licence_status(self.member), "NOT_ISSUED")
+
+    def test_card_matches_the_design(self):
+        import io
+
+        from PIL import Image
+
+        from . import licence_image as li
+
+        now = timezone.now()
+        png = li.render(name="Your Name", org_name="Org", number="AIDL-L-1234-5678", issued=now,
+                        expires=now + timedelta(days=365))
+        img = Image.open(io.BytesIO(png)).convert("RGB")
+        self.assertEqual(img.size, (li.W * li.S, li.H * li.S))
+        at = lambda x, y: img.getpixel((x * li.S, y * li.S))
+        self.assertEqual(at(400, 60), (0x14, 0x14, 0x0F))                        # header
+        self.assertEqual(at(780, 400), (0x16, 0x23, 0x3A))                       # navy panel
+        self.assertEqual(at(400, 425), (0x14, 0x14, 0x0F))                       # road
+        panel = img.crop((230 * li.S, 370 * li.S, 790 * li.S, 400 * li.S)).getcolors(100000)
+        self.assertGreater(len(panel), 1)                                        # the faint texture is there
 
     def test_every_case_draws_at_one_size(self):
         from . import licence_image as li
@@ -4459,7 +4495,7 @@ class LicenceDesignTests(TestCase):
 
         d = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
         name = "MAXIMILIANA FEATHERSTONEHAUGH-CHOLMONDELEY DE LA CRUZ"
-        self.assertLessEqual(d.textlength(name, font=li._fitted(d, name, "Black", 38, 537)), 537 * li.S)
+        self.assertLessEqual(d.textlength(name, font=li._fitted(d, name, "heavy", 38, 556)), 556 * li.S)
 
     def test_download_link_returns_the_licence_png(self):
         resp = self.client.get(f"/api/licenses/{self.member.licence_number}.png"
