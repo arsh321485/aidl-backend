@@ -1,0 +1,44 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Apps · AIDL{% endblock %}
+{% block body %}
+{% if requests %}
+<section class="box">
+  <h1>🛣 App requests</h1>
+  <div class="list">
+  {% for r in requests %}
+    <div>
+      <b>{{ r.row.name }}</b>{% if r.row.website %} · <span class="muted">{{ r.row.website }}</span>{% endif %}<br>
+      <span class="muted">Requested by {{ r.names }}</span>
+      <p style="margin-top:4px"><b>Use:</b> {{ r.row.purpose|default:"—" }}<br><b>Data:</b> {{ r.data }}</p>
+      {% if r.row.from_card %}<p class="muted">📘 Asked from card: {{ r.row.from_card }}</p>{% endif %}
+      <form method="post" action="{% url 'teams-app-app-decision' %}">
+        {% csrf_token %}<input type="hidden" name="request_id" value="{{ r.row.pk }}">
+        <div class="field"><label for="t{{ r.row.pk }}">Reason (the employee sees it) or your question</label><textarea id="t{{ r.row.pk }}" name="text" maxlength="1000" style="min-height:60px"></textarea></div>
+        <div class="row"><button class="btn ok" name="action" value="approve">✅ Approve</button><button class="btn no" name="action" value="reject">❌ Reject</button><button class="btn" name="action" value="info">💬 Ask for more info</button></div>
+      </form>
+    </div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+<section class="box">
+  <h1>{% if kind == "ai" %}🤖 AI applications{% else %}💻 IT applications{% endif %}</h1>
+  <p class="muted" style="margin-top:6px">{% if kind == "ai" %}The AI tools your team is allowed to use.{% else %}The IT systems your team is allowed to use alongside AI.{% endif %}</p>
+  <div class="row" style="margin-bottom:8px"><a class="btn sm" href="?kind=ai">🤖 AI</a> <a class="btn sm" href="?kind=it">💻 IT</a> <a class="btn sm" href="{% url 'teams-app-admin' %}">← Admin Center</a></div>
+  <div class="list">
+    {% for a in apps %}<div><b>{{ a.name }}</b> <span class="pill">{{ a.get_status_display }}</span><br><span class="muted">{{ a.category }}{% if a.data_allowed %} · {{ a.get_data_allowed_display }}{% endif %}</span></div>
+    {% empty %}<div class="muted">No applications yet.</div>{% endfor %}
+  </div>
+</section>
+<section class="box">
+  <h2>＋ Add {% if kind == "ai" %}an AI{% else %}an IT{% endif %} application</h2>
+  <form method="post" style="margin-top:8px">
+    {% csrf_token %}<input type="hidden" name="kind" value="{{ kind }}">
+    <div class="field"><label for="name">Application name</label><input id="name" type="text" name="name" required placeholder="e.g. Claude Enterprise"></div>
+    <div class="field"><label for="category">Category</label><select id="category" name="category" required>{% for c in categories %}<option>{{ c }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="data">Data allowed</label><select id="data" name="data">{% for d in data %}<option>{{ d }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="status">Status</label><select id="status" name="status"><option>Approved</option><option>Prohibited</option></select></div>
+    <button class="btn go">＋ Add</button>
+  </form>
+</section>
+{% endblock %}

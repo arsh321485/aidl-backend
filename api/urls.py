@@ -1,7 +1,23 @@
+from functools import wraps
+
+from django.conf import settings
+from django.http import HttpResponseNotFound
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from . import aup_views, avatar, auth_views, billing_views, licence_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views, waitlist_views, aup_upload_views
+from . import teams_portal, aup_views, avatar, auth_views, billing_views, licence_views, location_views, org_policy_views, slack_card_views, slack_interactions, slack_onboarding, teams_admin_extra_views, teams_app_views, teams_bot_views, views, waitlist_views, aup_upload_views
+
+
+def _legacy_teams(view):
+    """The older Teams endpoints trust an email in the request (and the bot endpoint
+    checks no signature), so they're off unless MS_TEAMS_LEGACY_ENABLED is set."""
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not settings.MS_TEAMS_LEGACY_ENABLED:
+            return HttpResponseNotFound()
+        return view(request, *args, **kwargs)
+    return wrapper
+
 
 urlpatterns = [
     path("", views.api_index, name="api-index"),
@@ -71,17 +87,46 @@ urlpatterns = [
     path("slack/cards/user/", slack_card_views.slack_user_cards, name="slack-user-cards"),
     path("slack/interactions/", slack_interactions.slack_interactions, name="slack-interactions"),
     path("slack/events/", slack_onboarding.slack_events, name="slack-events"),
+    # AIDL in Teams without a bot: the pages channel cards open
+    path("teams/app/", teams_portal.home, name="teams-app"),
+    path("teams/app/login/", teams_portal.login, name="teams-app-login"),
+    path("teams/app/logout/", teams_portal.logout, name="teams-app-logout"),
+    path("teams/app/signed-out/", teams_portal.signed_out, name="teams-app-signed-out"),
+    path("teams/app/dispatch/", teams_portal.dispatch_view, name="teams-app-dispatch"),
+    path("teams/app/me/", teams_portal.me, name="teams-app-me"),
+    path("teams/app/me/action/", teams_portal.me_action, name="teams-app-me-action"),
+    path("teams/app/me/cards/", teams_portal.my_cards, name="teams-app-my-cards"),
+    path("teams/app/me/cards/<str:no>/", teams_portal.card_page, name="teams-app-card"),
+    path("teams/app/me/request-app/", teams_portal.request_app, name="teams-app-request"),
+    path("teams/app/admin/", teams_portal.admin_home, name="teams-app-admin"),
+    path("teams/app/admin/action/", teams_portal.admin_action, name="teams-app-admin-action"),
+    path("teams/app/admin/timezone/", teams_portal.admin_timezone, name="teams-app-timezone"),
+    path("teams/app/admin/plans/", teams_portal.plans_link, name="teams-app-plans"),
+    path("teams/app/admin/coverage.csv", teams_portal.coverage, name="teams-app-coverage"),
+    path("teams/app/admin/policy/", teams_portal.policy, name="teams-app-policy"),
+    path("teams/app/admin/policy/upload/", teams_portal.upload_page, name="teams-app-upload"),
+    path("teams/app/admin/policy/upload/publish/", teams_portal.upload_publish, name="teams-app-upload-publish"),
+    path("teams/app/admin/policy/<int:n>/", teams_portal.policy_card, name="teams-app-policy-card"),
+    path("teams/app/admin/regulators/", teams_portal.regulators_page, name="teams-app-regulators"),
+    path("teams/app/admin/logo/", teams_portal.logo, name="teams-app-logo"),
+    path("teams/app/admin/admins/", teams_portal.admins, name="teams-app-admins"),
+    path("teams/app/admin/team/", teams_portal.team, name="teams-app-team"),
+    path("teams/app/admin/cards/", teams_portal.cards, name="teams-app-cards"),
+    path("teams/app/admin/cards/action/", teams_portal.cards_action, name="teams-app-cards-action"),
+    path("teams/app/admin/apps/", teams_portal.apps, name="teams-app-apps"),
+    path("teams/app/admin/apps/decision/", teams_portal.app_decision, name="teams-app-app-decision"),
+    path("teams/app/admin/alerts/", teams_portal.alerts, name="teams-app-alerts"),
     # AIDL Teams app — menu tabs + Adaptive Cards
     path("teams/", teams_app_views.teams_app_index, name="teams-app-index"),
     path(
         "teams/bot/messages/",
-        teams_bot_views.teams_bot_messages,
+        _legacy_teams(teams_bot_views.teams_bot_messages),
         name="teams-bot-messages",
     ),
-    path("teams/tabs/<str:tab>/", teams_app_views.teams_tab_page, name="teams-tab-page"),
+    path("teams/tabs/<str:tab>/", _legacy_teams(teams_app_views.teams_tab_page), name="teams-tab-page"),
     path(
         "teams/admin/export/",
-        teams_app_views.teams_admin_export_csv,
+        _legacy_teams(teams_app_views.teams_admin_export_csv),
         name="teams-admin-export",
     ),
     path(
@@ -156,13 +201,13 @@ urlpatterns = [
     ),
     path(
         "teams/admin/<str:tab>/",
-        teams_app_views.teams_admin_json,
+        _legacy_teams(teams_app_views.teams_admin_json),
         name="teams-admin-json",
     ),
-    path("teams/cards/<str:tab>/", teams_app_views.teams_card_json, name="teams-card-json"),
+    path("teams/cards/<str:tab>/", _legacy_teams(teams_app_views.teams_card_json), name="teams-card-json"),
     path(
         "teams/tab-content/<str:tab>/",
-        teams_app_views.teams_tab_content_json,
+        _legacy_teams(teams_app_views.teams_tab_content_json),
         name="teams-tab-content-json",
     ),
     path(
@@ -182,12 +227,12 @@ urlpatterns = [
     ),
     path(
         "teams/cards/learners-permit/download/",
-        teams_app_views.teams_licence_download,
+        _legacy_teams(teams_app_views.teams_licence_download),
         name="teams-licence-download",
     ),
     path(
         "teams/cards/traffic-light-check/rate/",
-        teams_app_views.teams_traffic_light_rate,
+        _legacy_teams(teams_app_views.teams_traffic_light_rate),
         name="teams-traffic-light-rate",
     ),
 ]

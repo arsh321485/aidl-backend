@@ -1,0 +1,13 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Company logo · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>🖼 Company logo</h1>
+  <p style="margin-top:6px">Your logo goes on every AI Driving Licence and behind every card for {{ org.name }}.</p>
+  <form method="post" enctype="multipart/form-data" style="margin-top:12px">
+    {% csrf_token %}
+    <div class="field"><label for="file">PNG or JPG, under 5 MB</label><input id="file" type="file" name="file" accept="image/png,image/jpeg" required></div>
+    <div class="row"><button class="btn go">Save logo</button> <a class="btn" href="{% url 'teams-app-admin' %}">Cancel</a></div>
+  </form>
+</section>
+{% endblock %}

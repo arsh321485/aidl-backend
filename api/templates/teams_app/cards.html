@@ -1,0 +1,77 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Approve cards · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>📋 {% if full %}Approve cards{% else %}Cards you've been asked to approve{% endif %}</h1>
+  <p style="margin-top:6px"><b>Nothing reaches your team until it's approved.</b> Approved cards go out on schedule. A card that's still waiting is postponed and follows once you approve it.</p>
+  <a class="btn" href="{% url 'teams-app-admin' %}">← Admin Center</a>
+</section>
+
+{% if full %}
+<section class="box">
+  <h2>Onboarding cards</h2>
+  <p class="muted">Needed before the programme starts.</p>
+  <div class="list">
+  {% for r in onboarding %}
+    <div class="spread"><div>{% if r.status == "approved" %}✅{% else %}⏳{% endif %} <b>{{ r.label }}</b>{% if r.by %} <span class="muted">· approved by {{ r.by }}</span>{% endif %}
+      <details><summary>👁 Preview</summary><img class="card" loading="lazy" src="{{ r.image }}" alt="{{ r.label }}"></details></div>
+      {% if r.status != "approved" %}<form method="post" action="{% url 'teams-app-cards-action' %}">{% csrf_token %}<input type="hidden" name="action" value="approve_onboarding"><input type="hidden" name="value" value="{{ r.item }}"><button class="btn sm ok">✅ Approve</button></form>{% endif %}</div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if paw %}
+<section class="box">
+  <h2>From your AI policy</h2>
+  <p class="muted">General rules as ready-made awareness cards. Approved ones follow each licence; employees press Got it.</p>
+  <div class="list">
+  {% for c in paw %}
+    <div class="spread"><div>{% if c.status == "approved" %}✅{% else %}⏳{% endif %} {{ c.icon }} <b>{{ c.title }}</b>{% if c.assignee %} <span class="muted">· 👤 {{ c.assignee }}</span>{% endif %}
+      <details><summary>👁 Preview</summary><img class="card" loading="lazy" src="{{ c.image }}" alt="{{ c.title }}"></details></div>
+      {% if c.status != "approved" %}<div class="row" style="flex:none"><form method="post" action="{% url 'teams-app-cards-action' %}">{% csrf_token %}<input type="hidden" name="action" value="approve_paw"><input type="hidden" name="value" value="{{ c.id }}"><button class="btn sm ok">✅ Approve</button></form></div>{% endif %}</div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="box">
+  <h2>Awareness cards</h2>
+  {% if full %}
+  <p class="muted">✅ {{ counts.approved }} approved · ⏳ {{ counts.waiting }} waiting · ⏭ {{ counts.skipped }} skipped · {{ counts.total }} in all</p>
+  {% if acks.topics_top %}<p class="muted">🏆 {% for t in acks.topics_top %}{{ t.0 }} {{ t.1 }}%{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+  <div class="row">
+    {% if counts.waiting %}<form method="post" action="{% url 'teams-app-cards-action' %}" onsubmit="return confirm('All {{ counts.waiting }} waiting cards will be sent to your team on schedule.')">{% csrf_token %}<input type="hidden" name="action" value="approve_all"><input type="hidden" name="month" value="{{ month }}"><button class="btn go">✅ Approve all {{ counts.waiting }} waiting</button></form>{% endif %}
+  </div>
+  <h3 style="margin-top:12px">Month {{ month }} of {{ months }}</h3>
+  <div class="row">
+    {% if prev %}<a class="btn sm" href="?month={{ prev }}">← Month {{ prev }}</a>{% endif %}
+    {% if next %}<a class="btn sm" href="?month={{ next }}">Month {{ next }} →</a>{% endif %}
+    {% if waiting_here %}<form method="post" action="{% url 'teams-app-cards-action' %}">{% csrf_token %}<input type="hidden" name="action" value="approve_month"><input type="hidden" name="month" value="{{ month }}"><button class="btn sm ok">✅ Approve month {{ month }}</button></form>
+    {% if admins %}<form method="post" action="{% url 'teams-app-cards-action' %}" class="row">{% csrf_token %}<input type="hidden" name="action" value="assign"><input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="value" value="month:{{ month }}"><select name="to" style="width:auto" aria-label="Admin">{% for a in admins %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select><button class="btn sm">👤 Ask this admin</button></form>{% endif %}{% endif %}
+  </div>
+  {% endif %}
+  <div class="list" style="margin-top:8px">
+  {% for c in cards %}
+    <div>
+      <div class="spread"><div>{% if c.approval == "approved" %}✅{% elif c.approval == "skipped" %}⏭{% else %}⏳{% endif %} <b>{{ c.position }}. {{ c.title }}</b><br>
+        <span class="muted">{{ c.category }} · {{ c.type }}{% if c.swapped_from %} · 🔄 replaces #{{ c.swapped_from }}{% endif %}{% if c.assignee %} · 👤 {{ c.assignee }}{% endif %}{% if c.rate != None %} · 📘 {{ c.rate }}% acknowledged{% endif %}</span></div>
+        <form method="post" action="{% url 'teams-app-cards-action' %}" class="row" style="flex:none">{% csrf_token %}<input type="hidden" name="value" value="{{ c.no }}"><input type="hidden" name="month" value="{{ month }}">
+          {% if c.approval != "approved" %}<button class="btn sm ok" name="action" value="approve">✅ Approve</button>{% endif %}
+          {% if c.approval != "skipped" %}<button class="btn sm" name="action" value="skip">⏭ Skip</button>{% elif full %}<button class="btn sm" name="action" value="unskip">↩️ Undo skip</button>{% endif %}
+          {% if full %}<button class="btn sm" name="action" value="swap">🔄 Swap</button>{% endif %}
+        </form></div>
+      <details><summary>👁 Preview</summary><img class="card" loading="lazy" src="{{ c.image }}" alt="{{ c.title }}"></details>
+    </div>
+  {% empty %}<div class="muted">No cards here.</div>{% endfor %}
+  </div>
+</section>
+
+{% if full and can.can_policy %}
+<section class="box">
+  <h2>Your AI policy</h2>
+  <p class="muted">{{ policy_sent }} of 14 policy cards approved{% if policy_later %} · {{ policy_later }} scheduled{% endif %}</p>
+  <a class="btn" href="{% url 'teams-app-policy' %}">📌 Add a policy card</a>
+</section>
+{% endif %}
+{% endblock %}

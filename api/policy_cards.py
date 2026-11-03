@@ -201,8 +201,11 @@ def approve(org: Organization, admin: AIDLUser | None, n: int, a: dict, send_on:
 def deliver_cards(org_pk, ns: list[int]) -> int:
     """Send these cards to everyone in the programme (or schedule them)."""
     from .admin_setup import _slack_learners
+    from .teams_channel import announce_policy, is_teams
 
     org = Organization.objects.get(pk=org_pk)
+    if is_teams(org):
+        return announce_policy(org, ns)
     count = 0
     for member in _slack_learners(org):
         for n in ns:

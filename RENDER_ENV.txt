@@ -15,7 +15,14 @@ CORS_ALLOWED_ORIGINS=https://aidl-frontend-8owk.vercel.app,http://localhost:5173
 MS_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 MICROSOFT_REDIRECT_URI=https://aidl-backend.onrender.com/api/auth/teams/callback/
 
-MS_SCOPES=User.Read,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All,User.ReadBasic.All,Mail.Send,offline_access
+MS_SCOPES=User.Read,User.ReadBasic.All,Team.ReadBasic.All,Team.Create,Channel.ReadBasic.All,Channel.Create,ChannelMessage.Send,TeamsTab.Create,TeamsTab.ReadWrite.All,Group.ReadWrite.All,Mail.Send
+# Teams runs without a bot (teams_channel.py + teams_portal.py).
+MS_TEAMS_LEGACY_ENABLED=False
+# Hourly job: Render cron job "python manage.py teams_dispatch", or any scheduler calling
+# POST https://aidl-backend.onrender.com/api/teams/app/dispatch/ with "Authorization: Bearer <this>"
+TEAMS_CRON_SECRET=
+# Card times until an admin opens the Admin Center (minutes from UTC, India = 330)
+TEAMS_DEFAULT_TZ_OFFSET_MINUTES=0
 MS_AIDL_CHANNEL_NAME=aidl dashboard
 
 # --- Invite-a-user feature (adds User.ReadBasic.All + Mail.Send + offline_access above) ---

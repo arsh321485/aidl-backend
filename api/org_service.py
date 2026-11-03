@@ -179,6 +179,7 @@ def ensure_organization_for_login(
     *,
     channel_info: dict | None = None,
     org_name: str = "",
+    tenant_id: str = "",
 ) -> Organization:
     """
     Create/link Organisation on Teams login and mark user as admin when
@@ -193,11 +194,13 @@ def ensure_organization_for_login(
     )
 
     org = None
-    if team_id:
+    if tenant_id:  # one Microsoft tenant = one organization; names can repeat across companies
+        org = Organization.objects.filter(ms_tenant_id=tenant_id, is_active=True).first()
+    if org is None and team_id:
         org = Organization.objects.filter(teams_team_id=team_id, is_active=True).first()
     if org is None and user.organization_id:
         org = Organization.objects.filter(pk=user.organization_id, is_active=True).first()
-    if org is None:
+    if org is None and not tenant_id:
         org = Organization.objects.filter(name__iexact=name, is_active=True).first()
 
     if org is None:
@@ -214,6 +217,7 @@ def ensure_organization_for_login(
             name=name,
             slug=slug,
             teams_team_id=team_id,
+            ms_tenant_id=tenant_id,
             seats_purchased=int(getattr(settings, "AIDL_DEFAULT_SEATS", 50) or 50),
             seats_renews_on=renew,
             admin_seat_limit=int(getattr(settings, "AIDL_DEFAULT_ADMIN_SEATS", 3) or 3),
@@ -226,14 +230,18 @@ def ensure_organization_for_login(
         if team_id and org.teams_team_id != team_id:
             org.teams_team_id = team_id
             changed = True
+        if tenant_id and org.ms_tenant_id != tenant_id:
+            org.ms_tenant_id = tenant_id
+            changed = True
         if changed:
-            org.save(update_fields=["teams_team_id", "updated_at"])
+            org.save(update_fields=["teams_team_id", "ms_tenant_id", "updated_at"])
 
     ensure_default_apps(org)
 
     org_pk = _org_id(org)
-    role = AIDLUser.Role.ADMIN if user.enroll_as == AIDLUser.EnrollAs.ORGANIZATION else user.role
-    # First linked member becomes admin if none exist yet.
+    # Only the first person becomes admin; choosing "Organization" at sign-in
+    # doesn't make a colleague one. After that admins are added by an admin.
+    role = user.role
     admin_count = AIDLUser.objects.filter(
         organization_id=org_pk,
         role=AIDLUser.Role.ADMIN,
@@ -241,6 +249,9 @@ def ensure_organization_for_login(
     ).count()
     if admin_count == 0:
         role = AIDLUser.Role.ADMIN
+        if not org.owner_user_id:
+            org.owner_user_id = str(user.pk)
+            org.save(update_fields=["owner_user_id", "updated_at"])
 
     user.organization_id = org_pk
     user.organization_name = org.name

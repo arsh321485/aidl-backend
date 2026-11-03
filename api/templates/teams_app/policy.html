@@ -1,0 +1,22 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Add a policy card · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>📌 Add a policy card</h1>
+  <p class="muted" style="margin-top:6px">{{ done }} of 14 approved. Each topic is one short card your team agrees to. Send as many as you like, in any order.</p>
+  <div class="list" style="margin-top:8px">
+    {% for t in topics %}
+    <div class="spread">
+      <div><b>{{ t.icon }} {{ t.title }}</b> <span class="muted">· point {{ t.n }}</span><br>
+        <span class="muted">{% if t.state == "sent" %}✅ Sent · {{ t.agreed }} agreed{% elif t.state == "scheduled" %}🗓 Goes out {{ t.day }}{% else %}{{ t.qs }} question{{ t.qs|pluralize }}{% endif %}</span></div>
+      <a class="btn sm {% if t.state == 'new' %}go{% endif %}" href="{% url 'teams-app-policy-card' t.n %}">{% if t.state == "new" %}Choose{% else %}Edit{% endif %}</a>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="row" style="margin-top:12px">
+    {% if upload_allowed %}<a class="btn" href="{% url 'teams-app-upload' %}">📤 Upload your own AUP instead</a>{% endif %}
+    <a class="btn" href="{% url 'teams-app-regulators' %}">🏛 Your regulators</a>
+    <a class="btn" href="{% url 'teams-app-admin' %}">← Admin Center</a>
+  </div>
+</section>
+{% endblock %}

@@ -87,8 +87,8 @@ def consume_oauth_state_with_payload(state: str):
     return enroll_as, payload, None
 
 
-def build_auth_url(enroll_as: str) -> dict:
-    state = create_oauth_state(enroll_as)
+def build_auth_url(enroll_as: str, payload: str = "") -> dict:
+    state = create_oauth_state(enroll_as, payload)
     app = _msal_app()
     auth_url = app.get_authorization_request_url(
         scopes=settings.MS_SCOPES,
@@ -209,6 +209,83 @@ def list_team_members(access_token: str, team_id: str) -> list:
         seen.add(key)
         result.append({"full_name": name, "email": email})
     return result
+
+
+def team_roster(access_token: str, team_id: str) -> list[dict] | None:
+    """Everyone in the Team: {user_id, email, full_name, roles}. None if Microsoft
+    couldn't say, which isn't the same as an empty team."""
+    url = f"{GRAPH_BASE}/teams/{team_id}/members"
+    out: list[dict] = []
+    try:
+        while url:
+            response = requests.get(url, headers=_graph_headers(access_token), timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            for m in data.get("value") or []:
+                if m.get("userId"):
+                    out.append({"user_id": m["userId"], "email": (m.get("email") or "").strip(),
+                                "full_name": (m.get("displayName") or "").strip(), "roles": m.get("roles") or []})
+            url = data.get("@odata.nextLink")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("team roster failed for team %s: %s", team_id, exc)
+        return None
+    return out
+
+
+def remove_team_member(access_token: str, team_id: str, user_id: str) -> bool:
+    """Take someone out of the Team (a Team is a Microsoft 365 group)."""
+    url = f"{GRAPH_BASE}/groups/{team_id}/members/{user_id}/$ref"
+    try:
+        response = requests.delete(url, headers=_graph_headers(access_token), timeout=30)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("remove team member failed: %s", exc)
+        return False
+    if response.status_code >= 400 and response.status_code != 404:
+        logger.warning("remove team member HTTP %s: %s", response.status_code, (response.text or "")[:300])
+        return False
+    return True
+
+
+def directory_users(access_token: str, limit: int = 2000) -> list[dict] | None:
+    """The company's people, for the Add people list: {user_id, email,
+    full_name}. Guests (#EXT# accounts) are left out. None on failure."""
+    url = f"{GRAPH_BASE}/users?$select=id,displayName,mail,userPrincipalName&$top=500"
+    out: list[dict] = []
+    try:
+        while url and len(out) < limit:
+            response = requests.get(url, headers=_graph_headers(access_token), timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            for u in data.get("value") or []:
+                upn = u.get("userPrincipalName") or ""
+                if u.get("id") and "#EXT#" not in upn:
+                    out.append({"user_id": u["id"], "email": u.get("mail") or upn,
+                                "full_name": u.get("displayName") or upn})
+            url = data.get("@odata.nextLink")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("directory users failed: %s", exc)
+        return None
+    return sorted(out, key=lambda u: u["full_name"].lower())
+
+
+def tenant_display_name(access_token: str) -> str:
+    """The company's name in Microsoft 365, or ""."""
+    try:
+        response = requests.get(f"{GRAPH_BASE}/organization?$select=displayName",
+                                headers=_graph_headers(access_token), timeout=20)
+        response.raise_for_status()
+        return ((response.json().get("value") or [{}])[0].get("displayName") or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tenant name lookup failed: %s", exc)
+        return ""
+
+
+def in_team(access_token: str, team_id: str) -> bool:
+    try:
+        return any(t.get("id") == team_id for t in list_joined_teams(access_token))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("joined teams lookup failed: %s", exc)
+        return False
 
 
 def team_is_accessible(access_token: str, team_id: str) -> bool:
@@ -349,14 +426,14 @@ def create_aidl_team(access_token: str, display_name: str) -> str:
     return team_id
 
 
-def ensure_aidl_team(access_token: str) -> str | None:
+def ensure_aidl_team(access_token: str, preferred: str = "") -> str | None:
     """
     Resolve the AIDL Microsoft Team id:
-    1) MS_AIDL_TEAM_ID override if set and still accessible
+    1) The organization's own team, or the MS_AIDL_TEAM_ID override, if still accessible
     2) Else find joined team named MS_AIDL_TEAM_NAME (default "AIDL")
     3) Else create that team (when MS_AIDL_AUTO_CREATE_TEAM is true)
     """
-    override = (getattr(settings, "MS_AIDL_TEAM_ID", None) or "").strip()
+    override = (preferred or getattr(settings, "MS_AIDL_TEAM_ID", None) or "").strip()
     if override:
         if team_is_accessible(access_token, override):
             return override
@@ -436,7 +513,7 @@ def _list_channels_with_retry(
     return [], False
 
 
-def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
+def ensure_aidl_channel(access_token: str, email: str = "", team_id: str = "") -> dict | None:
     """
     Ensure Team "AIDL" exists (or MS_AIDL_TEAM_ID), then ensure channel
     "aidl dashboard" inside it. Returns deep-link payload or None on failure.
@@ -446,7 +523,7 @@ def ensure_aidl_channel(access_token: str, email: str = "") -> dict | None:
         return None
 
     try:
-        team_id = ensure_aidl_team(access_token)
+        team_id = ensure_aidl_team(access_token, team_id)
         if not team_id:
             logger.warning(
                 "AIDL team not available (set MS_AIDL_TEAM_ID or enable auto-create + Team.Create)"
@@ -591,6 +668,27 @@ def resolve_teams_url(
     return build_teams_launch_url(email)
 
 
+def seal_refresh_token(token: str) -> str:
+    """Refresh tokens are encrypted in the database."""
+    from .slack_client import encrypt_token
+
+    return encrypt_token(token)
+
+
+def open_refresh_token(stored: str) -> str:
+    """Tokens saved before encryption are returned as they are."""
+    from cryptography.fernet import InvalidToken
+
+    from .slack_client import _fernet
+
+    if not stored:
+        return ""
+    try:
+        return _fernet().decrypt(stored.encode()).decode()
+    except (InvalidToken, ValueError):
+        return stored
+
+
 def refresh_graph_token(refresh_token: str) -> dict:
     """
     Mint a fresh Graph access token from a stored refresh token (requires the
@@ -612,7 +710,7 @@ def get_access_token_for_user(user) -> str:
     rotated refresh token current so the next call doesn't fail once the
     old one expires. Returns "" if the user has none stored (hasn't logged
     in since offline_access was added) or the refresh fails."""
-    refresh_token = getattr(user, "ms_refresh_token", "") or ""
+    refresh_token = open_refresh_token(getattr(user, "ms_refresh_token", "") or "")
     if not refresh_token:
         return ""
     token_result = refresh_graph_token(refresh_token)
@@ -627,7 +725,7 @@ def get_access_token_for_user(user) -> str:
 
     new_refresh = token_result.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
-        user.ms_refresh_token = new_refresh
+        user.ms_refresh_token = seal_refresh_token(new_refresh)
         user.save(update_fields=["ms_refresh_token", "updated_at"])
 
     return access_token

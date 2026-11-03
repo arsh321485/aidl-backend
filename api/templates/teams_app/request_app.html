@@ -1,0 +1,21 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Request an app · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>🛣 Request an app</h1>
+  <p class="muted" style="margin-top:6px">Ask your AIDL admin to approve an AI tool or app. You'll get the answer by email.</p>
+  {% if card_title %}<p class="muted">📘 Asked from card: <b>{{ card_title }}</b></p>{% endif %}
+  {% if error %}<div class="error" role="alert" style="margin:10px 0">{{ error }}</div>{% endif %}
+  <form method="post" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="from_card" value="{{ from_card }}">
+    <div class="field"><label for="name">App name</label><input id="name" type="text" name="name" maxlength="100" required value="{{ form.name }}" placeholder="e.g. Perplexity"></div>
+    <div class="field"><label for="website">Website (optional)</label><input id="website" type="text" name="website" maxlength="300" value="{{ form.website }}" placeholder="https://…"></div>
+    <div class="field"><label for="purpose">What would you use it for?</label><textarea id="purpose" name="purpose" maxlength="1000" required>{{ form.purpose }}</textarea></div>
+    <div class="field"><label for="data">What data would you put into it?</label>
+      <select id="data" name="data" required><option value="">Choose one</option>
+        {% for key, label in data %}<option value="{{ key }}"{% if form.data == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></div>
+    <button class="btn go">Send request</button>
+  </form>
+</section>
+{% endblock %}

@@ -151,7 +151,11 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
     """Schedule the learner's approved cards. Returns {'sent_now': n,
     'scheduled': n} (or {'skipped': reason})."""
     from .card_approval import deliverable, sequence
+    from .teams_channel import is_teams
+    from .teams_channel import sync_package as sync_teams
 
+    if is_teams(org):
+        return sync_teams(org, member, full=full)
     if not member.licence_issued:
         return {"skipped": "no_licence"}
     if member.slack_left_at:

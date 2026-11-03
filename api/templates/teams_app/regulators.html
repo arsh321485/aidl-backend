@@ -1,0 +1,19 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Your regulators · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>🏛 Regulators for {{ org.name }}</h1>
+  <p class="muted" style="margin-top:6px">{{ where }} · {{ co.industry|default:"—" }}</p>
+  <div class="list">
+    {% for r in regs %}
+    <div><b>{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}</b><br>Oversees {{ r.oversees }}.
+      {% if r.when %}<br><span class="muted">May apply if {{ r.when }}.</span>{% endif %}
+      {% if not r.reviewed %}<br><span class="pill">DRAFT · not yet reviewed</span>{% endif %}</div>
+    {% empty %}
+    <div>AIDL's compliance team is preparing the regulator details for your countries and industry. They'll appear here once they've been reviewed, so there's nothing to do on your side.</div>
+    {% endfor %}
+  </div>
+  <p class="muted" style="margin-top:10px">Regulators that may oversee how you use AI and data, from your countries and industry. Prepared and kept up to date by AIDL. Not legal advice. Only admins see this.</p>
+  <div class="row"><a class="btn" href="{% url 'teams-app-policy' %}?company=1">✏️ Change country or industry</a> <a class="btn" href="{% url 'teams-app-policy' %}">← Policy cards</a></div>
+</section>
+{% endblock %}

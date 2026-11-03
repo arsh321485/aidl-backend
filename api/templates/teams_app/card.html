@@ -1,0 +1,17 @@
+{% extends "teams_app/base.html" %}
+{% block title %}{{ card.title }} · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <p class="muted">📘 Card {{ row.post_order }} · {{ card.category }} · {{ card.type }}</p>
+  <h1>{{ card.title }}</h1>
+  <p style="margin-top:6px">{{ card.hook }}</p>
+  <img class="card" src="{{ image }}" alt="{{ card.title }}">
+  {% if local %}<p style="margin-top:10px">{{ local|linebreaksbr }}</p>{% endif %}
+  <div class="row" style="margin-top:14px">
+    {% if row.acked_at %}<span class="pill">✅ Acknowledged · {{ row.acked_at|date:"j M" }}</span>
+    {% else %}<form method="post">{% csrf_token %}<button class="btn ok">✅ Got it</button></form>{% endif %}
+    <a class="btn" href="{% url 'teams-app-my-cards' %}">📚 My cards</a>
+    <a class="btn" href="{% url 'teams-app-request' %}?from={{ card.no }}">🛣 Request an app</a>
+  </div>
+</section>
+{% endblock %}

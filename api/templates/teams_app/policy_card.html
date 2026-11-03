@@ -1,0 +1,67 @@
+{% extends "teams_app/base.html" %}
+{% block title %}{{ title }} · AIDL{% endblock %}
+{% block body %}
+<form method="post" id="pc" class="box">
+  {% csrf_token %}
+  <h1>{{ icon }} {{ title }}</h1>
+  <p class="muted" style="margin-top:6px">Point {{ n }} of 14{% if existing %} · ✏️ Already sent. Approving sends a new version that everyone agrees to again.{% endif %}</p>
+  {% if errors %}<div class="error" role="alert" style="margin:10px 0"><b>Please check:</b> {% for e in errors %}{{ e }} {% endfor %}</div>{% endif %}
+  {% for q in questions %}
+  <div class="field" style="margin-top:14px">
+    {% if q.type == "single" or q.type == "multi" %}
+      <div style="font-weight:600">{{ q.text }}{% if not q.required %} <span class="muted">(optional)</span>{% endif %}</div>
+      {% if q.help %}<div class="muted">{{ q.help }}</div>{% endif %}
+      {% for o in q.options %}
+      <label class="check"><input class="redraw" type="{% if q.type == 'multi' %}checkbox{% else %}radio{% endif %}" name="q|{{ q.id }}" value="{{ o.id }}"{% if o.checked %} checked{% endif %}> {{ o.text }}</label>
+      {% endfor %}
+    {% else %}
+      <label for="q{{ q.id }}">{{ q.text }}{% if not q.required %} <span class="muted">(optional)</span>{% endif %}</label>
+      {% if q.help %}<div class="muted">{{ q.help }}</div>{% endif %}
+      <input id="q{{ q.id }}" class="redraw" type="{% if q.type == 'date' %}date{% elif q.type == 'email' %}email{% else %}text{% endif %}" name="q|{{ q.id }}" value="{{ q.value|default:'' }}"{% if q.example %} placeholder="e.g. {{ q.example }}"{% endif %}>
+    {% endif %}
+    {% for f in q.fills %}
+      <label for="f{{ f.id }}">{{ f.label }}</label>
+      <input id="f{{ f.id }}" class="redraw" type="text" name="f|{{ f.id }}" value="{{ f.value }}">
+    {% endfor %}
+    {% if q.show_tools %}
+      <input type="hidden" name="tools_shown" value="1">
+      <details open style="margin-top:8px"><summary>Your approved AI tools</summary>
+        <div class="grid2" style="margin-top:8px">{% for t in tools %}<label class="check"><input class="redraw" type="checkbox" name="tools" value="{{ t.name }}"{% if t.checked %} checked{% endif %}> {{ t.name }}</label>{% endfor %}</div>
+      </details>
+      <label for="paste">Or paste a list (one per line, or separated by commas)</label>
+      <textarea id="paste" class="redraw" name="paste"></textarea>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <hr style="border:0;border-top:2px solid var(--ink);margin:16px 0">
+  <h3>Your team will see</h3>
+  {% for line in preview %}<blockquote>{{ line }}</blockquote>{% empty %}<p class="muted">Answer the questions to write this card.</p>{% endfor %}
+  <p class="muted">Each person presses I agree. It counts towards their AI Driving Licence.</p>
+  <hr style="border:0;border-top:2px solid var(--ink);margin:16px 0">
+  <div class="field">
+    <div style="font-weight:600">When should it go out?</div>
+    <label class="check"><input class="redraw" type="radio" name="when" value="today"{% if when == "today" %} checked{% endif %}> Send now</label>
+    <label class="check"><input class="redraw" type="radio" name="when" value="day"{% if when == "day" %} checked{% endif %}> Pick a day <span class="muted">· at 10:00</span></label>
+    {% if when == "day" %}<label for="day">Day</label><input id="day" type="date" name="day" value="{{ day }}">{% endif %}
+  </div>
+  <p class="muted">AIDL writes the card from your answers. Check it against what your regulators expect. Not legal advice.</p>
+  <div class="row">
+    <button class="btn ok" name="action" value="approve">{% if when == "today" %}Approve &amp; send{% else %}Approve &amp; schedule{% endif %}</button>
+    <a class="btn" href="{% url 'teams-app-policy' %}">← Topics</a>
+  </div>
+</form>
+{% endblock %}
+{% block script %}
+<script>
+// A changed answer can show or hide other questions and changes the wording: save and redraw, keeping your place.
+(function () {
+  var form = document.getElementById("pc"), key = "aidl-pc-scroll";
+  try { var y = sessionStorage.getItem(key); if (y) { window.scrollTo(0, +y); sessionStorage.removeItem(key); } } catch (e) {}
+  form.addEventListener("change", function (e) {
+    if (!e.target.classList.contains("redraw")) return;
+    try { sessionStorage.setItem(key, String(window.scrollY)); } catch (err) {}
+    form.submit();
+  });
+})();
+</script>
+{% endblock %}

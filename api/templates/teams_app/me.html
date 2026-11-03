@@ -1,0 +1,110 @@
+{% extends "teams_app/base.html" %}
+{% block title %}My AI Driving Licence · AIDL{% endblock %}
+{% block body %}
+{% if welcome %}
+<section class="box">
+  <h1>👋 Hi {{ first }}, welcome to your AI Driving Licence</h1>
+  <p class="muted" style="margin-top:6px">{{ org.name }} · AI Driving Licence programme · {{ org.plan|upper }}</p>
+  <p>{{ org.name }} uses AI every day. AIDL helps you use it safely and confidently, one short card at a time.</p>
+  <div class="grid2" style="margin:12px 0">
+    <div><b>Takes</b><br>About 10 min</div>
+    <div><b>You get</b><br>AI Driving Licence</div>
+    <div><b>After that</b><br>{{ cadence }}</div>
+  </div>
+  <h3>Your route today</h3>
+  <div class="list">
+    {% if policy_count %}<div>📜 <b>{{ org.name }} policy</b> · {{ policy_count }} short card{{ policy_count|pluralize }} to agree to</div>{% endif %}
+    <div>🚦 <b>Traffic Light Check</b> · what's safe to paste</div>
+    <div>📖 <b>The Highway Code</b> · 5 everyday rules</div>
+  </div>
+  <form method="post" action="{% url 'teams-app-me-action' %}" class="row" style="margin-top:14px">
+    {% csrf_token %}<input type="hidden" name="action" value="start">
+    <button class="btn go">Let's go →</button>
+    {% if not user.avatar_data %}<a class="btn" href="{{ avatar_url }}">🎨 Create my avatar</a>{% endif %}
+  </form>
+  <p class="muted" style="margin-top:12px">🔒 Your progress is private to you and your AIDL admin.</p>
+</section>
+{% else %}
+
+{% if licence %}
+<section class="box done">
+  <h1>🎉 You're road-ready, {{ first }}!</h1>
+  <p class="muted" style="margin-top:6px">Traffic Light, Highway Code and every policy card agreed.</p>
+  <p>Here's your AI Driving Licence{% if user.licence_expires_at %}, valid till <b>{{ user.licence_expires_at|date:"j F Y" }}</b>{% endif %}.</p>
+  <img class="lic" src="{{ licence.image }}" alt="AI Driving Licence {{ user.licence_number }}">
+  <div class="row" style="margin-top:14px">
+    <a class="btn go" href="{{ licence.download }}">📥 Download licence</a>
+    <a class="btn" href="{{ avatar_url }}">🎨 Change avatar</a>
+    <a class="btn" href="{{ licence.share }}" target="_blank" rel="noopener">🔗 Share on LinkedIn</a>
+    <a class="btn" href="{% url 'teams-app-my-cards' %}">📚 My cards</a>
+    <a class="btn" href="{% url 'teams-app-request' %}">🛣 Request an app</a>
+  </div>
+  <p class="muted" style="margin-top:12px">🗓 {% if licence.next %}Your next card arrives {{ licence.next.post_at|date:"j F Y" }}.{% else %}Your next card is on its way.{% endif %} Keep the Traffic Light and Highway Code cards handy.</p>
+</section>
+{% endif %}
+
+{% for c in policy %}
+<section class="box">
+  <p class="muted"><b>Policy card · {{ c.icon }} {{ c.title }}</b> · {{ org.name }} AI policy</p>
+  <img class="card" src="{{ c.image }}" alt="Policy card: {{ c.title }}">
+  <form method="post" action="{% url 'teams-app-me-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="agree"><input type="hidden" name="n" value="{{ c.n }}"><input type="hidden" name="version" value="{{ c.version }}">
+    <button class="btn ok">✅ I agree</button>
+  </form>
+  <p class="muted" style="margin-top:8px">Your agreement is time-stamped and saved to your AIDL record.</p>
+</section>
+{% endfor %}
+
+{% if waiting %}
+<section class="box">
+  <h2>⏳ Your next card is on its way</h2>
+  <p>Your AIDL admin is approving it for {{ org.name }}. It appears here as soon as it's approved, so there's nothing to do until then.</p>
+</section>
+{% elif traffic %}
+<section class="box">
+  <p class="muted"><b>🚦 Traffic Light Check</b> · Before you paste anything</p>
+  <img class="card" src="{{ traffic }}" alt="Traffic Light Check">
+  <form method="post" action="{% url 'teams-app-me-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="traffic_light">
+    <button class="btn ok">Got it. Next: The Highway Code →</button>
+  </form>
+</section>
+{% elif highway %}
+<section class="box">
+  <p class="muted"><b>📖 The Highway Code</b> · Section A · Learner Rules</p>
+  <img class="card" src="{{ highway }}" alt="The Highway Code">
+  <form method="post" action="{% url 'teams-app-me-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="highway_code">
+    <button class="btn ok">Got it. Get my licence →</button>
+  </form>
+</section>
+{% elif stage == "policy" %}
+<section class="box">
+  <h2>📜 One more step for your licence</h2>
+  <p>Agree to the policy card{{ policy|length|pluralize }} above and your AI Driving Licence is issued.</p>
+</section>
+{% elif stage == "licence" and not user.licence_issued %}
+<section class="box">
+  <h2>⏳ Almost there</h2>
+  <p>You've finished every card. All licence seats on {{ org.name }}'s plan are in use, so your licence will be issued as soon as one is free. Your AIDL admin has been told.</p>
+</section>
+{% elif stage == "licence" and not user.avatar_data %}
+<section class="box">
+  <h2>🎨 One last step: your licence avatar</h2>
+  <p>You've earned your AI Driving Licence, {{ first }}! Create the avatar that goes on it.</p>
+  <a class="btn go" href="{{ avatar_url }}">🎨 Create my avatar</a>
+</section>
+{% endif %}
+
+{% for c in awareness %}
+<section class="box">
+  <p class="muted"><b>AI awareness · {{ c.icon }} {{ c.title }}</b></p>
+  <img class="card" src="{{ c.image }}" alt="{{ c.title }}">
+  <form method="post" action="{% url 'teams-app-me-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="paw"><input type="hidden" name="id" value="{{ c.id }}">
+    <button class="btn ok">✅ Got it</button>
+  </form>
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

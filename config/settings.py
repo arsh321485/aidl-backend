@@ -109,10 +109,11 @@ _DEFAULT_MS_SCOPES = (
     "Mail.Send,"
     "offline_access"
 )
+# MSAL adds openid, profile and offline_access itself and refuses them in this list.
 MS_SCOPES = [
     s.strip()
     for s in os.getenv("MS_SCOPES", _DEFAULT_MS_SCOPES).split(",")
-    if s.strip()
+    if s.strip() and s.strip().lower() not in ("openid", "profile", "offline_access")
 ]
 
 # AIDL Microsoft Team + channel (auto-created on login when possible)
@@ -157,6 +158,14 @@ MS_AIDL_LAND_ON_POSTS = os.getenv("MS_AIDL_LAND_ON_POSTS", "True").lower() in (
 MS_SEND_ADMIN_CARD_EVERY_LOGIN = os.getenv(
     "MS_SEND_ADMIN_CARD_EVERY_LOGIN", "True"
 ).lower() in ("1", "true", "yes")
+# Teams runs without a bot (teams_channel.py, teams_portal.py). The older Teams
+# endpoints trust an email in the request and the bot endpoint checks no
+# signature, so they stay off unless this is set.
+MS_TEAMS_LEGACY_ENABLED = os.getenv("MS_TEAMS_LEGACY_ENABLED", "False").lower() in ("1", "true", "yes")
+# Sent as "Authorization: Bearer ..." to POST /api/teams/app/dispatch/ (hourly job).
+TEAMS_CRON_SECRET = os.getenv("TEAMS_CRON_SECRET", "")
+# Card times for a company whose admin hasn't opened the Admin Center yet (minutes from UTC).
+TEAMS_DEFAULT_TZ_OFFSET_MINUTES = int(os.getenv("TEAMS_DEFAULT_TZ_OFFSET_MINUTES", "0") or 0)
 MS_BOT_APP_ID = (os.getenv("MS_BOT_APP_ID") or os.getenv("MS_CLIENT_ID") or "").strip()
 MS_BOT_APP_PASSWORD = (
     os.getenv("MS_BOT_APP_PASSWORD") or os.getenv("MS_CLIENT_SECRET") or ""

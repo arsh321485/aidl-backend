@@ -75,8 +75,11 @@ def _values(view: dict) -> dict:
 def _approvers(org: Organization) -> list[AIDLUser]:
     from .admin_perms import has
 
-    admins = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True,
-                                     microsoft_id__startswith="slack:")
+    from .teams_channel import is_teams
+
+    admins = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True)
+    if not is_teams(org):
+        admins = admins.filter(microsoft_id__startswith="slack:")
     return [a for a in admins if has(org, a, "approve_apps")]
 
 
@@ -122,6 +125,11 @@ def _after_request(org: Organization, member: AIDLUser, req: AppRequest) -> None
 
 
 def _dm(org: Organization, user: AIDLUser, text: str) -> dict:
+    from .teams_channel import email, is_teams
+
+    if is_teams(org):  # no DMs without a bot: answers go by email
+        email(user, "AIDL: your app request", text.replace(" here.", ".").replace(" here in Slack.", "."))
+        return {}
     uid = _slack_id(user)
     if not uid:
         return {}
@@ -166,6 +174,14 @@ def admin_blocks(req: AppRequest) -> list:
 
 
 def notify_approvers(org: Organization, req: AppRequest) -> None:
+    from .teams_channel import email, is_teams
+
+    if is_teams(org):
+        names = ", ".join(p.full_name or p.email for p in _requesters(req)) or "An employee"
+        for admin in _approvers(org):
+            email(admin, f"AIDL app request: {req.name}", f"{names} asked for {req.name}.\nUse: {req.purpose or '—'}\n"
+                  f"Data: {DATA.get(req.data_class, ('', ''))[0]}", "admin/apps/")
+        return
     token = slack_client.bot_token(org)
     refs = []
     for admin in _approvers(org):
@@ -236,7 +252,8 @@ def reject(org: Organization, req: AppRequest, admin: AIDLUser, reason: str) -> 
 def ask_info(org: Organization, req: AppRequest, admin: AIDLUser, question: str) -> None:
     for person in _requesters(req):
         _dm(org, person, f"💬 *{admin.full_name or admin.email}* has a question about your request for "
-                         f"*{req.name}*:\n> {question}\nReply to them directly in Slack.")
+                         f"*{req.name}*:\n> {question}\nReply to them directly"
+                         + (" in Slack." if org.slack_team_id else "."))
 
 
 def reason_view(req: AppRequest, kind: str) -> dict:

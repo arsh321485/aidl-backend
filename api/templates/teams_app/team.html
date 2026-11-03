@@ -1,0 +1,54 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Team · AIDL{% endblock %}
+{% block body %}
+{% if can.can_team %}
+<section class="box">
+  <h1>👥 Add your team</h1>
+  <p class="muted" style="margin-top:6px">{{ plan.free }} seat{{ plan.free|pluralize }} left on your {{ plan.label }} plan ({{ plan.used }} of {{ plan.limit }} used). AIDL adds them to the AIDL team and each one gets their welcome.</p>
+  {% if directory_failed %}<p class="error">AIDL couldn't load your company's people from Microsoft. Please <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-team' %}">sign in again</a>.</p>
+  {% elif not people %}<p style="margin-top:8px">✅ Everyone in your company is already in the programme.</p>
+  {% else %}
+  <form method="post" style="margin-top:10px" id="add">
+    {% csrf_token %}
+    <div class="field"><label for="find">Search people</label><input id="find" type="search" placeholder="Type a name or email"></div>
+    <label class="check"><input type="checkbox" name="everyone" value="1" id="all"> <b>✅ Select all people ({{ people|length }})</b></label>
+    <div id="people" style="max-height:320px;overflow:auto;border:2px solid var(--ink);padding:8px;margin-bottom:12px">
+      {% for p in people %}<label class="check person"><input type="checkbox" name="people" value="{{ p.user_id }}"> <span>{{ p.full_name }} <span class="muted">{{ p.email }}</span></span></label>{% endfor %}
+    </div>
+    <button class="btn go">Add people</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+<section class="box">
+  <h2>Team progress</h2>
+  <p class="muted">{{ progress.members }} member{{ progress.members|pluralize }} · 🪪 {{ progress.licensed }} licensed · 📖 {{ progress.highway_code }} Highway Code · 🚦 {{ progress.traffic_light }} Traffic Light · 📄 {{ progress.aup }} policy{% if progress.waiting_seat %} · ⏳ {{ progress.waiting_seat }} waiting for a seat{% endif %}</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Name</th><th>Status</th><th>Policy cards</th><th>Cards acknowledged</th><th></th></tr></thead>
+    <tbody>
+    {% for r in progress.rows %}
+      <tr><td><b>{{ r.name }}</b><br><span class="muted">{{ r.email }}</span></td><td>{{ r.label }}</td><td>{{ r.aup_points }}</td>
+        <td>{% if r.acks %}{{ r.acks.0 }} of {{ r.acks.1 }}{% if r.acks.2 %} · ⏰ {{ r.acks.2 }} overdue{% endif %}{% else %}—{% endif %}</td>
+        <td><form method="post">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="user_id" value="{{ r.id }}"><button class="btn sm no">Remove</button></form></td></tr>
+    {% empty %}<tr><td colspan="5" class="muted">Nobody yet.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% if progress.removed %}<h3 style="margin-top:12px">Removed</h3>
+  <div class="list">{% for m in progress.removed %}<div>{{ m.name }} <span class="muted">{{ m.email }}{% if m.licensed %} · licence suspended, still holds a seat{% endif %}</span></div>{% endfor %}</div>{% endif %}
+  <div class="row" style="margin-top:12px"><a class="btn" href="{% url 'teams-app-coverage' %}">⬇ Export coverage</a> <a class="btn" href="{% url 'teams-app-admin' %}">← Admin Center</a></div>
+</section>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  var find = document.getElementById("find"), all = document.getElementById("all");
+  if (find) find.addEventListener("input", function () {
+    var q = find.value.toLowerCase();
+    document.querySelectorAll(".person").forEach(function (p) { p.hidden = q && p.textContent.toLowerCase().indexOf(q) < 0; });
+  });
+  if (all) all.addEventListener("change", function () {
+    document.querySelectorAll("[name=people]").forEach(function (c) { c.checked = all.checked; });
+  });
+})();
+</script>
+{% endblock %}

@@ -95,6 +95,13 @@ def _after_save(member: AIDLUser) -> None:
         post_licence(member)
 
 
+def _return_url(member: AIDLUser) -> str:
+    """Teams people go back to their AIDL page; Slack people just close the tab."""
+    if member.microsoft_id.startswith("slack:") or member.microsoft_id.startswith("local:"):
+        return ""
+    return f"{settings.BACKEND_URL}/api/teams/app/me/"
+
+
 # ---------- views ----------
 
 def avatar_start(request):
@@ -117,7 +124,7 @@ def avatar_api(request):
     token = request.GET.get("token") if request.method == "GET" else (request.data or {}).get("token")
     member = _member_for(token or "")
     if member is None:
-        return Response({"detail": "This link has expired. Open “Create my avatar” in Slack again."},
+        return Response({"detail": "This link has expired. Open “Create my avatar” again."},
                         status=status.HTTP_401_UNAUTHORIZED)
     if request.method == "GET":
         try:
@@ -125,7 +132,7 @@ def avatar_api(request):
         except ValueError:
             config = None
         return Response({"name": member.full_name or member.email, "has_avatar": bool(member.avatar_data),
-                         "config": config, "licensed": member.licence_issued})
+                         "config": config, "licensed": member.licence_issued, "return_url": _return_url(member)})
     raw = str(request.data.get("png") or "")
     if "," in raw[:100]:
         raw = raw.split(",", 1)[1]  # data:image/png;base64,...
@@ -142,6 +149,9 @@ def avatar_api(request):
     config = request.data.get("config")
     save(member, png, config if isinstance(config, dict) else None)
     _after_save(member)
-    return Response({"ok": True, "licensed": member.licence_issued,
-                     "message": "Your avatar is saved — your AI Driving License is in Slack." if member.licence_issued
-                     else "Your avatar is saved."})
+    if member.microsoft_id.startswith("slack:"):
+        message = "Your avatar is saved — your AI Driving License is in Slack."
+    else:
+        message = "Your avatar is saved — your AI Driving Licence is ready in AIDL."
+    return Response({"ok": True, "licensed": member.licence_issued, "return_url": _return_url(member),
+                     "message": message if member.licence_issued else "Your avatar is saved."})

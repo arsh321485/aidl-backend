@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.http import HttpResponseRedirect
+from django.urls import reverse
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
@@ -21,19 +22,21 @@ from .microsoft_auth import (
     consume_oauth_state_with_payload,
     build_auth_url,
     build_teams_launch_url,
-    consume_oauth_state,
     ensure_aidl_channel,
     exchange_code_for_token,
     fetch_microsoft_profile,
     microsoft_configured,
     resolve_teams_url,
+    seal_refresh_token,
+    tenant_display_name,
 )
 from .slack_auth import build_slack_auth_url, exchange_slack_code, fetch_slack_profile, slack_configured
 from . import auth_verification, slack_client
 from .org_policy import PolicyAnswersError, clean_answers, policy_completed, save_answers
 from .teams_cards import org_display_name
 from .teams_channel_tabs import is_aidl_teams_landing_url
-from .org_service import ensure_organization_for_login, get_organization_for_user, replace_welcome_card
+from .org_service import ensure_organization_for_login, get_organization_for_user
+from .teams_channel import PERSONAL_TENANT
 from .models import AIDLUser, Invitation, Organization
 from .schema import AuthResponseDoc, ErrorDoc, MeDoc, MessageDoc, RefreshRequestDoc, TokenPairDoc
 from .serializers import AIDLUserSerializer, LoginSerializer, SignupSerializer
@@ -86,7 +89,7 @@ def _upsert_user(profile: dict, enroll_as: str, refresh_token: str = "") -> tupl
     # Only overwrite when we actually got one this login (offline_access scope) —
     # a token exchange without it must not wipe out a previously stored one.
     if refresh_token:
-        defaults["ms_refresh_token"] = refresh_token
+        defaults["ms_refresh_token"] = seal_refresh_token(refresh_token)
     user, created = AIDLUser.objects.update_or_create(
         microsoft_id=profile["microsoft_id"],
         defaults=defaults,
@@ -309,7 +312,7 @@ def teams_callback(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    enroll_as, state_error = consume_oauth_state(state)
+    enroll_as, state_payload, state_error = consume_oauth_state_with_payload(state)
     if not enroll_as:
         enroll_as = _normalize_enroll_as(
             request.query_params.get("enroll_as") or "organization"
@@ -341,19 +344,41 @@ def teams_callback(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # A sign-in started by the Teams pages only identifies the person.
+    if state_payload.startswith("app:"):
+        from .teams_portal import finish_login
+
+        return finish_login(request, token_result, profile, state_payload[4:])
+
+    tenant_id = (token_result.get("id_token_claims") or {}).get("tid", "")
+    if tenant_id == PERSONAL_TENANT:  # personal Microsoft accounts have no Teams organization
+        return _teams_error_redirect("work_account_required",
+                                     "Please sign in with your work Microsoft account. Personal accounts can't use AIDL in Teams.")
+    existing_org = Organization.objects.filter(ms_tenant_id=tenant_id, is_active=True).first() if tenant_id else None
+    known = AIDLUser.objects.filter(microsoft_id=profile["microsoft_id"]).first()
+    joining = (existing_org is not None and (known is None or known.organization_id != str(existing_org.pk)
+                                             or known.role != AIDLUser.Role.ADMIN))
+    if joining:  # the company already runs AIDL: a colleague joins it, they don't start another
+        from .teams_portal import finish_login
+
+        return finish_login(request, token_result, profile, reverse("teams-app"))
+
     user, is_new_signup = _upsert_user(profile, enroll_as, token_result.get("refresh_token") or "")
     old_team_id = getattr(user, "teams_team_id", "") or ""
     old_channel_id = getattr(user, "teams_channel_id", "") or ""
 
-    channel_info = ensure_aidl_channel(ms_token, email=user.email)
+    channel_info = ensure_aidl_channel(ms_token, email=user.email,
+                                       team_id=existing_org.teams_team_id if existing_org else "")
     _save_channel_on_user(user, channel_info)
     # Refresh user after channel ids saved
     user.refresh_from_db()
+    org = None
     try:
-        ensure_organization_for_login(
+        org = ensure_organization_for_login(
             user,
             channel_info=channel_info or {},
-            org_name=org_display_name(),
+            org_name=tenant_display_name(ms_token) or user.full_name or org_display_name(),
+            tenant_id=tenant_id,
         )
         user.refresh_from_db()
     except Exception as exc:  # noqa: BLE001
@@ -378,12 +403,7 @@ def teams_callback(request):
         # the org, so only an admin's login should replace what's posted
         # there. teams_tab_page routes "home" to this dashboard instead of
         # Admin Center's Home once it sees this user's role is Learner.
-        from urllib.parse import urlencode
-
-        teams_base = (getattr(settings, "MS_TEAMS_APP_BASE_URL", "") or "").rstrip("/")
-        landing_url = f"{teams_base}/tabs/home/?" + urlencode(
-            {"email": user.email, "full_name": user.full_name}
-        )
+        landing_url = f"{settings.BACKEND_URL}{reverse('teams-app')}"
 
     welcome_card_sent = False
     welcome_card_error = ""
@@ -397,19 +417,13 @@ def teams_callback(request):
             or (channel_info.get("channel_id") or "") != old_channel_id
         )
         should_send_welcome = bool(send_every_login) or is_new_signup or channel_recreated
-        if should_send_welcome:
-            welcome_result = replace_welcome_card(
-                ms_token,
-                team_id=channel_info.get("team_id") or "",
-                channel_id=channel_info.get("channel_id") or "",
-                full_name=user.full_name,
-                org_name=user.organization_name or org_display_name(),
-                email=user.email,
-                user=user,
-                channel_just_created=bool(
-                    channel_info.get("channel_just_created")
-                ),
-            )
+        if should_send_welcome and org is not None:
+            from .teams_channel import forget_token, publish_home
+
+            forget_token(org)
+            org.teams_welcome_channel_id = channel_info.get("channel_id") or ""
+            org.save(update_fields=["teams_welcome_channel_id", "updated_at"])
+            welcome_result = publish_home(org, ms_token)
             welcome_card_sent = bool(welcome_result and welcome_result.get("ok"))
             if not welcome_card_sent:
                 welcome_card_error = (
@@ -420,7 +434,9 @@ def teams_callback(request):
         tab_info = channel_info.get("channel_tabs") or {}
         channel_tabs_created = len(tab_info.get("tabs_created") or [])
 
-    return _redirect_with_tokens(
+    from .teams_portal import set_session
+
+    return set_session(_redirect_with_tokens(
         user,
         mode="microsoft",
         ms_access_token=ms_token,
@@ -433,7 +449,7 @@ def teams_callback(request):
         channel_tabs_ok=bool(
             ((channel_info or {}).get("channel_tabs") or {}).get("ok")
         ),
-    )
+    ), user)
 
 
 @extend_schema(summary="Teams launch URL for the signed-in user", responses=OpenApiTypes.OBJECT)
@@ -477,6 +493,11 @@ def teams_launch(request):
             ),
         }
     )
+
+
+def _teams_error_redirect(error: str, description: str = ""):
+    query = {"mode": "microsoft", "error": error, "error_description": description}
+    return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
 
 
 def _slack_error_redirect(error: str, description: str = ""):

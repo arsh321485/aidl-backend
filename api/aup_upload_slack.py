@@ -234,6 +234,13 @@ def notify_done(upload: AupUpload) -> None:
         return
     _show(org, upload.slack_view_id, review_view(org, upload))
     admin = AIDLUser.objects.filter(pk=upload.uploaded_by_id).first()
+    from .teams_channel import email, is_teams
+
+    if admin is not None and is_teams(org):
+        ready = upload.status == AupUpload.Status.READY
+        email(admin, "Your 14 AUP cards are ready to review" if ready else "AIDL couldn't write your AUP cards",
+              f"From {upload.file_name}." + ("" if ready else f" {upload.error}"), "admin/policy/upload/")
+        return
     if admin is None or not (admin.microsoft_id or "").startswith("slack:"):
         return
     if upload.status == AupUpload.Status.READY:

@@ -23,6 +23,8 @@ class Organization(models.Model):
     name = models.CharField(max_length=255)
     slug = models.CharField(max_length=128, blank=True, default="", unique=True)
     teams_team_id = models.CharField(max_length=128, blank=True, default="")
+    # Microsoft tenant id — one tenant always maps to one organization.
+    ms_tenant_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
     # Slack workspace (team) id — set on the first Slack organization login so
     # the same workspace always maps to the same organization.
     slack_team_id = models.CharField(max_length=32, blank=True, default="", db_index=True)
@@ -603,3 +605,16 @@ class AupUpload(models.Model):
 
     def __str__(self):
         return f"{self.organization_name}: {self.file_name} ({self.status})"
+
+
+class TeamsPost(models.Model):
+    """A card AIDL posted in an organization's Teams channel. The unique key
+    means a card is only posted once, however often the hourly job runs."""
+
+    organization_id = models.CharField(max_length=64)
+    key = models.CharField(max_length=128)
+    message_id = models.CharField(max_length=128, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("organization_id", "key")

@@ -1,0 +1,63 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Upload your AUP · AIDL{% endblock %}
+{% block body %}
+{% if form %}
+<section class="box">
+  <h1>📤 Upload your AUP</h1>
+  <p style="margin-top:6px">Already have an AI policy? Upload it and AIDL turns it into the 14 policy cards your team agrees to, with {{ org.name }}'s logo on every card.</p>
+  <p class="muted">AI writes the cards only from your file and quotes the sentence each card is based on. Nothing reaches your team until you review and approve the cards.</p>
+  {% if not has_logo %}<p class="muted">Tip: add your company logo in the Admin Center first. It goes on every card.</p>{% endif %}
+  <form method="post" enctype="multipart/form-data" style="margin-top:12px">
+    {% csrf_token %}
+    <div class="field"><label for="file">Your AI policy (PDF, Word or text file)</label><input id="file" type="file" name="file" accept=".pdf,.docx,.txt,.md" required></div>
+    <button class="btn go">Write my cards</button>
+  </form>
+</section>
+{% elif processing %}
+<section class="box">
+  <h1>⏳ AIDL is writing your 14 cards</h1>
+  <p style="margin-top:6px">From {{ upload.file_name }}. This usually takes a few minutes. You can close this page, and AIDL will email you when the cards are ready to review.</p>
+</section>
+{% elif failed %}
+<section class="box">
+  <h1>⚠ AIDL couldn't write the cards</h1>
+  <p style="margin-top:6px">From {{ upload.file_name }}. {{ upload.error|default:"Please try again." }}</p>
+  <a class="btn go" href="?new=1">Upload a file</a>
+</section>
+{% else %}
+<section class="box">
+  <h1>Your policy as 14 cards</h1>
+  <p class="muted" style="margin-top:6px">From {{ upload.file_name }} · written by AI · {% if published %}in use as your AUP{% else %}not sent to anyone yet{% endif %}</p>
+  {% if upload.text_truncated %}<p class="error">Your file is very long, so only its first part was used. Check that every card is right.</p>{% endif %}
+  {% if warn.not_covered %}<p class="error"><b>Not in your policy:</b> points {{ warn.not_covered|join:", " }}. Add them to your policy and upload it again, or use these cards as they are.</p>{% endif %}
+  {% if warn.unverified %}<p class="error"><b>Check these cards:</b> {{ warn.unverified|join:", " }}. AIDL couldn't match their quote to your file.</p>{% endif %}
+  <div class="list">
+  {% for c in cards %}
+    <div>
+      {% if c.covered %}
+      <b>{{ c.no }} · {{ c.title }}</b>{% if c.headline %} · {{ c.headline }}{% endif %}
+      {% if c.summary %}<p>{{ c.summary }}</p>{% endif %}
+      {% for t in c.do %}<div>✓ {{ t }}</div>{% endfor %}{% for t in c.dont %}<div>✗ {{ t }}</div>{% endfor %}
+      <p class="muted">{% if c.quote_verified %}From your policy: “{{ c.source_quote }}”{% else %}⚠ AIDL couldn't find this quote in your file. Check this card: “{{ c.source_quote|default:"no quote given" }}”{% endif %}</p>
+      {% else %}⚠ <b>{{ c.no }} · {{ c.title }}</b><br><span class="muted">Your policy doesn't cover this point. Employees will see that it isn't covered yet.</span>{% endif %}
+    </div>
+  {% endfor %}
+  </div>
+  <a class="btn" href="?new=1" style="margin-top:10px">Upload another file</a>
+  {% if not published %}
+  <form method="post" action="{% url 'teams-app-upload-publish' %}" style="margin-top:16px">
+    {% csrf_token %}<input type="hidden" name="upload_id" value="{{ upload.pk }}">
+    <div class="field">
+      <div style="font-weight:600">When should the cards go out?</div>
+      <label class="check"><input type="radio" name="when" value="today" checked> Send now</label>
+      <label class="check"><input type="radio" name="when" value="day"> On a day <span class="muted">· at 10:00</span></label>
+      <label for="day">Day (if not today)</label><input id="day" type="date" name="day">
+    </div>
+    <button class="btn ok">Use these cards</button>
+  </form>
+  {% endif %}
+  <p class="muted" style="margin-top:10px">Check the cards against what your regulators expect. Not legal advice.</p>
+</section>
+{% endif %}
+{% endblock %}
+{% block script %}{% if processing %}<script>setTimeout(function () { location.reload(); }, 15000);</script>{% endif %}{% endblock %}

@@ -4,6 +4,8 @@ be scheduled at once), and remind admins about cards waiting for approval
 (card_approval.remind). Run daily, e.g. a Render cron job:
 
     python manage.py schedule_package_cards
+
+Teams has its own job, run hourly: python manage.py teams_dispatch
 """
 
 from django.core.management.base import BaseCommand
