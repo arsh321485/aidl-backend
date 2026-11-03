@@ -8,11 +8,12 @@ whole library (design: E:\\AIDL Card Design System.html), drawn with Pillow:
              highway_code), square = awareness ("pkg-<card no>", and the AI
              policy's "paw-<id>", policy_awareness.py)
     action   whatever the card asks people to do is the same sign
-    footer   AI DRIVING LICENCE + the button to press
+    footer   AIDL's own cards: the AIDL logo + aidrivinglicence.ai, then the button
+             to press. A company's policy cards: only the button to press.
     mark     behind everything: the company's own logo (Basic and Enterprise,
              Organization.logo_data via licence_image.brand_logo), else its name;
-             Trial cards show a faint AIDL logo (static/aidl/card-logo.png) and no
-             company.
+             Trial cards show a faint AIDL logo (static/aidl/logo-transparent.png)
+             and no company; Trial policy cards show nothing, as they carry no AIDL logo.
 
 The body changes with the content; policy cards pick one of four layouts
 (_layout). The approved words are never rewritten: lists from the question
@@ -41,7 +42,7 @@ from .licence_image import brand_logo, text_watermark
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "11"
+DESIGN_VERSION = "12"
 
 
 def valid_kind(kind: str) -> bool:
@@ -65,8 +66,9 @@ INK, WHITE, CREAM, CREAM2, YELLOW, YELLOW_SOFT = "#14140F", "#FFFFFF", "#F5ECD2"
 GREEN, RED, AMBER, SKY, MUTED = "#2EC866", "#E23A2E", "#FFB000", "#6FB3E0", "#5E5843"
 GREEN_DK, RED_DK = "#1A7F37", "#B42318"
 _FONTS = Path(__file__).resolve().parent / "data" / "fonts"
-_AIDL_LOGO = Path(__file__).resolve().parent / "static" / "aidl" / "card-logo.png"
-WATERMARK_LOGO = 300  # width, the same on every card
+_AIDL_LOGO = Path(__file__).resolve().parent / "static" / "aidl" / "logo-transparent.png"
+AIDL_DOMAIN = "aidrivinglicence.ai"
+FOOTER_LOGO, WATERMARK_LOGO = 36, 300  # widths, the same on every card
 WATERMARK_OPACITY = 0.12
 COMPANY_MARK = {"angle": 35, "width_ratio": 1.0, "opacity": 0.26}  # the company logo behind every card
 # Pale panels: the watermark shows through them, or tinted rows would hide it.
@@ -331,9 +333,15 @@ def _action_list(d, y, items, label) -> float:
     return _sign(d, y, label, body, fill=YELLOW_SOFT, label_fill=YELLOW)
 
 
-def _footer(d, y, press: str) -> float:
+def _is_policy(kind: str) -> bool:
+    """A company's own policy card, as opposed to one AIDL wrote."""
+    return kind.startswith("aup-")
+
+
+def _footer(d, y, press: str, *, aidl_brand: bool = True) -> float:
     _rule(d, y)
-    d.text(_xy(PAD, y + 24), "AIDL · AI DRIVING LICENCE", font=_font("mono", 10), fill=MUTED, anchor="lm")
+    if aidl_brand:  # _add_logo puts the AIDL logo on the left
+        d.text(_xy(PAD + 46, y + 24), AIDL_DOMAIN, font=_font("mono", 10), fill=MUTED, anchor="lm")
     d.text(_xy(W - PAD, y + 24), f"PRESS  {press}  BELOW", font=_font("mono", 10), fill=MUTED, anchor="rm")
     return y + 48
 
@@ -523,7 +531,7 @@ def _policy_card(d, org, n: int) -> float:
             y = _draw_go_stop(d, y, [f"Use {s[1]}" if isinstance(s, tuple) else s for s in sts if _go_stop(s) == "go"],
                               [s for s in sts if _go_stop(s) == "stop"],
                               [s for s in sts if _go_stop(s) == "always"], "ALWAYS")
-    return _footer(d, _rail(d, y + 6, n), "I AGREE")
+    return _footer(d, _rail(d, y + 6, n), "I AGREE", aidl_brand=False)
 
 
 # ---------- onboarding ----------
@@ -668,8 +676,6 @@ def logo_watermark(img: Image.Image, logo: Image.Image, *, angle: float = 28, wi
 @lru_cache(maxsize=4)
 def _aidl_logo(width: int, opacity: float = 1.0) -> Image.Image:
     logo = Image.open(_AIDL_LOGO).convert("RGBA")
-    for corner in ((0, 0), (logo.width - 1, 0), (0, logo.height - 1), (logo.width - 1, logo.height - 1)):
-        ImageDraw.floodfill(logo, corner, (255, 255, 255, 0), thresh=40)  # the file has a white square behind it
     logo = logo.resize((width * S, round(logo.height * width * S / logo.width)), Image.LANCZOS)
     if opacity < 1:
         logo.putalpha(logo.getchannel("A").point(lambda a: int(a * opacity)))
@@ -682,15 +688,22 @@ def _aidl_watermark(img: Image.Image) -> None:
     img.alpha_composite(mark, ((img.width - mark.width) // 2, max(0, (img.height - mark.height) // 2)))
 
 
-def _watermark(body: Image.Image, org) -> None:
-    """Behind every card: the company's logo, else its name. Trial: AIDL's logo."""
+def _add_logo(img: Image.Image) -> None:
+    """The AIDL logo in the footer."""
+    foot = _aidl_logo(FOOTER_LOGO)
+    img.alpha_composite(foot, (PAD * S, img.height - 24 * S - foot.height // 2))
+
+
+def _watermark(body: Image.Image, org, kind: str = "") -> None:
+    """Behind every card: the company's logo, else its name. Trial: AIDL's
+    logo, except on policy cards, which never carry it."""
     logo = brand_logo(org)
     if logo is not None:
         logo_watermark(body, logo, **COMPANY_MARK)
     elif _paid(org):
         text_watermark(body, org.name, angle=COMPANY_MARK["angle"], opacity=0.09, width_ratio=0.9, spacing=0.02,
                        font=ImageFont.truetype(str(_FONTS / "Bungee-Regular.ttf"), 200))
-    else:
+    elif not _is_policy(kind):
         _aidl_watermark(body)
 
 
@@ -745,10 +758,12 @@ def _draw(kind: str, d, org) -> float:
 def render(kind: str, org) -> bytes:
     bottom = _measure(lambda d: _draw(kind, d, org))
     background = Image.new("RGBA", (W * S, int(bottom * S)), WHITE)
-    _watermark(background, org)  # first, so everything sits on top of it
+    _watermark(background, org, kind)  # first, so everything sits on top of it
     body = background.copy()
     _draw(kind, ImageDraw.Draw(body), org)
     _show_through_panels(body, background)
+    if not _is_policy(kind):
+        _add_logo(body)
     return _png(_frame(body))
 
 

@@ -4318,7 +4318,7 @@ class CardDesignSystemTests(SimpleTestCase):
         return [f"aup-{n}" for n in range(1, 15)] + ["traffic_light", "highway_code"] + \
             [f"pkg-{no}" for no in by_type.values()] + [f"paw-{c['id']}" for c in policy_awareness.cards()]
 
-    def test_no_card_has_an_aidl_logo_at_the_bottom_or_the_top(self):
+    def test_aidl_cards_carry_the_logo_at_the_bottom_and_policy_cards_keep_it_empty(self):
         import io
 
         from PIL import Image
@@ -4326,16 +4326,89 @@ class CardDesignSystemTests(SimpleTestCase):
         from . import card_image as ci
 
         def logo_yellow(img, box):
-            return sum(1 for r, g, b, a in img.crop(box).get_flattened_data() if r > 240 and 200 < g < 235 and 70 < b < 110)
+            return sum(1 for r, g, b, a in img.crop(box).get_flattened_data() if r > 240 and 200 < g < 235 and b < 110)
 
         s = ci.S
         for org in (self._org(plan="trial"), self._org(), self._org(plan="enterprise", logo=self._logo())):
             for kind in self._all_kinds():
                 img = Image.open(io.BytesIO(ci.render(kind, org))).convert("RGBA")
                 h = img.height - (ci.SHADOW + 2) * s
-                self.assertEqual(logo_yellow(img, (ci.PAD * s, h - 42 * s, (ci.PAD + 36) * s, h - 6 * s)), 0, kind)
+                found = logo_yellow(img, (ci.PAD * s, h - 44 * s, (ci.PAD + 36) * s, h - 4 * s))
+                if kind.startswith("aup-"):
+                    self.assertEqual(found, 0, kind)
+                else:
+                    self.assertGreater(found, 500, kind)
                 x1 = (ci.W - ci.PAD) * s
                 self.assertEqual(logo_yellow(img, (x1 - 66 * s, 30 * s, x1, 94 * s)), 0, kind)
+
+    def test_footer_words_by_kind_of_card(self):
+        from unittest.mock import MagicMock
+
+        from . import card_image as ci
+
+        real_footer = ci._footer
+
+        def footer_words(kind):
+            words = []
+
+            def spy(d, y, press, **kw):
+                fake = MagicMock()
+                real_footer(fake, y, press, **kw)
+                words.extend(c.args[1] for c in fake.text.call_args_list)
+                return real_footer(d, y, press, **kw)
+
+            with patch("api.card_image._footer", side_effect=spy):
+                ci.render(kind, self._org(plan="trial"))
+            return " ".join(words)
+
+        for kind in self._all_kinds():
+            words = footer_words(kind)
+            self.assertNotIn("Driving", words, kind)
+            self.assertNotIn("DRIVING", words, kind)
+            if kind.startswith("aup-"):
+                self.assertNotIn("aidrivinglicence.ai", words, kind)
+                self.assertIn("I AGREE", words, kind)
+            else:
+                self.assertIn("aidrivinglicence.ai", words, kind)
+                self.assertIn("GOT IT", words, kind)
+
+    def test_trial_policy_cards_have_no_aidl_watermark(self):
+        from . import card_image as ci
+
+        with patch("api.card_image._aidl_watermark") as aidl:
+            ci.render("aup-1", self._org(plan="trial"))
+        aidl.assert_not_called()
+        with patch("api.card_image._aidl_watermark") as aidl:
+            ci.render("traffic_light", self._org(plan="trial"))
+        aidl.assert_called_once()
+
+    def test_branding_does_not_change_a_cards_size(self):
+        from . import card_image as ci
+
+        self.assertEqual(ci._measure(lambda d: ci._footer(d, 100, "GOT IT")),
+                         ci._measure(lambda d: ci._footer(d, 100, "GOT IT", aidl_brand=False)))
+
+    def test_every_kind_of_card_uses_its_own_companys_watermark(self):
+        import io
+
+        from PIL import Image
+
+        from . import card_image as ci
+        from .licence_image import save_logo
+
+        def logo(colour):
+            buf = io.BytesIO()
+            Image.new("RGB", (200, 60), colour).save(buf, "PNG")
+            return save_logo(buf.getvalue())
+
+        one, two = self._org(logo=logo("#336699"), name="One"), self._org(logo=logo("#993333"), name="Two")
+        one.pk, two.pk = "65f000000000000000000001", "65f000000000000000000002"
+        for kind in ("aup-1", "traffic_light", "highway_code", "pkg-006", self._all_kinds()[-1]):
+            self.assertNotEqual(ci.render(kind, one), ci.render(kind, two), kind)
+            with patch("api.image_cache.png", side_effect=lambda key, fn: key):
+                keys = {ci.png_for(kind, one), ci.png_for(kind, two)}
+            self.assertEqual(len(keys), 2, kind)                                 # never another company's cached copy
+            self.assertNotEqual(ci.image_url(kind, one), ci.image_url(kind, two))
 
     def test_every_card_has_the_company_logo_behind_everything(self):
         from . import card_image as ci
@@ -4418,6 +4491,7 @@ class CardDesignSystemTests(SimpleTestCase):
         self.assertLessEqual(mark.getchannel("A").getextrema()[1], int(255 * 0.13))
         self.assertEqual(mark.width, ci.WATERMARK_LOGO * ci.S)
         self.assertEqual(mark.getpixel((0, 0))[3], 0)                            # no white square behind it
+        self.assertEqual(ci._aidl_logo(ci.FOOTER_LOGO).width, ci.FOOTER_LOGO * ci.S)
 
 
 class LicenceDesignTests(TestCase):
