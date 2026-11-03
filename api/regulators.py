@@ -24,7 +24,7 @@ COUNTRIES = ["India", "United Kingdom", "United States", EU, "United Arab Emirat
              "Singapore", "Australia", "Other"]
 INDUSTRIES = ["Banking & financial services", "Insurance", "Healthcare", "Government / public sector", "Education",
               "Retail & e-commerce", "Technology / IT services", "Manufacturing", "Hospitality & travel",
-              "Professional services (legal, consulting, audit)", "Other"]
+              "Professional services (consulting, audit)", "Other"]
 
 
 def _r(name: str, oversees: str, url: str = "", when: str = "", reviewed: str = "") -> dict:
@@ -34,25 +34,23 @@ def _r(name: str, oversees: str, url: str = "", when: str = "", reviewed: str = 
 # Regulators for everyone in a country.
 BY_COUNTRY: dict[str, list[dict]] = {
     "India": [
-        _r("Data Protection Board of India", "personal data, under the Digital Personal Data Protection Act, 2023",
-           "https://www.meity.gov.in"),
+        _r("Data Protection Board of India", "personal data", "https://www.meity.gov.in"),
         _r("CERT-In (Indian Computer Emergency Response Team)", "cyber security incidents and how fast they must be "
            "reported", "https://www.cert-in.org.in"),
     ],
     "United Kingdom": [
-        _r("Information Commissioner's Office (ICO)", "personal data, under the UK GDPR and the Data Protection Act "
-           "2018", "https://ico.org.uk"),
+        _r("Information Commissioner's Office (ICO)", "personal data", "https://ico.org.uk"),
     ],
     "United States": [
         _r("Federal Trade Commission (FTC)", "unfair or deceptive practices, including how companies use AI and "
            "consumers' data", "https://www.ftc.gov"),
-        _r("California Privacy Protection Agency", "consumers' personal data under the CCPA / CPRA",
+        _r("California Privacy Protection Agency", "consumers' personal data",
            "https://cppa.ca.gov", when="you have customers in California"),
     ],
     EU: [
-        _r("Your country's data protection authority", "personal data, under the EU GDPR",
+        _r("Your country's data protection authority", "personal data",
            "https://www.edpb.europa.eu/about-edpb/about-edpb/members_en"),
-        _r("Your country's AI Act authority", "the EU AI Act, including Article 4 (AI literacy of your staff)",
+        _r("Your country's AI authority", "how companies use AI, including their staff's AI literacy",
            "https://digital-strategy.ec.europa.eu/en/policies/ai-office"),
     ],
     "United Arab Emirates": [
@@ -68,12 +66,11 @@ BY_COUNTRY: dict[str, list[dict]] = {
         _r("Personal Data Protection Authority", "how companies in Bahrain handle personal data"),
     ],
     "Singapore": [
-        _r("Personal Data Protection Commission (PDPC)", "personal data, under the PDPA", "https://www.pdpc.gov.sg"),
+        _r("Personal Data Protection Commission (PDPC)", "personal data", "https://www.pdpc.gov.sg"),
         _r("Cyber Security Agency of Singapore (CSA)", "cyber security", "https://www.csa.gov.sg"),
     ],
     "Australia": [
-        _r("Office of the Australian Information Commissioner (OAIC)", "personal information, under the Privacy Act "
-           "1988", "https://www.oaic.gov.au"),
+        _r("Office of the Australian Information Commissioner (OAIC)", "personal information", "https://www.oaic.gov.au"),
     ],
     "Other": [
         _r("Your national data protection authority", "personal data in your country"),
@@ -102,7 +99,7 @@ BY_INDUSTRY: dict[tuple[str, str], list[dict]] = {
         _r("Financial Conduct Authority (FCA)", "insurers' conduct", "https://www.fca.org.uk"),
     ],
     ("United States", "Healthcare"): [
-        _r("HHS Office for Civil Rights", "patients' health information, under HIPAA", "https://www.hhs.gov/ocr"),
+        _r("HHS Office for Civil Rights", "patients' health information", "https://www.hhs.gov/ocr"),
     ],
     ("United States", "Banking & financial services"): [
         _r("Your financial regulators (e.g. SEC, FINRA, CFPB, banking regulators)", "financial firms, including "
@@ -167,7 +164,7 @@ def card_blocks(org_name: str, countries: list[str], industry: str) -> list:
     blocks += [
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
             "Regulators that *may* oversee how you use AI and data, from your countries and industry. Prepared and "
-            "kept up to date by AIDL — not legal advice. Only admins see this."}]},
+            "kept up to date by AIDL. Only admins see this."}]},
         {"type": "actions", "block_id": "aidl_regulators", "elements": [
             {"type": "button", "text": {"type": "plain_text", "text": "✏️ Change country or industry", "emoji": True},
              "action_id": "aidl_company_open", "value": "change"}]},
