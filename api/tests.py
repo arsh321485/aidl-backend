@@ -4334,7 +4334,7 @@ class CardDesignSystemTests(SimpleTestCase):
                 img = Image.open(io.BytesIO(ci.render(kind, org))).convert("RGBA")
                 h = img.height - (ci.SHADOW + 2) * s
                 found = logo_yellow(img, (ci.PAD * s, h - 44 * s, (ci.PAD + 36) * s, h - 4 * s))
-                if kind.startswith(("aup-", "paw-")):
+                if kind.startswith("aup-"):
                     self.assertEqual(found, 0, kind)
                 else:
                     self.assertGreater(found, 500, kind)
@@ -4365,9 +4365,9 @@ class CardDesignSystemTests(SimpleTestCase):
             words = footer_words(kind)
             self.assertNotIn("Driving", words, kind)
             self.assertNotIn("DRIVING", words, kind)
-            if kind.startswith(("aup-", "paw-")):
+            if kind.startswith("aup-"):
                 self.assertNotIn("aidrivinglicence.ai", words, kind)
-                self.assertIn("I AGREE" if kind.startswith("aup-") else "GOT IT", words, kind)
+                self.assertIn("I AGREE", words, kind)
             else:
                 self.assertIn("aidrivinglicence.ai", words, kind)
                 self.assertIn("GOT IT", words, kind)
@@ -4375,10 +4375,9 @@ class CardDesignSystemTests(SimpleTestCase):
     def test_trial_policy_cards_have_no_aidl_watermark(self):
         from . import card_image as ci
 
-        for kind in ("aup-1", self._all_kinds()[-1]):
-            with patch("api.card_image._aidl_watermark") as aidl:
-                ci.render(kind, self._org(plan="trial"))
-            aidl.assert_not_called()
+        with patch("api.card_image._aidl_watermark") as aidl:
+            ci.render("aup-1", self._org(plan="trial"))
+        aidl.assert_not_called()
         with patch("api.card_image._aidl_watermark") as aidl:
             ci.render("traffic_light", self._org(plan="trial"))
         aidl.assert_called_once()
