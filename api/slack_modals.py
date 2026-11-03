@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from django.utils import timezone
 
 from . import slack_client
-from .cards_service import CardsError, request_card, request_new_card
+from .cards_service import CardsError, request_card
 from .admin_ops import AdminOpsError, add_registered_app
 from .models import AIDLUser, CardRequest, Organization, RegisteredApp
 from .org_policy import get_answers, policy_effects
@@ -400,12 +400,6 @@ def cards_view(d: dict, meta: dict) -> dict:
                 "text": _md(f"{c['icon']} *{c['title']}*{badge}\n_{c['kicker']}_{state}\n{c['desc']}"),
                 "accessory": {"type": "button", "text": _text("View"), "action_id": "aidl_card_view", "value": c["id"]},
             })
-    if d["can_create_card"]:
-        blocks += [
-            {"type": "divider"},
-            {"type": "section", "text": _md("*Need something that's not listed?* We'll scope it and follow up with pricing."),
-             "accessory": {"type": "button", "text": _text("＋ Request a New Card"), "action_id": "aidl_card_new", "value": "new"}},
-        ]
     return _modal("aidl_cards", "Send Cards", blocks, meta=meta, close="Close")
 
 
@@ -442,17 +436,6 @@ def card_send_view(card: dict, meta: dict, blocks: list | None = None) -> dict:
     blocks.append(_input("when", "When", {"type": "radio_buttons", "action_id": "v", "options": when, "initial_option": when[0]}))
     blocks.append(_input("at", "Date and time (for Schedule for later)", {"type": "datetimepicker", "action_id": "v"}, optional=True))
     return _modal("aidl_card_send", card["title"], blocks, submit="Send Card", meta=meta)
-
-
-def new_card_view(meta: dict) -> dict:
-    return _modal("aidl_card_new", "Request a New Card", [
-        _input("name", "Card name", {"type": "plain_text_input", "action_id": "v", "placeholder": _text("e.g. Vendor Risk Checklist")}),
-        _input("desc", "What should it cover?", {"type": "plain_text_input", "action_id": "v", "multiline": True}, optional=True),
-        _input("priority", "Priority", {"type": "static_select", "action_id": "v", "options": [_option("Standard"), _option("Urgent")],
-                                        "initial_option": _option("Standard")}),
-        {"type": "context", "elements": [_md("AIDL's team reviews every request and tells you when the card is "
-                                             "ready to approve.")]},
-    ], submit="Send request", meta=meta)
 
 
 def add_app_view(kind: str, meta: dict) -> dict:
@@ -825,42 +808,6 @@ def submit_card_send(caller: AIDLUser, org: Organization, view: dict) -> dict | 
     dots = "".join(_LIGHT_EMOJI[l] for l in lights) if card.get("lights") else ""
     status = "🕒 Scheduled" if later else "✓ Sent"
     return {"notice": f"{status} · {card['title']} {dots}".strip()}
-
-
-def submit_new_card(caller: AIDLUser, org: Organization, view: dict) -> dict | None:
-    values = _values(view)
-    name = _value(values, "name")
-    if not name:
-        return errors(name="Give the new card a name.")
-    d = light_admin_context(caller, cards=True)
-    if d["quota_used"] >= d["quota_max"]:
-        return errors(name="Monthly quota reached — new requests open next month.")
-    desc = _value(values, "desc")
-    priority = _value(values, "priority") or "Standard"
-    request_new_card(org, by_email=caller.email, title=name, description=f"[{priority}] {desc}".strip())
-    # A custom request uses one of the monthly quota (guide 8.4).
-    CardRequest.objects.create(organization_id=str(org.pk), card_id=f"custom:{name[:40]}",
-                               status=CardRequest.Status.REQUESTED, requested_by_email=caller.email)
-    in_background(_tell_aidl_team, org.name, caller.full_name or caller.email, caller.email, name, priority, desc)
-    return {"notice": f"⏳ Card requested · {name} ({priority}) — AIDL's team will review it."}
-
-
-def _tell_aidl_team(org_name: str, who: str, email: str, name: str, priority: str, desc: str) -> None:
-    """Email a new-card request to the AIDL team (CARD_REQUEST_EMAIL, else
-    BILLING_SALES_EMAIL)."""
-    from django.conf import settings
-    from django.core.mail import send_mail
-
-    to = getattr(settings, "CARD_REQUEST_EMAIL", "") or settings.BILLING_SALES_EMAIL
-    if not to:
-        return
-    try:
-        send_mail(subject=f"AIDL card request ({priority}): {name} — {org_name}",
-                  message=f"{who} ({email}) at {org_name} asked for a new card.\n\nCard: {name}\nPriority: {priority}"
-                          f"\nWhat it should cover: {desc or '—'}",
-                  from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[to], fail_silently=True)
-    except Exception:  # noqa: BLE001 — the request is saved either way
-        pass
 
 
 def submit_add_app(caller: AIDLUser, org: Organization, view: dict) -> dict | None:

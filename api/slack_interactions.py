@@ -102,7 +102,7 @@ _POPUP_TITLES = {
     "aidl_regulators_open": "Your regulators", "aidl_laws_open": "Your regulators",
     "aidl_company_open": "About your company",
     "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_admin_edit": "Edit permissions", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
-    "aidl_card_new": "Request a new card", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
+    "aidl_card_new": "Approve cards", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Approve cards", "aidl_crv_assign": "Ask an admin", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
     "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview", "aidl_ack_alerts": "Acknowledgement alerts",
     "aidl_appreq_reject": "Reject app", "aidl_appreq_info": "Ask for more info",
@@ -165,7 +165,6 @@ _SUBMIT_TAB = {
     "aidl_add_admin": "add-admin",
     "aidl_card_request": "cards",
     "aidl_card_send": "cards",
-    "aidl_card_new": "cards",
     "aidl_add_app": "ai-apps",
     "aidl_add_people": "home",
     policy_cards_slack.CARD: "home",
@@ -207,8 +206,6 @@ def _handle_submission(payload: dict):
     allowed = tab in d["tabs"]
     if callback in ("aidl_card_request", "aidl_card_send"):
         allowed = d["can_manage_cards"]
-    elif callback == "aidl_card_new":
-        allowed = d["can_create_card"]
     elif callback in (policy_cards_slack.CARD, policy_cards_slack.COMPANY, aup_upload_slack.UPLOAD,
                       aup_upload_slack.REVIEW):
         allowed = d["can_policy"]
@@ -226,7 +223,6 @@ def _handle_submission(payload: dict):
         "aidl_add_admin": lambda: slack_modals.submit_add_admin(admin, org, team_id, view),
         "aidl_card_request": lambda: slack_modals.submit_card_request(admin, org, view),
         "aidl_card_send": lambda: slack_modals.submit_card_send(admin, org, view),
-        "aidl_card_new": lambda: slack_modals.submit_new_card(admin, org, view),
         "aidl_add_app": lambda: slack_modals.submit_add_app(admin, org, view),
         "aidl_add_people": lambda: slack_modals.submit_add_people(admin, org, view),
         policy_cards_slack.CARD: lambda: _submit_policy(admin, org, view),
@@ -656,8 +652,7 @@ def _may_review_assigned(org, user, action: dict, action_id: str) -> bool:
     return False
 
 
-def _card_review_action(org, user, payload: dict, action: dict, action_id: str, *, full: bool = True,
-                        can_request: bool = False) -> None:
+def _card_review_action(org, user, payload: dict, action: dict, action_id: str, *, full: bool = True) -> None:
     """Review & approve cards popup (card_review_slack.py). `full` = has the
     Approve cards permission; otherwise only the cards assigned to them."""
     view = payload.get("view") or {}
@@ -670,7 +665,7 @@ def _card_review_action(org, user, payload: dict, action: dict, action_id: str, 
     def popup(notice: str = "", at_month: int | None = None) -> dict:
         if mine:
             return card_review_slack.mine_view(org, user, notice)
-        return card_review_slack.review_view(org, at_month or month, notice, can_request=can_request)
+        return card_review_slack.review_view(org, at_month or month, notice)
 
     def redraw(notice: str = "", view_id: str = "", at_month: int | None = None) -> None:
         target = view_id or (view.get("id") if view.get("callback_id") == card_review_slack.CALLBACK else "")
@@ -832,17 +827,13 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                        response_url: str, is_ephemeral: bool, user, org) -> None:
     d = build_admin_cards_context(user)
 
-    # Buttons inside an open modal: view one card / request a new card.
-    if action_id in ("aidl_card_view", "aidl_card_new") and org is not None:
+    # Button inside an open modal: view one card.
+    if action_id == "aidl_card_view" and org is not None:
         meta = json.loads((payload.get("view") or {}).get("private_metadata") or "{}")
-        if action_id == "aidl_card_view":
-            card = next((c for c in d["cards"] if c["id"] == action.get("value")), None)
-            if card is not None:
-                _open_modal(org, payload.get("trigger_id", ""),
-                                           slack_modals.card_view(d, card, meta), push=True)
-        elif d["can_create_card"]:
+        card = next((c for c in d["cards"] if c["id"] == action.get("value")), None)
+        if card is not None:
             _open_modal(org, payload.get("trigger_id", ""),
-                                       slack_modals.new_card_view(meta), push=True)
+                                       slack_modals.card_view(d, card, meta), push=True)
         return HttpResponse(status=200)
 
     # Remove buttons in the Add Admin and Team progress popups.
@@ -953,15 +944,14 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
             slack_modals.in_background(_send_aup_reminders, org, user, response_url)
         return HttpResponse(status=200)
 
-    # The paid extra reference cards are gone; older "Cards" buttons open Card approval.
-    if action_id in ("aidl_open_cards", "aidl_tab_cards"):
+    # The paid extra reference cards and card requests are gone; older buttons open Card approval.
+    if action_id in ("aidl_open_cards", "aidl_tab_cards", "aidl_card_new"):
         action_id, action = "aidl_cards_review", {**action, "value": "1"}
     if org is not None and (action_id == "aidl_cards_review" or action_id.startswith("aidl_crv_")):
         if not d.get("can_approve_cards") and not _may_review_assigned(org, user, action, action_id):
             _reply(response_url, text="Approving cards needs the *Approve cards* permission — ask your master admin.")
             return HttpResponse(status=200)
-        _card_review_action(org, user, payload, action, action_id, full=bool(d.get("can_approve_cards")),
-                            can_request=bool(d.get("can_create_card")))
+        _card_review_action(org, user, payload, action, action_id, full=bool(d.get("can_approve_cards")))
         return HttpResponse(status=200)
 
     if org is not None and action_id == "aidl_ack_alerts":

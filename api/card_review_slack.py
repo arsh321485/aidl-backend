@@ -5,7 +5,7 @@
     Awareness cards    counts · [✅ Approve all waiting]
       Month n of N     [← Month n-1] [Month n+1 →] [✅ Approve month n] [👤 Ask an admin]
         one line per card with a ⋯ menu: Preview · Approve · Skip · Swap · Ask an admin
-    Your AI policy     the policy cards sent / scheduled · [📌 Add a policy card] [＋ Request a new card]
+    Your AI policy     the policy cards sent / scheduled · [📌 Add a policy card]
 
 "Ask another admin to approve" (card_approval.assign) hands a card or a
 month to another admin; they get a DM and see only those cards
@@ -47,7 +47,7 @@ def _opt(text, value):
     return {"text": _t(text), "value": value}
 
 
-def review_view(org, month: int = 1, notice: str = "", *, can_request: bool = False) -> dict:
+def review_view(org, month: int = 1, notice: str = "") -> dict:
     from .plans import PACKAGE_LABELS, plan_key
     from .policy_cards import summary as policy_summary
 
@@ -156,17 +156,11 @@ def review_view(org, month: int = 1, notice: str = "", *, can_request: bool = Fa
     later = len(policy) - sent
     line = (f"{sent} of 14 policy cards approved" + (f" · {later} scheduled" if later else "")) if policy else \
         "No policy cards yet — each topic of your AI policy is one short card your team agrees to."
-    buttons = [_btn("📌 Add a policy card", "aidl_policy_open", "policy")]
-    if can_request:
-        buttons.append(_btn("＋ Request a new card", "aidl_card_new", "new"))
     blocks += [
         {"type": "divider"},
         {"type": "section", "text": _md(f"*Your AI policy* — approved when you send each card.\n{line}")},
-        {"type": "actions", "block_id": "crv_policy", "elements": buttons},
+        {"type": "actions", "block_id": "crv_policy", "elements": [_btn("📌 Add a policy card", "aidl_policy_open", "policy")]},
     ]
-    if can_request:
-        blocks.append({"type": "context", "elements": [_md("Need a card that isn't here? Request it — AIDL's team "
-                                                           "reviews every request.")]})
     return {"type": "modal", "callback_id": CALLBACK, "title": _t("Approve cards"), "close": _t("Done"),
             "private_metadata": json.dumps({"month": month}), "blocks": blocks[:100]}
 

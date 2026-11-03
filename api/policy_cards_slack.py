@@ -233,10 +233,10 @@ def card_view(org: Organization, n: int, a: dict, meta: dict, *, when: str = "to
         {"type": "divider"},
         {"type": "input", "block_id": "when", "label": _text("When should it go out?"), "dispatch_action": True,
          "element": {"type": "radio_buttons", "action_id": "v", "options": [
-             {"text": _text("Today, now"), "value": "today"},
+             {"text": _text("Send now"), "value": "today"},
              {"text": _text("Pick a day"), "value": "day",
               "description": _text("10:00 in each person's time zone")}],
-             "initial_option": {"text": _text("Today, now"), "value": "today"} if when == "today" else
+             "initial_option": {"text": _text("Send now"), "value": "today"} if when == "today" else
              {"text": _text("Pick a day"), "value": "day", "description": _text("10:00 in each person's time zone")}}},
     ]
     if when == "day":

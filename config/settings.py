@@ -405,5 +405,3 @@ AUP_UPLOAD_MAX_CHARS = int(os.getenv("AUP_UPLOAD_MAX_CHARS", "120000"))
 # Regulator card (regulators.py): show regulator entries that haven't been through AIDL's compliance review yet,
 # marked DRAFT. For AIDL's own test workspaces only — leave off for customers.
 REGULATORS_PREVIEW = os.getenv("REGULATORS_PREVIEW", "False").lower() in ("1", "true", "yes")
-# "Request a new card" (Card approval) is emailed here (empty = BILLING_SALES_EMAIL; both empty = saved only).
-CARD_REQUEST_EMAIL = os.getenv("CARD_REQUEST_EMAIL", "")

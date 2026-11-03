@@ -463,7 +463,7 @@ def _add_admin(d: dict) -> list:
     return [
         {"type": "header", "text": {"type": "plain_text", "text": "🧑‍💼 Add another admin", "emoji": True}},
         _section("Give a colleague access to your Admin Center — choose exactly what they can see and do.\n"
-                 "*Permissions:* Approve Apps · Request New Cards · Manage admins · Manage plan & billing · Approve cards"),
+                 "*Permissions:* Approve Apps · Manage admins · Manage plan & billing · Approve cards"),
         _context(f"{d['admin_count']} of {d['admin_seat_limit']} admin seats used"),
     ]
 
@@ -485,8 +485,6 @@ def _cards(d: dict) -> list:
                 f"{c['icon']} *{c['title']}*{badge}{state}\n_{c['kicker'].upper()}_\n{c['desc']}\n"
                 f"{price}  ★ *{c['rating']}* ({c['votes']})"
             ))
-    if d["can_create_card"]:
-        blocks.append(_context("*Need something that's not listed?* Request a brand-new reference card — we'll scope it and follow up with pricing."))
     return blocks
 
 
