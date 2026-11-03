@@ -1203,7 +1203,7 @@ class SlackModalTests(TestCase):
         self.assertEqual(resp.json(), {"response_action": "clear"})
         rahul = AIDLUser.objects.get(microsoft_id="slack:T9:U7")
         self.assertEqual(rahul.role, AIDLUser.Role.ADMIN)
-        self.assertEqual((rahul.perm_approve_apps, rahul.perm_access_cards, rahul.perm_create_card), (False, True, False))
+        self.assertEqual((rahul.perm_approve_apps, rahul.perm_access_cards), (False, True))
         methods = [m for m, _ in self.calls]
         self.assertIn("conversations.invite", methods)
         self.assertIn("chat.postEphemeral", methods)
@@ -2332,6 +2332,11 @@ class PolicyCardsSlackTests(TestCase):
 
         return policy_cards_slack.card_view(self.org, n, aup_store.answers(self.org), {})
 
+    def test_when_choice_says_send_now(self):
+        when = next(b for b in self._card(2)["blocks"] if b.get("block_id") == "when")["element"]
+        self.assertEqual(when["options"][0]["text"]["text"], "Send now")
+        self.assertEqual(when["initial_option"], when["options"][0])
+
     def _values(self, view):
         """What Slack sends back for a screen: the pre-selected / pre-filled values."""
         values = {}
@@ -2548,20 +2553,23 @@ class PolicyCardsSlackTests(TestCase):
     def test_extra_paid_cards_are_gone_and_old_buttons_open_card_approval(self):
         from .card_review_slack import review_view
 
-        view = json.dumps(review_view(self.org, 1, can_request=True), ensure_ascii=False)
-        for gone in ("Extra reference cards", "aidl_open_cards", "one-time", "$"):
+        view = json.dumps(review_view(self.org, 1), ensure_ascii=False)
+        for gone in ("Extra reference cards", "aidl_open_cards", "one-time", "$", "Request a new card",
+                     "aidl_card_new", "Need a card that isn't here"):
             self.assertNotIn(gone, view)
-        for shown in ("Your AI policy", "aidl_policy_open", "＋ Request a new card", "Traffic Light Check",
-                      "The Highway Code"):
+        for shown in ("Your AI policy", "aidl_policy_open", "Traffic Light Check", "The Highway Code"):
             self.assertIn(shown, view)
-        self.assertNotIn("Request a new card", json.dumps(review_view(self.org, 1)))   # needs the permission
         self._post({"type": "block_actions", "trigger_id": "TR", "channel": {"id": "C42"},
                     "actions": [{"action_id": "aidl_open_cards", "value": "cards"}]})       # an old message's button
+        self.assertEqual(_shown_views(self.calls)[-1]["callback_id"], "aidl_cards_review")
+        self.calls.clear()
+        self._post({"type": "block_actions", "trigger_id": "TR2", "channel": {"id": "C42"},
+                    "actions": [{"action_id": "aidl_card_new", "value": "new"}]})            # the old request button
         self.assertEqual(_shown_views(self.calls)[-1]["callback_id"], "aidl_cards_review")
         from .admin_perms import PERMS
 
         self.assertNotIn("access_cards", [k for k, *_ in PERMS])
-        self.assertIn("create_card", [k for k, *_ in PERMS])
+        self.assertNotIn("create_card", [k for k, *_ in PERMS])
 
     def test_ask_another_admin_to_approve_some_cards(self):
         from . import card_approval
@@ -2594,24 +2602,24 @@ class PolicyCardsSlackTests(TestCase):
                     "actions": [{"action_id": "aidl_crv_card", "selected_option": {"value": f"approve|{other}"}}]})
         self.assertNotEqual(card_approval.status(self.org, f"pkg:{other}"), card_approval.APPROVED)
 
-    def test_strip_shows_sent_topics_at_their_positions(self):
-        from urllib.parse import parse_qs, urlparse
-
-        from . import aup_store, policy_cards
-
-        a = aup_store.answers(self.org)
-        for n in (5, 7):
-            policy_cards.approve(self.org, self.owner, n, a, deliver=False)
-        self.org.refresh_from_db()
-        urls = {n: next(b["image_url"] for b in self._card(n)["blocks"] if b["type"] == "image") for n in (5, 14)}
-        q14 = parse_qs(urlparse(urls[14]).query)
-        self.assertEqual((q14["at"], q14["d"], q14["r"]), (["13"], ["5,7"], ["2 of 14 sent"]))
-        self.assertEqual(parse_qs(urlparse(urls[5]).query)["at"], ["4"])          # each topic its own position
-        resp = self.client.get(urlparse(urls[14]).path + "?" + urlparse(urls[14]).query)
-        self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
-        bad = urlparse(urls[14]).query.replace("d=5%2C7", "d=1%2C2")
-        self.assertEqual(self.client.get(urlparse(urls[14]).path + "?" + bad).status_code, 404)  # signed
-
+    def test_strip_shows_sent_topics_at_their_positions(self):
+        from urllib.parse import parse_qs, urlparse
+
+        from . import aup_store, policy_cards
+
+        a = aup_store.answers(self.org)
+        for n in (5, 7):
+            policy_cards.approve(self.org, self.owner, n, a, deliver=False)
+        self.org.refresh_from_db()
+        urls = {n: next(b["image_url"] for b in self._card(n)["blocks"] if b["type"] == "image") for n in (5, 14)}
+        q14 = parse_qs(urlparse(urls[14]).query)
+        self.assertEqual((q14["at"], q14["d"], q14["r"]), (["13"], ["5,7"], ["2 of 14 sent"]))
+        self.assertEqual(parse_qs(urlparse(urls[5]).query)["at"], ["4"])          # each topic its own position
+        resp = self.client.get(urlparse(urls[14]).path + "?" + urlparse(urls[14]).query)
+        self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
+        bad = urlparse(urls[14]).query.replace("d=5%2C7", "d=1%2C2")
+        self.assertEqual(self.client.get(urlparse(urls[14]).path + "?" + bad).status_code, 404)  # signed
+
     def test_images_have_short_hover_text(self):
         from . import card_image
 
@@ -4119,6 +4127,8 @@ class AupUploadTests(TestCase):
         self.assertEqual(up.status, AupUpload.Status.READY)
         review = aup_upload_slack.review_view(self.org, up)
         self.assertEqual(review["submit"]["text"], "Use these cards")
+        self.assertIn('"Send now"', json.dumps(review))
+        self.assertNotIn("Today, now", json.dumps(review))
         resp = self._post({"type": "view_submission", "view": {**review, "state": {"values": {}}}}).json()
         self.assertEqual(resp["response_action"], "update")
         self.assertEqual(resp["view"]["callback_id"], "aidl_policy_sent")
@@ -4305,7 +4315,7 @@ class CardDesignSystemTests(SimpleTestCase):
         return [f"aup-{n}" for n in range(1, 15)] + ["traffic_light", "highway_code"] + \
             [f"pkg-{no}" for no in by_type.values()] + [f"paw-{c['id']}" for c in policy_awareness.cards()]
 
-    def test_every_card_has_the_aidl_logo_at_the_bottom_and_none_at_the_top(self):
+    def test_no_card_has_an_aidl_logo_at_the_bottom_or_the_top(self):
         import io
 
         from PIL import Image
@@ -4320,7 +4330,7 @@ class CardDesignSystemTests(SimpleTestCase):
             for kind in self._all_kinds():
                 img = Image.open(io.BytesIO(ci.render(kind, org))).convert("RGBA")
                 h = img.height - (ci.SHADOW + 2) * s
-                self.assertGreater(logo_yellow(img, (ci.PAD * s, h - 42 * s, (ci.PAD + 36) * s, h - 6 * s)), 500, kind)
+                self.assertEqual(logo_yellow(img, (ci.PAD * s, h - 42 * s, (ci.PAD + 36) * s, h - 6 * s)), 0, kind)
                 x1 = (ci.W - ci.PAD) * s
                 self.assertEqual(logo_yellow(img, (x1 - 66 * s, 30 * s, x1, 94 * s)), 0, kind)
 
@@ -4404,9 +4414,7 @@ class CardDesignSystemTests(SimpleTestCase):
         mark = ci._aidl_logo(ci.WATERMARK_LOGO, ci.WATERMARK_OPACITY)
         self.assertLessEqual(mark.getchannel("A").getextrema()[1], int(255 * 0.13))
         self.assertEqual(mark.width, ci.WATERMARK_LOGO * ci.S)
-        foot = ci._aidl_logo(ci.FOOTER_LOGO)
-        self.assertEqual(foot.width, ci.FOOTER_LOGO * ci.S)
-        self.assertEqual(foot.getpixel((0, 0))[3], 0)                            # no white square behind it
+        self.assertEqual(mark.getpixel((0, 0))[3], 0)                            # no white square behind it
 
 
 class LicenceDesignTests(TestCase):

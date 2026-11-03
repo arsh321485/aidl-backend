@@ -8,11 +8,11 @@ whole library (design: E:\\AIDL Card Design System.html), drawn with Pillow:
              highway_code), square = awareness ("pkg-<card no>", and the AI
              policy's "paw-<id>", policy_awareness.py)
     action   whatever the card asks people to do is the same sign
-    footer   the AIDL logo (static/aidl/card-logo.png) + AI DRIVING LICENCE + the
-             button to press
+    footer   AI DRIVING LICENCE + the button to press
     mark     behind everything: the company's own logo (Basic and Enterprise,
              Organization.logo_data via licence_image.brand_logo), else its name;
-             Trial cards show a faint AIDL logo and no company.
+             Trial cards show a faint AIDL logo (static/aidl/card-logo.png) and no
+             company.
 
 The body changes with the content; policy cards pick one of four layouts
 (_layout). The approved words are never rewritten: lists from the question
@@ -41,7 +41,7 @@ from .licence_image import brand_logo, text_watermark
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "10"
+DESIGN_VERSION = "11"
 
 
 def valid_kind(kind: str) -> bool:
@@ -66,7 +66,7 @@ GREEN, RED, AMBER, SKY, MUTED = "#2EC866", "#E23A2E", "#FFB000", "#6FB3E0", "#5E
 GREEN_DK, RED_DK = "#1A7F37", "#B42318"
 _FONTS = Path(__file__).resolve().parent / "data" / "fonts"
 _AIDL_LOGO = Path(__file__).resolve().parent / "static" / "aidl" / "card-logo.png"
-FOOTER_LOGO, WATERMARK_LOGO = 36, 300  # widths, the same on every card
+WATERMARK_LOGO = 300  # width, the same on every card
 WATERMARK_OPACITY = 0.12
 COMPANY_MARK = {"angle": 35, "width_ratio": 1.0, "opacity": 0.26}  # the company logo behind every card
 # Pale panels: the watermark shows through them, or tinted rows would hide it.
@@ -332,8 +332,8 @@ def _action_list(d, y, items, label) -> float:
 
 
 def _footer(d, y, press: str) -> float:
-    _rule(d, y)  # _add_logo puts the AIDL logo on the left
-    d.text(_xy(PAD + 46, y + 24), "AIDL · AI DRIVING LICENCE", font=_font("mono", 10), fill=MUTED, anchor="lm")
+    _rule(d, y)
+    d.text(_xy(PAD, y + 24), "AIDL · AI DRIVING LICENCE", font=_font("mono", 10), fill=MUTED, anchor="lm")
     d.text(_xy(W - PAD, y + 24), f"PRESS  {press}  BELOW", font=_font("mono", 10), fill=MUTED, anchor="rm")
     return y + 48
 
@@ -682,12 +682,6 @@ def _aidl_watermark(img: Image.Image) -> None:
     img.alpha_composite(mark, ((img.width - mark.width) // 2, max(0, (img.height - mark.height) // 2)))
 
 
-def _add_logo(img: Image.Image) -> None:
-    """The AIDL logo in the footer."""
-    foot = _aidl_logo(FOOTER_LOGO)
-    img.alpha_composite(foot, (PAD * S, img.height - 24 * S - foot.height // 2))
-
-
 def _watermark(body: Image.Image, org) -> None:
     """Behind every card: the company's logo, else its name. Trial: AIDL's logo."""
     logo = brand_logo(org)
@@ -755,7 +749,6 @@ def render(kind: str, org) -> bytes:
     body = background.copy()
     _draw(kind, ImageDraw.Draw(body), org)
     _show_through_panels(body, background)
-    _add_logo(body)
     return _png(_frame(body))
 
 

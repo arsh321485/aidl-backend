@@ -151,7 +151,6 @@
           <div class="label-caps strip-label">Permissions</div>
           <div class="perm-grid">
             <button type="button" class="perm-chip" data-perm="approve_apps" aria-pressed="true"><b>Approve Apps</b><span>Change the AI / IT registry</span></button>
-            <button type="button" class="perm-chip" data-perm="create_card" aria-pressed="false"><b>Request New Cards</b><span>Request new awareness cards for review</span></button>
           </div>
           <div class="actions-row">
             <button class="slack-btn primary" type="submit">Send Admin Invite</button>
@@ -242,14 +241,6 @@
         </div>
         {% endif %}
 
-        {% if d.can_create_card %}
-        <div class="label-caps strip-label">Need something that's not listed?</div>
-        <div class="section-text" style="margin-top: 0;">Request a brand-new reference card for your team — we'll scope it and follow up with pricing.</div>
-        <div id="customRequests"></div>
-        <div class="actions-row">
-          <button class="slack-btn" type="button" id="openRequestNew">＋ Request a New Card</button>
-        </div>
-        {% endif %}
         <div class="next-hint">→ Next: set which AI tools your team is allowed to use</div>
       </div>
     </div>
@@ -324,30 +315,6 @@
         <button class="slack-btn primary" type="button" id="sendCardBtn">Send Card</button>
       </div>
     </div>
-  </div>
-</div>
-
-{# ================= MODAL: request a new card ================= #}
-<div class="modal-backdrop" id="requestNewModal" role="dialog" aria-modal="true" aria-labelledby="requestNewTitle">
-  <div class="modal">
-    <div class="modal-head">
-      <div><div class="label-caps">Custom Request</div><h3 id="requestNewTitle">Request a New Card</h3></div>
-      <button class="modal-close" type="button" data-close="requestNewModal" aria-label="Close">✕</button>
-    </div>
-    <form id="requestNewForm" novalidate>
-      <div class="modal-body">
-        <div class="field"><label class="label-caps" for="reqName">Card Name</label><input type="text" id="reqName" placeholder="e.g. Vendor Risk Checklist" /></div>
-        <div class="field"><label class="label-caps" for="reqDesc">What should it cover?</label><input type="text" id="reqDesc" placeholder="Brief description of the topic or guidance needed" /></div>
-        <div class="field"><label class="label-caps" for="reqPriority">Priority</label><select id="reqPriority"><option>Standard</option><option>Urgent</option></select></div>
-        <div class="warn-text" id="reqWarn" hidden></div>
-      </div>
-      <div class="modal-foot">
-        <div class="modal-foot-row">
-          <span class="modal-status">Counts toward your monthly quota · pricing scoped after review</span>
-          <button class="slack-btn primary" type="submit">Submit Request</button>
-        </div>
-      </div>
-    </form>
   </div>
 </div>
 
@@ -601,37 +568,6 @@
       }
       renderRow(c);
       renderModalFoot();
-    });
-  }
-
-  /* ---------- Request a New Card (8.4) ---------- */
-  if ($('openRequestNew')) {
-    $('openRequestNew').addEventListener('click', function () {
-      $('requestNewForm').reset();
-      $('reqWarn').hidden = true;
-      openModal('requestNewModal');
-    });
-    $('requestNewForm').addEventListener('submit', function (e) {
-      e.preventDefault();
-      var name = $('reqName').value.trim();
-      if (!name) { $('reqName').focus(); return; }
-      if (quotaFull()) {
-        $('reqWarn').textContent = 'Monthly quota reached — new requests open next month.';
-        $('reqWarn').hidden = false;
-        return;
-      }
-      D.quota_used += 1;
-      renderQuota();
-      var row = document.createElement('div');
-      row.className = 'ref-item';
-      row.innerHTML = '<span class="ref-icon" aria-hidden="true">🆕</span><div class="ref-body"><div class="ref-head">' +
-        '<div class="ref-title"></div><div class="ref-action"><span class="state-badge pending">⏳ Pending Review</span></div></div>' +
-        '<div class="label-caps ref-kicker"></div><div class="ref-desc"></div></div>';
-      row.querySelector('.ref-title').textContent = name;
-      row.querySelector('.ref-kicker').textContent = 'Custom Request · ' + $('reqPriority').value;
-      row.querySelector('.ref-desc').textContent = $('reqDesc').value.trim() || 'No additional details provided.';
-      $('customRequests').appendChild(row);
-      closeModal('requestNewModal');
     });
   }
 

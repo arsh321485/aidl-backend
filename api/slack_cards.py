@@ -397,7 +397,7 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "ai_apps": ai_apps, "it_apps": it_apps,
             "cards": _card_rows(None, len(ai_apps) + len(it_apps)),
             "tabs": [t[0] for t in ADMIN_TABS],
-            "can_manage_cards": True, "can_create_card": True,
+            "can_manage_cards": True,
         }
     else:
         metrics = compute_org_metrics(org)
@@ -436,7 +436,6 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
             "cards": _card_rows(org, metrics["total_apps"]),
             "tabs": _visible_admin_tabs(user, is_primary),
             "can_manage_cards": False,  # the paid reference cards are gone from Slack
-            "can_create_card": is_primary or user.perm_create_card,
             "is_primary": is_primary,
             "admins": [{
                 "id": str(a.pk), "name": a.full_name or a.email, "email": a.email, "primary": a.pk == admins[0].pk,
@@ -634,7 +633,6 @@ def light_admin_context(user: AIDLUser, *, cards: bool = False) -> dict:
         "tabs": _visible_admin_tabs(user, owner),
         "is_primary": owner,
         "can_manage_cards": False,  # the paid reference cards are gone from Slack
-        "can_create_card": owner or user.perm_create_card,
         "can_policy": owner or user.perm_policy or user.perm_approve_apps,
         "can_admins": owner or user.perm_manage_admins,
         "can_team": owner or user.perm_manage_admins,
