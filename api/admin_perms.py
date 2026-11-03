@@ -77,7 +77,13 @@ def notify_master(org: Organization, by: AIDLUser, text: str) -> None:
     from .slack_onboarding import primary_admin
 
     master = primary_admin(org)
-    if master is None or master.pk == by.pk or not master.microsoft_id.startswith("slack:"):
+    if master is None or master.pk == by.pk:
+        return
+    if not master.microsoft_id.startswith("slack:"):
+        from .teams_channel import email, is_teams
+
+        if is_teams(org):
+            email(master, "AIDL: a change by another admin", text, "admin/")
         return
     slack_client.send_dm(slack_client.bot_token(org), org, master.microsoft_id.split(":")[-1], text=text,
                          blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": text}}])

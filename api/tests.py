@@ -140,6 +140,7 @@ class AddAdminPermissionsTests(TestCase):
         self.assertEqual(resp.status_code, 403)
 
 
+@override_settings(MS_TEAMS_LEGACY_ENABLED=True)
 class PolicyUploadTests(TestCase):
     def setUp(self):
         self.org = make_org()
@@ -201,6 +202,7 @@ class PolicyUploadTests(TestCase):
         self.assertIn("/api/teams/admin/policy/file/", placeholder["policy_url"])
 
 
+@override_settings(MS_TEAMS_LEGACY_ENABLED=True)
 class CardsCatalogueTests(TestCase):
     def setUp(self):
         self.org = make_org()
@@ -409,6 +411,7 @@ class InviteEmailLinkTests(TestCase):
         self.assertIn("/api/auth/teams/login-redirect/", kwargs["body_html"])
 
 
+@override_settings(MS_TEAMS_LEGACY_ENABLED=True)
 class BotAdaptiveCardActionsTests(TestCase):
     """The in-Teams native path: Action.Execute invoke payloads hitting the
     bot messaging endpoint directly (no Website Tab, no JWT) — same shape
@@ -4511,6 +4514,7 @@ class LicenceDesignTests(TestCase):
         self.assertEqual((resp.status_code, resp.content[1:4]), (200, b"PNG"))
         self.assertIn("attachment", resp["Content-Disposition"])
 
+    @override_settings(MS_TEAMS_LEGACY_ENABLED=True)
     def test_teams_download_is_the_same_design(self):
         from urllib.parse import quote
 
@@ -4532,3 +4536,678 @@ class LicenceDesignTests(TestCase):
         card = _licence_card_visual(full_name="", org_name="Secureitlab", user=self.member)
         self.assertEqual(card["type"], "Image")
         self.assertIn("/cards/learners-permit/download/?email=", card["url"])
+
+
+@override_settings(SLACK_REPLY_SYNC=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                   TEAMS_CRON_SECRET="cron-secret", DEBUG=False)
+class TeamsWithoutBotTests(TestCase):
+    """The Slack programme in a Teams channel: posts through Graph, pages for the buttons."""
+
+    TENANT = "11111111-2222-3333-4444-555555555555"
+
+    def setUp(self):
+        from django.core import mail
+
+        self.org = make_org(name="Secureitlab", teams_team_id="team-1", ms_tenant_id=self.TENANT,
+                            teams_welcome_channel_id="chan-1", plan="basic", seats_purchased=50)
+        self.admin = make_user(self.org, full_name="Asha Admin", ms_refresh_token="x")
+        self.org.owner_user_id = str(self.admin.pk)
+        self.org.save(update_fields=["owner_user_id"])
+        self.member = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Ravi Member")
+        self.posts = []
+        mail.outbox = []
+        self.mail = mail
+
+        def fake_post(url, headers=None, json=None, timeout=None, **kw):
+            self.posts.append(json)
+
+            class R:
+                status_code, content, headers = 201, b"{}", {}
+
+                def json(self_inner):
+                    return {"id": f"msg-{len(self.posts)}"}
+            return R()
+
+        for target, kwargs in (("api.teams_channel.token_for", {"return_value": "tok"}),
+                               ("api.teams_channel.requests.post", {"side_effect": fake_post}),
+                               ("api.teams_channel.dispatch_if_due", {}),
+                               ("api.teams_messaging.delete_channel_message", {"return_value": True})):
+            p = patch(target, **kwargs)
+            setattr(self, target.rsplit(".", 1)[1], p.start())
+            self.addCleanup(p.stop)
+
+    def _client(self, user=None) -> APIClient:
+        from .teams_portal import COOKIE, _session_token
+
+        client = APIClient()
+        if user is not None:
+            client.cookies[COOKIE] = _session_token(user)
+        return client
+
+    def _titles(self) -> list[str]:
+        return [p["subject"] for p in self.posts]
+
+    def _ready(self):
+        """Policy approved, onboarding approved, every awareness card approved."""
+        _answer_policy(self.org)
+        _approve_all(self.org)
+        self.org.refresh_from_db()
+
+    # ---------- closed doors ----------
+
+    def test_session_endpoint_no_longer_hands_out_admin_tokens(self):
+        resp = APIClient().post("/api/teams/admin/session/", {"email": self.admin.email}, format="json")
+        self.assertEqual(resp.status_code, 410)
+        self.assertNotIn("access_token", resp.json())
+
+    def test_old_endpoints_that_trust_an_email_are_off(self):
+        for url in ("/api/teams/tabs/home/", f"/api/teams/admin/home/?email={self.admin.email}",
+                    f"/api/teams/admin/export/?email={self.admin.email}",
+                    f"/api/teams/cards/learners-permit/download/?email={self.member.email}"):
+            self.assertEqual(APIClient().get(url).status_code, 404, url)
+        self.assertEqual(APIClient().post("/api/teams/bot/messages/", {"type": "message"}, format="json").status_code, 404)
+
+    def test_scopes_leave_out_what_msal_refuses(self):
+        import importlib
+        import os
+
+        from config import settings as cfg
+
+        with patch.dict(os.environ, {"MS_SCOPES": "User.Read,offline_access,openid,profile,Mail.Send"}):
+            self.assertEqual(importlib.reload(cfg).MS_SCOPES, ["User.Read", "Mail.Send"])
+        importlib.reload(cfg)
+
+    def test_pages_need_sign_in_and_sign_in_only_returns_to_our_pages(self):
+        from .teams_portal import _safe_next
+
+        resp = APIClient().get("/api/teams/app/admin/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/api/teams/app/login/", resp["Location"])
+        for bad in ("https://evil.example/", "//evil.example/", "/api/teams/app//evil.example", "/api/auth/me/"):
+            self.assertEqual(_safe_next(bad), "/api/teams/app/", bad)
+        self.assertEqual(_safe_next("/api/teams/app/me/cards/001/"), "/api/teams/app/me/cards/001/")
+
+    def test_employees_cannot_open_admin_pages(self):
+        client = self._client(self.member)
+        for path in ("admin/", "admin/policy/", "admin/admins/", "admin/team/", "admin/cards/", "admin/apps/",
+                     "admin/coverage.csv", "admin/plans/"):
+            self.assertEqual(client.get(f"/api/teams/app/{path}").status_code, 403, path)
+        self.assertEqual(client.post("/api/teams/app/admin/action/", {"action": "start"}).status_code, 403)
+
+    def test_admins_only_get_the_pages_their_permissions_allow(self):
+        co = make_user(self.org, full_name="Co Admin", perm_approve_apps=False, perm_manage_admins=False,
+                       perm_policy=False, perm_billing=False, perm_approve_cards=False)
+        client = self._client(co)
+        self.assertEqual(client.get("/api/teams/app/admin/").status_code, 200)
+        for path in ("admin/policy/", "admin/admins/", "admin/apps/", "admin/plans/"):
+            self.assertEqual(client.get(f"/api/teams/app/{path}").status_code, 403, path)
+        self.assertNotEqual(client.get("/api/teams/app/admin/cards/").status_code, 500)
+        resp = client.post("/api/teams/app/admin/cards/action/", {"action": "approve_all"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_one_companys_data_stays_out_of_anothers(self):
+        other = make_org(name="Other Co", teams_team_id="team-2", ms_tenant_id="tenant-2")
+        stranger = make_user(other, role=AIDLUser.Role.LEARNER)
+        client = self._client(self.admin)
+        client.post("/api/teams/app/admin/team/", {"action": "remove", "user_id": str(stranger.pk)})
+        stranger.refresh_from_db()
+        self.assertIsNone(stranger.slack_left_at)
+        self.assertEqual(client.post("/api/teams/app/admin/action/", {"action": "remind_person",
+                                                                      "user_id": str(stranger.pk)}).status_code, 302)
+        self.assertEqual(self.posts, [])
+
+    def test_slack_organizations_are_not_treated_as_teams(self):
+        from .teams_channel import is_teams
+
+        self.assertTrue(is_teams(self.org))
+        self.assertFalse(is_teams(make_org(slack_team_id="T1", slack_bot_token="x")))
+        self.assertFalse(is_teams(make_org()))
+        slack_user = make_user(make_org(slack_team_id="T1x"))
+        self.assertEqual(self._client(slack_user).get("/api/teams/app/admin/").status_code, 403)
+
+    # ---------- which organization ----------
+
+    def test_two_tenants_never_share_an_organization(self):
+        from .org_service import ensure_organization_for_login
+
+        a = make_user(self.org, organization_id="", enroll_as="organization", role=AIDLUser.Role.LEARNER)
+        b = make_user(self.org, organization_id="", enroll_as="organization", role=AIDLUser.Role.LEARNER)
+        org_a = ensure_organization_for_login(a, org_name="Same Name", tenant_id="tenant-a")
+        org_b = ensure_organization_for_login(b, org_name="Same Name", tenant_id="tenant-b")
+        self.assertNotEqual(org_a.pk, org_b.pk)
+        a.refresh_from_db()
+        self.assertEqual(a.role, AIDLUser.Role.ADMIN)
+        org_a.refresh_from_db()
+        self.assertEqual(org_a.owner_user_id, str(a.pk))
+
+    def test_choosing_organization_does_not_make_a_colleague_admin(self):
+        from .org_service import ensure_organization_for_login
+
+        colleague = make_user(self.org, organization_id="", enroll_as="organization", role=AIDLUser.Role.LEARNER)
+        org = ensure_organization_for_login(colleague, tenant_id=self.TENANT)
+        self.assertEqual(org.pk, self.org.pk)
+        colleague.refresh_from_db()
+        self.assertEqual(colleague.role, AIDLUser.Role.LEARNER)
+
+    def _callback(self, profile, tid, payload="", enroll="organization", refresh="rt"):
+        from .microsoft_auth import create_oauth_state
+
+        state = create_oauth_state(enroll, payload)
+        token = {"access_token": "ms", "refresh_token": refresh, "id_token_claims": {"tid": tid}}
+        with patch("api.auth_views.microsoft_configured", return_value=True), \
+                patch("api.auth_views.exchange_code_for_token", return_value=token), \
+                patch("api.auth_views.fetch_microsoft_profile", return_value=profile):
+            return APIClient().get(f"/api/auth/teams/callback/?code=c&state={state}")
+
+    def test_personal_microsoft_accounts_are_turned_away(self):
+        from .teams_channel import PERSONAL_TENANT
+
+        resp = self._callback({"microsoft_id": "p1", "email": "me@outlook.com", "full_name": "Me"}, PERSONAL_TENANT)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("error=work_account_required", resp["Location"])
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="p1").exists())
+
+    def test_a_colleague_joins_and_does_not_create_a_second_team(self):
+        with patch("api.auth_views.ensure_aidl_channel") as ensure, patch("api.microsoft_auth.in_team", return_value=True):
+            resp = self._callback({"microsoft_id": "aad-new", "email": "new@x.example", "full_name": "New Person"}, self.TENANT)
+        ensure.assert_not_called()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/api/teams/app/")
+        user = AIDLUser.objects.get(microsoft_id="aad-new")
+        self.assertEqual((user.role, user.organization_id), (AIDLUser.Role.LEARNER, str(self.org.pk)))
+        self.assertEqual(user.ms_refresh_token, "")  # only admins' logins are kept
+        self.assertTrue(resp.cookies["aidl_teams"]["httponly"])
+
+    def test_someone_outside_the_team_is_refused(self):
+        with patch("api.microsoft_auth.in_team", return_value=False):
+            resp = self._callback({"microsoft_id": "aad-x", "email": "x@x.example", "full_name": "X"}, self.TENANT,
+                                  payload="app:/api/teams/app/")
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="aad-x").exists())
+
+    def test_first_admin_login_sets_up_the_org_and_channel_and_seals_the_token(self):
+        from .microsoft_auth import open_refresh_token
+
+        info = {"team_id": "team-9", "channel_id": "chan-9", "channel_name": "aidl dashboard", "teams_url": "https://teams/l/channel/x"}
+        with patch("api.auth_views.ensure_aidl_channel", return_value=info), \
+                patch("api.auth_views.tenant_display_name", return_value="Fresh Co"):
+            resp = self._callback({"microsoft_id": "aad-owner", "email": "o@fresh.example", "full_name": "Owner"}, "tenant-9")
+        self.assertEqual(resp.status_code, 302)
+        org = Organization.objects.get(ms_tenant_id="tenant-9")
+        self.assertEqual((org.name, org.teams_team_id, org.teams_welcome_channel_id), ("Fresh Co", "team-9", "chan-9"))
+        owner = AIDLUser.objects.get(microsoft_id="aad-owner")
+        self.assertEqual(owner.role, AIDLUser.Role.ADMIN)
+        self.assertNotEqual(owner.ms_refresh_token, "rt")
+        self.assertEqual(open_refresh_token(owner.ms_refresh_token), "rt")
+        self.assertIn("AI Driving Licence", self._titles())
+        self.assertIn("aidl_teams", resp.cookies)
+
+    def test_tokens_saved_before_encryption_still_work(self):
+        from .microsoft_auth import open_refresh_token, seal_refresh_token
+
+        self.assertEqual(open_refresh_token("old-plain-token"), "old-plain-token")
+        self.assertEqual(open_refresh_token(seal_refresh_token("new")), "new")
+
+    # ---------- every page draws ----------
+
+    def test_every_admin_page_draws(self):
+        self._ready()
+        client = self._client(self.admin)
+        directory = [{"user_id": "aad-z", "email": "z@x.example", "full_name": "Zed"}]
+        with patch("api.microsoft_auth.directory_users", return_value=directory), self.settings(REGULATORS_PREVIEW=True):
+            aup_store_company = client.post("/api/teams/app/admin/policy/", {"countries": ["India"], "industry": "Other"})
+            self.assertEqual(aup_store_company.status_code, 302)
+            for path in ("admin/", "admin/policy/", "admin/policy/?company=1", "admin/policy/upload/?new=1", "admin/regulators/",
+                         "admin/logo/", "admin/admins/", "admin/team/", "admin/cards/", "admin/cards/?month=2", "admin/apps/",
+                         "admin/apps/?kind=it", "admin/alerts/", *[f"admin/policy/{n}/" for n in range(1, 15)]):
+                resp = client.get(f"/api/teams/app/{path}")
+                self.assertEqual(resp.status_code, 200, path)
+                self.assertNotIn("in Slack", resp.content.decode(), path)
+        self.assertEqual(client.get("/api/teams/app/").status_code, 302)
+        self.assertIn("aidl-coverage.csv", client.get("/api/teams/app/admin/coverage.csv")["Content-Disposition"])
+        self.assertIn("/plans?token=", client.get("/api/teams/app/admin/plans/")["Location"])
+
+    def test_forms_work_with_csrf_on_and_fail_without_it(self):
+        from .teams_portal import COOKIE, _session_token
+
+        client = APIClient(enforce_csrf_checks=True)
+        client.cookies[COOKIE] = _session_token(self.member)
+        url = "/api/teams/app/me/action/"
+        self.assertEqual(client.post(url, {"action": "start"}).status_code, 403)
+        client.get("/api/teams/app/me/request-app/")
+        token = client.cookies["csrftoken"].value
+        self.assertEqual(client.post(url, {"action": "start", "csrfmiddlewaretoken": token}).status_code, 302)
+
+    def test_timezone_from_the_admins_browser(self):
+        from .admin_setup import state
+        from .teams_channel import _tz_offset
+
+        client = self._client(self.admin)
+        self.assertEqual(client.post("/api/teams/app/admin/timezone/", {"offset": "330"}).status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(state(self.org)["tz_offset_min"], 330)
+        self.assertEqual(_tz_offset(self.org), 19800)
+        self.assertEqual(client.post("/api/teams/app/admin/timezone/", {"offset": "x"}).status_code, 400)
+
+    # ---------- step 1: a policy card ----------
+
+    def test_policy_card_saves_redraws_and_approves(self):
+        from . import aup_store
+
+        client = self._client(self.admin)
+        client.post("/api/teams/app/admin/policy/", {"countries": ["India"], "industry": "Other"})
+        page = client.get("/api/teams/app/admin/policy/2/").content.decode()
+        self.assertIn("Send now", page)
+        self.assertNotIn("Today, now", page)
+        self.org.refresh_from_db()
+        a = aup_store.answers(self.org)["answers"]
+        from .policy_cards import questions
+
+        data = {}
+        for q in questions(2, a):
+            data[f"q|{q['id']}"] = a.get(q["id"], "")
+        self.assertEqual(client.post("/api/teams/app/admin/policy/2/", data).status_code, 200)  # redraw
+        self.org.refresh_from_db()
+        self.assertIsNone(aup_store.card(self.org, 2))                                          # nothing approved yet
+        resp = client.post("/api/teams/app/admin/policy/2/", {**data, "action": "approve", "when": "today"})
+        self.assertEqual(resp.status_code, 302)
+        self.org.refresh_from_db()
+        self.assertIsNotNone(aup_store.card(self.org, 2))
+        self.assertEqual(self.posts, [])                                                        # not started yet
+
+    def test_approving_with_a_missing_answer_shows_it_and_saves_nothing(self):
+        from . import aup_store
+
+        client = self._client(self.admin)
+        resp = client.post("/api/teams/app/admin/policy/7/", {"q|7.1": "", "action": "approve", "when": "today"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Please check", resp.content.decode())
+        self.org.refresh_from_db()
+        self.assertIsNone(aup_store.card(self.org, 7))
+
+    def test_a_card_for_a_past_day_is_refused(self):
+        client = self._client(self.admin)
+        resp = client.post("/api/teams/app/admin/policy/2/", {"action": "approve", "when": "day", "day": "2020-01-01"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Pick today or a later day.", resp.content.decode())
+
+    # ---------- step 3 ----------
+
+    def test_add_people_respects_the_plan(self):
+        self.org.plan = "trial"
+        self.org.save(update_fields=["plan"])
+        people = [{"user_id": f"aad-{i}", "email": f"p{i}@x.example", "full_name": f"P{i}"} for i in range(9)]
+        client = self._client(self.admin)
+        with patch("api.microsoft_auth.directory_users", return_value=people), \
+                patch("api.microsoft_auth.add_team_member", return_value={"ok": True}) as add:
+            resp = client.post("/api/teams/app/admin/team/", {"everyone": "1"})
+            self.assertIn("seats", resp["Location"])
+            add.assert_not_called()
+            resp = client.post("/api/teams/app/admin/team/", {"people": ["aad-1", "aad-2"]})
+            self.assertEqual(add.call_count, 2)
+        self.assertEqual(AIDLUser.objects.filter(microsoft_id__in=["aad-1", "aad-2"], role="learner").count(), 2)
+
+    def test_directory_failure_is_not_shown_as_an_empty_company(self):
+        with patch("api.microsoft_auth.directory_users", return_value=None):
+            page = self._client(self.admin).get("/api/teams/app/admin/team/").content.decode()
+        self.assertIn("couldn't load", page)
+        self.assertNotIn("Everyone in your company", page)
+
+    # ---------- the programme, start to finish ----------
+
+    def test_full_journey_from_start_to_licence_to_got_it(self):
+        from . import aup_store
+        from .models import PackageDelivery
+
+        self._ready()
+        admin, me = self._client(self.admin), self._client(self.member)
+        self.assertIn("Nothing to do yet", me.get("/api/teams/app/me/").content.decode())
+
+        resp = admin.post("/api/teams/app/admin/action/", {"action": "start"})
+        self.assertEqual(resp.status_code, 302)
+        self.org.refresh_from_db()
+        self.assertTrue(any(t.startswith("Welcome") for t in self._titles()))
+        welcome = next(p for p in self.posts if p["subject"].startswith("Welcome"))
+        self.assertEqual(welcome["mentions"][0]["mentioned"]["user"]["id"], self.member.microsoft_id)
+        self.assertEqual(sum(t.startswith("Policy card") for t in self._titles()), 14)
+        self.assertTrue(any(self.member.email in m.to for m in self.mail.outbox))
+
+        page = me.get("/api/teams/app/me/").content.decode()
+        self.assertIn("Let's go", page)
+        me.post("/api/teams/app/me/action/", {"action": "start"})
+        page = me.get("/api/teams/app/me/").content.decode()
+        self.assertIn("Traffic Light Check", page)
+        self.assertIn("I agree", page)
+
+        # an out-of-date card is refused, then the current one counts
+        resp = me.post("/api/teams/app/me/action/", {"action": "agree", "n": "1", "version": "P1-OLD"})
+        self.assertIn("updated", resp["Location"])
+        self.org.refresh_from_db()
+        for n, ver in aup_store.required_points(self.org).items():
+            me.post("/api/teams/app/me/action/", {"action": "agree", "n": str(n), "version": ver})
+        self.member.refresh_from_db()
+        self.assertFalse(self.member.licence_issued)
+
+        me.post("/api/teams/app/me/action/", {"action": "traffic_light"})
+        self.assertIn("Highway Code", me.get("/api/teams/app/me/").content.decode())
+        me.post("/api/teams/app/me/action/", {"action": "highway_code"})
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.licence_issued)
+
+        self.assertIn("Create my avatar", me.get("/api/teams/app/me/").content.decode())
+        self.member.avatar_data = "x"
+        self.member.save(update_fields=["avatar_data"])
+        page = me.get("/api/teams/app/me/").content.decode()
+        self.assertIn("road-ready", page)
+        self.assertIn(self.member.licence_number, page)
+
+        # the first awareness card came with the licence; the rest are saved for later
+        rows = PackageDelivery.objects.filter(user_id=str(self.member.pk))
+        self.assertEqual(rows.filter(status="sent").count(), 1)
+        self.assertGreater(rows.filter(status="scheduled").count(), 50)
+        first = rows.get(status="sent")
+        self.assertIn(first.card_no, me.get("/api/teams/app/me/cards/").content.decode())
+        me.post(f"/api/teams/app/me/cards/{first.card_no}/")
+        first.refresh_from_db()
+        self.assertIsNotNone(first.acked_at)
+        self.assertIn("Acknowledged", me.get(f"/api/teams/app/me/cards/{first.card_no}/").content.decode())
+
+        # someone else's card, or one not sent yet, doesn't open
+        later = rows.filter(status="scheduled").first()
+        self.assertIn("isn&#x27;t for you yet", me.get(f"/api/teams/app/me/cards/{later.card_no}/").content.decode())
+
+    def test_start_is_refused_until_onboarding_cards_are_approved(self):
+        _answer_policy(self.org)
+        resp = self._client(self.admin).post("/api/teams/app/admin/action/", {"action": "start"})
+        self.assertIn("Approve", resp["Location"])
+        self.assertEqual(self.posts, [])
+
+    def test_an_unapproved_card_waits_and_cannot_be_acknowledged(self):
+        from .admin_setup import update
+        from .licensing import acknowledged_items
+
+        update(self.org, flow_started="now")
+        self.member.slack_onboarded_at = timezone.now()
+        self.member.save(update_fields=["slack_onboarded_at"])
+        me = self._client(self.member)
+        self.assertIn("on its way", me.get("/api/teams/app/me/").content.decode())
+        me.post("/api/teams/app/me/action/", {"action": "traffic_light"})
+        self.assertNotIn("traffic_light", acknowledged_items(self.member))
+
+    def test_licence_waits_for_a_seat_and_the_owner_is_told(self):
+        from .admin_setup import update
+        from .licensing import acknowledge
+
+        self.org.plan = "trial"
+        self.org.save(update_fields=["plan"])
+        for i in range(5):
+            make_user(self.org, role=AIDLUser.Role.LEARNER, licence_issued=True, licence_number=f"AIDL-L-{i}")
+        _approve_all(self.org)
+        update(self.org, flow_started="now")
+        acknowledge(self.member, "traffic_light")
+        self.member.slack_onboarded_at = timezone.now()
+        self.member.save(update_fields=["slack_onboarded_at"])
+        self._client(self.member).post("/api/teams/app/me/action/", {"action": "highway_code"})
+        self.member.refresh_from_db()
+        self.assertFalse(self.member.licence_issued)
+        self.assertTrue(any("no free licence seats" in m.subject for m in self.mail.outbox))
+
+    # ---------- the hourly job ----------
+
+    def test_due_cards_go_out_once_for_everyone(self):
+        from .models import PackageDelivery, TeamsPost
+        from .plans import library
+        from .teams_channel import deliver_due
+
+        self._ready()
+        other = make_user(self.org, role=AIDLUser.Role.LEARNER, licence_issued=True, licence_number="AIDL-L-2")
+        self.member.licence_issued = True
+        self.member.save(update_fields=["licence_issued"])
+        no = library()[0]["no"]
+        past = timezone.now() - timedelta(minutes=5)
+        for person in (self.member, other):
+            PackageDelivery.objects.create(organization_id=str(self.org.pk), user_id=str(person.pk), package="basic",
+                                           card_no=no, post_order=2, post_at=past)
+        self.assertEqual(deliver_due(self.org), 2)
+        self.assertEqual(deliver_due(self.org), 0)
+        self.assertEqual(TeamsPost.objects.filter(organization_id=str(self.org.pk), key=f"pkg:{no}").count(), 1)
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(PackageDelivery.objects.filter(card_no=no, status="sent").count(), 2)
+
+    def test_a_post_that_failed_is_tried_again(self):
+        from .models import TeamsPost
+        from .teams_channel import post_once
+
+        with patch("api.teams_channel.post", return_value={"ok": False, "error": "graph_http_403"}):
+            self.assertFalse(post_once(self.org, "k1", "Title"))
+        self.assertFalse(TeamsPost.objects.filter(key="k1").exists())
+        self.assertTrue(post_once(self.org, "k1", "Title"))
+        self.assertFalse(post_once(self.org, "k1", "Title"))
+
+    def test_microsofts_rate_limit_is_waited_out(self):
+        from .teams_channel import post
+
+        answers = [(429, {"Retry-After": "0"}), (201, {})]
+
+        def fake(url, headers=None, json=None, timeout=None):
+            code, hdrs = answers.pop(0)
+
+            class R:
+                status_code, headers, content, text = code, hdrs, b"{}", ""
+
+                def json(self_inner):
+                    return {"id": "m"}
+            return R()
+
+        with patch("api.teams_channel.requests.post", side_effect=fake), patch("api.teams_channel.time.sleep"):
+            self.assertTrue(post(self.org, "T")["ok"])
+
+    def test_dated_policy_card_waits_until_ten_on_its_day(self):
+        from . import aup_store
+        from .admin_setup import update
+        from .teams_channel import _due_policy
+
+        update(self.org, flow_started="now", tz_offset_min=0)
+        today = timezone.now().date().isoformat()
+        aup_store.save_card(self.org, 2, "Monitoring", ["A rule."], send_on=today)
+        with patch("api.teams_channel.timezone.now", return_value=timezone.now().replace(hour=9, minute=0)):
+            self.assertNotIn(2, _due_policy(self.org))
+        with patch("api.teams_channel.timezone.now", return_value=timezone.now().replace(hour=10, minute=0)):
+            self.assertIn(2, _due_policy(self.org))
+
+    def test_someone_who_joined_the_team_gets_welcomed_and_a_leaver_is_suspended(self):
+        from .admin_setup import update
+        from .teams_channel import sync_team
+
+        update(self.org, flow_started="now")
+        self.member.licence_issued, self.member.licence_number = True, "AIDL-L-1"
+        self.member.save(update_fields=["licence_issued", "licence_number"])
+        roster = [{"user_id": self.admin.microsoft_id, "email": self.admin.email, "full_name": "A", "roles": ["owner"]},
+                  {"user_id": "aad-joiner", "email": "j@x.example", "full_name": "Jo Joiner", "roles": []},
+                  {"user_id": "aad-guest", "email": "g@x.example", "full_name": "Guest", "roles": ["guest"]}]
+        with patch("api.microsoft_auth.team_roster", return_value=roster):
+            out = sync_team(self.org)
+        self.assertEqual(out, {"joined": 1, "left": 1})
+        self.assertTrue(AIDLUser.objects.filter(microsoft_id="aad-joiner", role="learner").exists())
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="aad-guest").exists())
+        self.assertTrue(any(t.startswith("Welcome") for t in self._titles()))
+        self.member.refresh_from_db()
+        self.assertIsNotNone(self.member.slack_left_at)
+        from .licensing import licence_status
+
+        self.assertEqual(licence_status(self.member), "SUSPENDED")
+        self.assertIn("no longer in the programme", self._client(self.member).get("/api/teams/app/me/").content.decode())
+
+        roster.append({"user_id": self.member.microsoft_id, "email": self.member.email, "full_name": "R", "roles": []})
+        with patch("api.microsoft_auth.team_roster", return_value=roster):
+            sync_team(self.org)
+        self.member.refresh_from_db()
+        self.assertIsNone(self.member.slack_left_at)
+
+    def test_a_failed_member_list_never_removes_anyone(self):
+        from .teams_channel import sync_team
+
+        for answer in (None, []):
+            with patch("api.microsoft_auth.team_roster", return_value=answer):
+                self.assertEqual(sync_team(self.org), {"skipped": "no_list"})
+        self.member.refresh_from_db()
+        self.assertIsNone(self.member.slack_left_at)
+
+    def test_full_plan_takes_a_new_joiner_back_out(self):
+        from .teams_channel import sync_team
+
+        self.org.plan = "trial"
+        self.org.save(update_fields=["plan"])
+        for i in range(4):
+            make_user(self.org, role=AIDLUser.Role.LEARNER)
+        roster = [{"user_id": u.microsoft_id, "email": u.email, "full_name": "x", "roles": []}
+                  for u in AIDLUser.objects.filter(organization_id=str(self.org.pk))]
+        roster.append({"user_id": "aad-extra", "email": "e@x.example", "full_name": "Extra", "roles": []})
+        with patch("api.microsoft_auth.team_roster", return_value=roster), \
+                patch("api.microsoft_auth.remove_team_member", return_value=True) as out:
+            sync_team(self.org)
+        out.assert_called_once_with("tok", "team-1", "aad-extra")
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="aad-extra").exists())
+        self.assertTrue(any("plan is full" in m.subject for m in self.mail.outbox))
+
+    def test_reminder_after_a_week_mentions_who_has_not_acknowledged(self):
+        from .models import PackageDelivery
+        from .plans import library
+        from .teams_channel import send_reminders
+
+        self.member.licence_issued = True
+        self.member.save(update_fields=["licence_issued"])
+        no = library()[0]["no"]
+        row = PackageDelivery.objects.create(organization_id=str(self.org.pk), user_id=str(self.member.pk), package="basic",
+                                             card_no=no, post_order=1, status="sent",
+                                             post_at=timezone.now() - timedelta(days=8))
+        self.assertEqual(send_reminders(self.org), 1)
+        self.assertEqual(self.posts[-1]["mentions"][0]["mentioned"]["user"]["id"], self.member.microsoft_id)
+        self.assertEqual(send_reminders(self.org), 0)
+        row.refresh_from_db()
+        self.assertIsNotNone(row.reminded_at)
+
+    def test_dispatch_url_needs_the_secret(self):
+        url = "/api/teams/app/dispatch/"
+        self.assertEqual(APIClient().post(url).status_code, 403)
+        self.assertEqual(APIClient().post(url, HTTP_AUTHORIZATION="Bearer wrong").status_code, 403)
+        with patch("api.teams_channel.dispatch_all", return_value={}) as run:
+            self.assertEqual(APIClient().post(url, HTTP_AUTHORIZATION="Bearer cron-secret").status_code, 200)
+        run.assert_called_once()
+        with self.settings(TEAMS_CRON_SECRET=""):
+            self.assertEqual(APIClient().post(url, HTTP_AUTHORIZATION="Bearer ").status_code, 403)
+
+    def test_one_companys_failure_does_not_stop_the_others(self):
+        from .teams_channel import dispatch_all
+
+        make_org(name="Second", teams_team_id="team-2", ms_tenant_id="t2")
+        seen = []
+
+        def fake(org):
+            seen.append(org.name)
+            if org.name == "Second":
+                raise RuntimeError("boom")
+            return {}
+
+        with patch("api.teams_channel.dispatch", side_effect=fake):
+            out = dispatch_all()
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(out["Second"], {"error": True})
+
+    def test_lost_login_shows_a_warning_in_the_admin_center(self):
+        from .admin_setup import update
+
+        update(self.org, teams_login_lost="2026-11-03")
+        self.assertIn("Sign in again", self._client(self.admin).get("/api/teams/app/admin/").content.decode())
+
+    # ---------- app requests, admins ----------
+
+    def test_request_an_app_then_an_admin_decides(self):
+        from .models import AppRequest
+
+        me = self._client(self.member)
+        self.assertEqual(me.get("/api/teams/app/me/request-app/").status_code, 200)
+        resp = me.post("/api/teams/app/me/request-app/", {"name": "Perplexity", "website": "", "purpose": "Research", "data": "green"})
+        self.assertEqual(resp.status_code, 302)
+        req = AppRequest.objects.get(name="Perplexity")
+        self.assertTrue(any(self.admin.email in m.to and "Perplexity" in m.subject for m in self.mail.outbox))
+        self.assertEqual(me.post("/api/teams/app/me/request-app/", {"name": "", "purpose": "x", "data": "green"}).status_code, 200)
+        admin = self._client(self.admin)
+        self.assertIn("Perplexity", admin.get("/api/teams/app/admin/apps/").content.decode())
+        admin.post("/api/teams/app/admin/apps/decision/", {"request_id": str(req.pk), "action": "approve"})
+        req.refresh_from_db()
+        self.assertEqual(req.status, AppRequest.Status.APPROVED)
+        self.assertTrue(RegisteredApp.objects.filter(organization_id=str(self.org.pk), name="Perplexity",
+                                                     status=RegisteredApp.Status.APPROVED).exists())
+        self.assertTrue(any(self.member.email in m.to and "approved" in m.body for m in self.mail.outbox))
+        self.assertNotIn("*", next(m.body for m in self.mail.outbox if self.member.email in m.to and "approved" in m.body))
+
+    def test_add_edit_and_remove_an_admin(self):
+        client = self._client(self.admin)
+        found = {"id": "aad-co", "displayName": "Co Admin", "mail": "co@x.example"}
+        with patch("api.microsoft_auth.resolve_user_by_email", return_value=found), \
+                patch("api.microsoft_auth.add_team_member", return_value={"ok": True}) as add:
+            client.post("/api/teams/app/admin/admins/", {"action": "add", "email": "co@x.example", "perms": ["approve_apps"]})
+        add.assert_called_once()
+        co = AIDLUser.objects.get(microsoft_id="aad-co")
+        self.assertEqual(co.role, AIDLUser.Role.ADMIN)
+        self.assertTrue(co.perm_approve_apps)
+        self.assertFalse(co.perm_billing)
+        client.post("/api/teams/app/admin/admins/", {"action": "edit", "user_id": str(co.pk), "perms": ["billing"]})
+        co.refresh_from_db()
+        self.assertEqual((co.perm_approve_apps, co.perm_billing), (False, True))
+        # the master admin can't be edited or removed
+        client.post("/api/teams/app/admin/admins/", {"action": "edit", "user_id": str(self.admin.pk), "perms": []})
+        self.admin.refresh_from_db()
+        self.assertEqual(self.admin.role, AIDLUser.Role.ADMIN)
+        client.post("/api/teams/app/admin/admins/", {"action": "remove", "user_id": str(self.admin.pk)})
+        self.admin.refresh_from_db()
+        self.assertEqual(self.admin.role, AIDLUser.Role.ADMIN)
+        client.post("/api/teams/app/admin/admins/", {"action": "remove", "user_id": str(co.pk)})
+        co.refresh_from_db()
+        self.assertEqual(co.role, AIDLUser.Role.LEARNER)
+
+    def test_removing_someone_from_the_team(self):
+        client = self._client(self.admin)
+        with patch("api.microsoft_auth.remove_team_member", return_value=True) as out:
+            client.post("/api/teams/app/admin/team/", {"action": "remove", "user_id": str(self.member.pk)})
+        out.assert_called_once_with("tok", "team-1", self.member.microsoft_id)
+        self.member.refresh_from_db()
+        self.assertIsNotNone(self.member.slack_left_at)
+
+    def test_ask_another_admin_to_approve(self):
+        from . import card_approval
+        from .plans import package_cards
+
+        co = make_user(self.org, full_name="Co", perm_approve_cards=False)
+        no = package_cards(self.org)[0]["no"]
+        client = self._client(self.admin)
+        client.post("/api/teams/app/admin/cards/action/", {"action": "assign", "value": f"pkg:{no}", "to": str(co.pk), "month": "1"})
+        self.org.refresh_from_db()
+        self.assertEqual(card_approval.assigned_keys(self.org, co), [f"pkg:{no}"])
+        self.assertTrue(any(co.email in m.to for m in self.mail.outbox))
+        them = self._client(co)
+        self.assertEqual(them.get("/api/teams/app/admin/cards/").status_code, 200)
+        them.post("/api/teams/app/admin/cards/action/", {"action": "approve", "value": no})
+        self.assertEqual(card_approval.status(self.org, f"pkg:{no}"), card_approval.APPROVED)
+        self.org.refresh_from_db()
+        other = package_cards(self.org)[1]["no"]
+        self.assertEqual(them.post("/api/teams/app/admin/cards/action/", {"action": "approve", "value": other}).status_code, 403)
+
+    def test_avatar_page_knows_the_way_back_to_teams(self):
+        from .avatar import _return_url
+
+        self.assertIn("/api/teams/app/me/", _return_url(self.member))
+        slack_person = make_user(self.org, microsoft_id="slack:T1:U1")
+        self.assertEqual(_return_url(slack_person), "")
+
+    def test_channel_card_has_a_public_image_and_opens_our_page(self):
+        from .teams_channel import post
+
+        post(self.org, "Title", "Text", image="https://x/y.png", button=("Open", "https://x/z"), mention=[self.member])
+        body = self.posts[-1]
+        card = json.loads(body["attachments"][0]["content"])
+        self.assertEqual(card["actions"][0]["type"], "Action.OpenUrl")
+        self.assertEqual(card["body"][2]["url"], "https://x/y.png")
+        self.assertIn(f'<at id="0">{self.member.full_name}</at>', body["body"]["content"])
+        self.assertNotIn("Action.Execute", body["attachments"][0]["content"])

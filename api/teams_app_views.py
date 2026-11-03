@@ -579,25 +579,9 @@ def teams_admin_export_csv(request):
 @permission_classes([AllowAny])
 def teams_admin_session(request):
     """
-    Mint a short-lived AIDL session token for an org admin who is already
-    inside the Teams tab (the "Send Admin Invite" flow has no browser-based
-    SPA login to hand it a token from). The Teams tab resolves the caller's
-    email from the Teams SSO context client-side and posts it here.
-
-    This does not grant admin — it only authenticates a request for someone
-    the DB already has on record as role=admin (set the normal way, via a
-    prior invite or org setup), the same requirement teams_admin_invite
-    enforces. An unrecognised or non-admin email gets nothing.
+    Removed: it handed out an admin token to anyone who knew an admin's email.
     """
-    email = (request.data.get("email") or "").strip().lower()
-    if not email:
-        return Response({"error": "email_required"}, status=status.HTTP_400_BAD_REQUEST)
-    caller = AIDLUser.objects.filter(
-        email__iexact=email, is_active=True, role=AIDLUser.Role.ADMIN
-    ).first()
-    if caller is None:
-        return Response({"error": "not_admin"}, status=status.HTTP_403_FORBIDDEN)
-    return Response({"ok": True, "access_token": create_access_token(caller)})
+    return Response({"error": "gone", "message": "Sign in with Microsoft instead."}, status=status.HTTP_410_GONE)
 
 
 @api_view(["POST"])

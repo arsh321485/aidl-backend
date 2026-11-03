@@ -251,12 +251,13 @@ def after_change(org: Organization, by: AIDLUser | None, summary: str) -> None:
     from .package_delivery import sync_organization
 
     sync_organization(org, full=False)
-    try:
-        from .slack_blocks import publish_admin_center
+    if org.slack_team_id:
+        try:
+            from .slack_blocks import publish_admin_center
 
-        publish_admin_center(org, by)
-    except Exception:  # noqa: BLE001 — the decision itself is saved
-        pass
+            publish_admin_center(org, by)
+        except Exception:  # noqa: BLE001 — the decision itself is saved
+            pass
     if by is not None and summary:
         notify_master(org, by, f"🗂️ *{by.full_name or by.email}* {summary}")
 
@@ -294,8 +295,11 @@ def remind(org: Organization, now=None) -> int:
     from .card_review_slack import reminder_blocks
 
     now = now or timezone.now()
+    from .teams_channel import email, is_teams
+
+    teams = is_teams(org)
     waiting = [c for c in sequence(org) if c["approval"] == WAITING][:20]
-    if not waiting or not org.slack_bot_token:
+    if not waiting or not (org.slack_bot_token or teams):
         return 0
     last = state(org).get("approval_reminded_at")
     last_at = datetime.fromisoformat(last) if last else None
@@ -310,6 +314,12 @@ def remind(org: Organization, now=None) -> int:
         when = "⚠️ *Your team has no approved cards left* — their cards are postponed until you approve more."
     else:
         when = f"{'⚠️ ' if urgent else ''}Your team runs out of approved cards on *{out.strftime('%d %B')}*."
+    if teams:
+        told = sum(email(a, f"{len(waiting)} AIDL cards are waiting for your approval", when, "admin/cards/")
+                   for a in AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True)
+                   if has(org, a, "approve_cards"))
+        update(org, approval_reminded_at=now.isoformat())
+        return told
     token = slack_client.bot_token(org)
     told = 0
     for admin in AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True,

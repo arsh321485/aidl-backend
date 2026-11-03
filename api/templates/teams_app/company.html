@@ -1,0 +1,20 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Your company · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>Your company</h1>
+  <p class="muted" style="margin-top:6px">AIDL already knows {{ org.name }} from Microsoft 365. These two answers tell us which regulators may oversee you.</p>
+  <form method="post" style="margin-top:12px">
+    {% csrf_token %}
+    <fieldset class="field" style="border:0;padding:0">
+      <legend style="font-weight:600;margin-bottom:6px">Where do you operate?</legend>
+      {% for c in countries %}<label class="check"><input type="checkbox" name="countries" value="{{ c }}"{% if c in co.countries %} checked{% endif %}> {{ c }}</label>{% endfor %}
+    </fieldset>
+    <div class="field"><label for="industry">Your industry</label>
+      <select id="industry" name="industry" required><option value="">Choose one</option>
+        {% for i in industries %}<option{% if co.industry == i %} selected{% endif %}>{{ i }}</option>{% endfor %}
+      </select></div>
+    <button class="btn go">Next →</button>
+  </form>
+</section>
+{% endblock %}

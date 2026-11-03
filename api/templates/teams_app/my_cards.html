@@ -1,0 +1,45 @@
+{% extends "teams_app/base.html" %}
+{% block title %}My cards · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>📚 My cards</h1>
+  {% if next %}<p class="muted" style="margin-top:6px">📅 Next card: {{ next.post_at|date:"j F Y" }}</p>{% endif %}
+  {% if not total %}
+    <p style="margin-top:8px">{% if not user.licence_issued %}<b>No cards yet.</b> Your awareness cards appear here once your licence is issued.
+    {% elif next %}<b>No cards yet.</b> Your first card is scheduled.
+    {% else %}<b>No cards yet.</b> Your admin is still approving your awareness cards, and they'll appear here once they're sent.{% endif %}</p>
+  {% else %}
+    <p class="muted" style="margin-top:6px"><b>{{ total }} card{{ total|pluralize }}</b> · {{ acked }} acknowledged · {{ waiting }} to go</p>
+    <form method="get" class="grid2" style="margin-top:10px">
+      <div class="field"><label for="q">🔍 Search</label><input id="q" type="search" name="q" value="{{ m.q }}" placeholder="e.g. password, privacy"></div>
+      <div class="field"><label for="status">Status</label><select id="status" name="status">
+        <option value="all">All cards</option>
+        <option value="todo"{% if m.status == "todo" %} selected{% endif %}>Not acknowledged</option>
+        <option value="done"{% if m.status == "done" %} selected{% endif %}>Acknowledged</option></select></div>
+      <div class="field"><label for="topic">Topic</label><select id="topic" name="topic">
+        <option value="all">All topics</option>
+        {% for t in topics %}<option{% if m.topic == t %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="month">Month</label><select id="month" name="month">
+        <option value="all">All months</option>
+        {% for k, label in months %}<option value="{{ k }}"{% if m.month == k %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="latest">Latest</label><select id="latest" name="latest">
+        <option value="all">All</option>
+        <option value="2"{% if m.latest == "2" %} selected{% endif %}>Last 2 cards</option>
+        <option value="5"{% if m.latest == "5" %} selected{% endif %}>Last 5 cards</option>
+        <option value="10"{% if m.latest == "10" %} selected{% endif %}>Last 10 cards</option></select></div>
+      <div class="field" style="align-content:end"><div class="row"><button class="btn go">Search</button><a class="btn" href="{% url 'teams-app-my-cards' %}">Clear</a></div></div>
+    </form>
+  {% endif %}
+</section>
+{% if total and not cards %}<section class="box"><b>No cards found.</b> Try another word, or clear the filters.</section>{% endif %}
+{% for c in cards %}
+<section class="box flat spread">
+  <div>
+    <h3>{{ c.row.post_order }}. {{ c.card.title }}</h3>
+    <p class="muted">{{ c.card.category }} · received {{ c.row.post_at|date:"j M Y" }} · {% if c.row.acked_at %}✅ Acknowledged {{ c.row.acked_at|date:"j M" }}{% else %}🟡 Not acknowledged{% endif %}</p>
+  </div>
+  <a class="btn {% if not c.row.acked_at %}go{% endif %}" href="{% url 'teams-app-card' c.row.card_no %}">Open</a>
+</section>
+{% endfor %}
+{% if more %}<p class="muted">{{ more }} older cards aren't shown. Search or filter to find them.</p>{% endif %}
+{% endblock %}

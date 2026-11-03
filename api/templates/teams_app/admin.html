@@ -1,0 +1,111 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Admin Center · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>AIDL Admin Center</h1>
+  <p class="muted" style="margin-top:6px">{{ org.name }} · signed in as {{ user.full_name|default:user.email }}{% if master %} · 👑 Master admin{% endif %}</p>
+  <p class="steps" aria-hidden="true">{% for _ in bar %}🟩{% endfor %}{% for _ in rest %}⬜{% endfor %}</p>
+  <p><b>{{ st.done_count }} of 5 setup steps done</b></p>
+  <div class="spread" style="margin-top:8px">
+    <div>📦 <b>{{ plan.label }} plan</b> · {{ plan.cards }} awareness cards, {{ plan.cadence }} · {{ plan.used }} of {{ plan.limit }} users</div>
+    <div class="row" style="flex:none">
+      {% if can.can_billing and plan.can_upgrade %}<a class="btn sm go" href="{% url 'teams-app-plans' %}">⬆️ Upgrade plan</a>{% endif %}
+      {% if can.can_admins %}{% if logo_allowed %}<a class="btn sm" href="{% url 'teams-app-logo' %}">🖼 {% if org.logo_data %}Change{% else %}Add{% endif %} logo</a>{% else %}<span class="muted">Your logo on cards is a paid feature.</span>{% endif %}{% endif %}
+    </div>
+  </div>
+</section>
+
+{% if no_team %}<div class="error" role="alert"><b>AIDL couldn't create your Teams team.</b> Your company may not allow you to create teams. Ask your Microsoft 365 admin to allow it, then <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-admin' %}">sign in again</a>.</div>{% endif %}
+{% if lost %}<div class="error" role="alert"><b>AIDL can't post in your Teams channel.</b> Your Microsoft sign-in has expired. <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-admin' %}">Sign in again</a> to reconnect.</div>{% endif %}
+{% if pending_apps and can.can_apps %}<div class="notice">🛣 {{ pending_apps }} app request{{ pending_apps|pluralize }} waiting. <a href="{% url 'teams-app-apps' %}">Review</a></div>{% endif %}
+
+<section class="box step">
+  <h2>{% if policy_days %}✅ {% endif %}1 · Your AI policy</h2>
+  {% if not policy_days %}<p>Pick a topic, check the answers (they're already picked), approve. Each topic becomes one short card your team agrees to.{% if st.aup_upload_allowed %} Already have a policy? Upload it and AIDL turns it into the cards.{% endif %}</p>
+  {% else %}<div class="list">{% for c in policy_days %}<div>{% if c.state == "sent" %}✅ {{ c.icon }} <b>{{ c.title }}</b>{% if st.cards_done %} · sent · {{ c.agreed }} of {{ st.members }} agreed{% else %} · approved · goes out when you start the programme{% endif %}{% else %}🗓 {{ c.icon }} <b>{{ c.title }}</b> · goes out {{ c.day }}{% endif %}</div>{% endfor %}</div>{% endif %}
+  <div class="row" style="margin-top:10px">
+    {% if can.can_policy %}<a class="btn {% if not policy_days %}go{% endif %}" href="{% url 'teams-app-policy' %}">📌 Add a policy card</a>
+      {% if st.aup_upload_allowed %}<a class="btn" href="{% url 'teams-app-upload' %}">📤 Upload your own AUP</a>{% endif %}
+      {% if st.company_set %}<a class="btn" href="{% url 'teams-app-regulators' %}">🏛 Your regulators</a>{% endif %}{% endif %}
+    {% if can.can_apps %}<a class="btn" href="{% url 'teams-app-apps' %}">🤖 AI apps</a> <a class="btn" href="{% url 'teams-app-apps' %}?kind=it">💻 IT apps</a>{% endif %}
+  </div>
+</section>
+
+<section class="box step{% if not st.aup_done %} locked{% endif %}">
+  <h2>{% if st.admins_done %}✅ {% endif %}2 · Admins (optional)</h2>
+  {% if not st.aup_done %}<p class="muted">🔒 Finish step 1 first.</p>
+  {% else %}
+  <p>Invite HR, IT or Compliance colleagues to help run AIDL. You choose what each one can do.</p>
+  {% if can.can_admins %}<div class="row"><a class="btn {% if not st.admins_done %}go{% endif %}" href="{% url 'teams-app-admins' %}">🧑‍💼 Add or remove admins</a>
+    {% if not st.admins_done %}<form method="post" action="{% url 'teams-app-admin-action' %}">{% csrf_token %}<input type="hidden" name="action" value="skip_admins"><button class="btn">Skip →</button></form>{% endif %}</div>{% endif %}
+  {% endif %}
+</section>
+
+<section class="box step{% if not st.admins_done or not st.aup_done %} locked{% endif %}">
+  <h2>{% if st.team_done %}✅ {% endif %}3 · Your team</h2>
+  {% if not st.aup_done or not st.admins_done %}<p class="muted">🔒 Finish step 2 first.</p>
+  {% else %}
+  <p>{% if st.team_done %}{{ st.members }} member{{ st.members|pluralize }} · {% else %}Add the people who should earn an AI licence. {% endif %}{{ plan.used }} of {{ plan.limit }} users on your {{ plan.label }} plan</p>
+  <a class="btn {% if not st.team_done %}go{% endif %}" href="{% url 'teams-app-team' %}">👥 Add people &amp; team progress</a>
+  {% endif %}
+</section>
+
+<section class="box step{% if not st.aup_done %} locked{% endif %}">
+  <h2>{% if st.approved_ready %}✅ {% endif %}4 · Card approval</h2>
+  {% if not st.aup_done %}<p class="muted">🔒 Finish step 1 first.</p>
+  {% else %}
+  <p>Nothing reaches your team until you approve it.</p>
+  <div class="list">
+    <div>{% for r in st.onboarding %}{% if r.status == "approved" %}✅{% else %}⏳{% endif %} {{ r.label }}{% if not forloop.last %} · {% endif %}{% endfor %}</div>
+    <div>🧭 From your AI policy: <b>{{ st.paw.approved }}</b> of {{ st.paw.total }} awareness cards approved</div>
+    <div>📘 Awareness cards: <b>{{ st.approvals.approved }}</b> of {{ st.approvals.total }} approved{% if st.approvals.waiting %} · ⏳ {{ st.approvals.waiting }} waiting{% endif %}{% if st.approvals.skipped %} · ⏭ {{ st.approvals.skipped }} skipped{% endif %}</div>
+    {% if acks.best %}<div class="muted">🏆 Most acknowledged: <b>{{ acks.best.0 }}</b> {{ acks.best.1 }}%{% if acks.worst %} · 🔻 Least: <b>{{ acks.worst.0 }}</b> {{ acks.worst.1 }}%{% endif %}</div>{% endif %}
+  </div>
+  {% if can.can_approve_cards %}<a class="btn {% if not st.approved_ready or st.approvals.waiting %}go{% endif %}" style="margin-top:10px" href="{% url 'teams-app-cards' %}">📋 Review &amp; approve cards</a>
+  {% else %}<a class="btn" style="margin-top:10px" href="{% url 'teams-app-cards' %}">📋 Cards assigned to me</a>{% endif %}
+  {% endif %}
+</section>
+
+<section class="box step{% if not st.team_done or not st.approved_ready and not st.cards_done %} locked{% endif %}">
+  <h2>{% if st.cards_done %}✅ {% endif %}5 · {% if st.cards_done %}Programme started{% else %}Start the programme{% endif %}</h2>
+  {% if st.cards_done %}
+    <p><b>{{ st.sends.aup.accepted }}</b> of {{ st.members }} agreed to every policy card · <b>{{ st.licensed }}</b> of {{ st.members }} licensed</p>
+    {% if can.can_send and st.licensed < st.members %}<form method="post" action="{% url 'teams-app-admin-action' %}">{% csrf_token %}<input type="hidden" name="action" value="remind"><button class="btn">🔔 Remind people who haven't finished</button></form>{% endif %}
+  {% elif not st.aup_done or not st.team_done or not st.approved_ready %}<p class="muted">🔒 Finish steps 3 and 4 first.</p>
+  {% else %}
+    <p>Everyone gets a Welcome post in your Teams channel and an email, then your policy cards, the Traffic Light Check and the Highway Code, at their own pace. Their AI Driving Licence is issued at the end. People who join later start automatically.</p>
+    {% if can.can_send %}<form method="post" action="{% url 'teams-app-admin-action' %}">{% csrf_token %}<input type="hidden" name="action" value="start"><button class="btn go">📤 Start for {{ st.members }}</button></form>{% endif %}
+  {% endif %}
+</section>
+
+<section class="box step{% if not st.cards_done %} locked{% endif %}">
+  <h2>6 · Licences &amp; awareness cards</h2>
+  {% if not st.cards_done %}<p class="muted">🔒 Finish step 5 first.</p>
+  {% else %}
+  <p>🪪 <b>{{ team.licensed }}</b> of {{ team.members }} licensed{% if team.waiting_seat %} · ⏳ {{ team.waiting_seat }} waiting for a seat{% endif %}</p>
+  <p>📘 {{ plan.package_label }}: {{ plan.cards }} awareness cards, {{ plan.cadence }}. Approved cards go out automatically after each licence.</p>
+  {% if acks.sent %}
+  <p>📘 <b>Cards acknowledged this month: {{ acks.month_acked }} of {{ acks.month_sent }}</b></p>
+  <p class="muted">📊 Last week: {{ acks.week_sent }} cards sent · {{ acks.week_acked }} acknowledged</p>
+  <p class="muted">✅ Today: {{ acks.today|length }} acknowledged</p>
+  {% if acks.overdue %}<h3>⏰ Overdue · reminded 3+ days ago, still not acknowledged</h3>
+  <div class="list">{% for p in acks.overdue|slice:":8" %}<div class="spread"><div><b>{{ p.name }}</b> · {{ p.title }} (sent {{ p.sent|date:"j M" }}){% if p.reminded_by_admin %}<br><span class="muted">✅ Reminded by an admin</span>{% endif %}</div>
+    {% if not p.reminded_by_admin %}<form method="post" action="{% url 'teams-app-admin-action' %}">{% csrf_token %}<input type="hidden" name="action" value="remind_person"><input type="hidden" name="user_id" value="{{ p.user_id }}"><button class="btn sm">⏰ Remind</button></form>{% endif %}</div>{% endfor %}</div>{% endif %}
+  {% endif %}
+  <div class="row" style="margin-top:10px">
+    <a class="btn go" href="{% url 'teams-app-team' %}">View team progress</a>
+    <a class="btn" href="{% url 'teams-app-coverage' %}">⬇ Export coverage</a>
+    <a class="btn" href="{% url 'teams-app-alerts' %}">🔔 Acknowledgement alerts</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+{% block script %}
+{% if not tz_known %}{% csrf_token %}
+<script>
+// The company's card times: 10:00 where this admin is.
+fetch("{% url 'teams-app-timezone' %}", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded", "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value},
+  body: "offset=" + (-new Date().getTimezoneOffset())}).catch(function () {});
+</script>
+{% endif %}
+{% endblock %}

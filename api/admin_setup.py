@@ -73,8 +73,12 @@ def first_tab(member: AIDLUser, org: Organization) -> str:
 
 
 def _slack_learners(org: Organization):
+    """The people in the programme (Slack: this workspace's; Teams: the team's)."""
     from .licensing import learners
+    from .teams_channel import is_teams
 
+    if is_teams(org):
+        return learners(org)
     return learners(org).filter(microsoft_id__startswith=f"slack:{org.slack_team_id}:")
 
 
@@ -90,13 +94,20 @@ def send_item(org: Organization, item: str) -> tuple[int, int]:
     now = timezone.now().isoformat()
     # The older dashboard tabs show these cards once "sent".
     update(org, flow_started=now, aup_sent=now, traffic_light_sent=now, highway_code_sent=now)
+    from .teams_channel import is_teams, start_programme
+
+    if is_teams(org):
+        return start_programme(org)
     return employee_flow.start_everyone(org)
 
 
 def remind_item(org: Organization, item: str = "flow") -> tuple[int, int]:
     """Post each unfinished employee's current card again."""
     from . import employee_flow
+    from .teams_channel import is_teams, remind_everyone
 
+    if is_teams(org):
+        return remind_everyone(org)
     return employee_flow.remind_everyone(org)
 
 

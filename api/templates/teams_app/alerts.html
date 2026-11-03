@@ -1,0 +1,16 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Acknowledgement alerts · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>🔔 Acknowledgement alerts</h1>
+  <p style="margin-top:6px">You always see acknowledgements in the Admin Center and Team progress. Choose what AIDL emails you on top of that.</p>
+  <form method="post" style="margin-top:12px">
+    {% csrf_token %}
+    <div class="field"><div style="font-weight:600">When someone taps ✅ Got it</div>
+      {% for key, label in live %}<label class="check"><input type="radio" name="live" value="{{ key }}"{% if key == cur_live %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+    <div class="field"><div style="font-weight:600">When someone doesn't acknowledge</div>
+      {% for key, label in late %}<label class="check"><input type="radio" name="late" value="{{ key }}"{% if key == cur_late %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+    <div class="row"><button class="btn go">Save</button> <a class="btn" href="{% url 'teams-app-admin' %}">Cancel</a></div>
+  </form>
+</section>
+{% endblock %}

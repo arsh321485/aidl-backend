@@ -1,0 +1,39 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Admins · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>🧑‍💼 Admins</h1>
+  <p class="muted" style="margin-top:6px">{{ seats }} of {{ limit }} admin seats used. You can only give the permissions you have yourself.</p>
+  <div class="list">
+    {% for a in admins %}
+    <div>
+      <b>{{ a.name }}</b> <span class="muted">{{ a.email }}</span>{% if a.master %} <span class="pill">👑 Master admin</span>{% endif %}
+      {% if a.master %}<p class="muted">All permissions. Can't be removed or changed.</p>
+      {% else %}
+      <details style="margin-top:4px"><summary>Permissions: {{ a.perms|join:", "|default:"none" }}</summary>
+        <form method="post" style="margin-top:8px">
+          {% csrf_token %}<input type="hidden" name="action" value="edit"><input type="hidden" name="user_id" value="{{ a.id }}">
+          {% for p in perms %}<label class="check"><input type="checkbox" name="perms" value="{{ p.key }}"{% if p.key in a.keys %} checked{% endif %}> {{ p.label }} · <span class="muted">{{ p.desc }}</span></label>{% endfor %}
+          <button class="btn sm go">Save</button>
+        </form>
+        <form method="post" style="margin-top:8px">
+          {% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="user_id" value="{{ a.id }}">
+          <button class="btn sm no">Remove as admin</button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+<section class="box">
+  <h2>Add another admin</h2>
+  <p class="muted">Give a colleague access to your Admin Center. Choose exactly what they can see and do.</p>
+  <form method="post" style="margin-top:10px">
+    {% csrf_token %}<input type="hidden" name="action" value="add">
+    <div class="field"><label for="email">Their work email</label><input id="email" type="email" name="email" required placeholder="name@company.com"></div>
+    {% for p in perms %}<label class="check"><input type="checkbox" name="perms" value="{{ p.key }}"{% if forloop.first %} checked{% endif %}> {{ p.label }} · <span class="muted">{{ p.desc }}</span></label>{% endfor %}
+    <div class="row" style="margin-top:8px"><button class="btn go">Send admin invite</button> <a class="btn" href="{% url 'teams-app-admin' %}">← Admin Center</a></div>
+  </form>
+</section>
+{% endblock %}
