@@ -9,7 +9,7 @@ whole library (design: E:\\AIDL Card Design System.html), drawn with Pillow:
              policy's "paw-<id>", policy_awareness.py)
     action   whatever the card asks people to do is the same sign
     footer   AIDL's own cards: the AIDL logo + aidrivinglicence.ai, then the button
-             to press. A company's policy cards: only the button to press.
+             to press. A company's policy cards (aup-*, paw-*): only the button to press.
     mark     behind everything: the company's own logo (Basic and Enterprise,
              Organization.logo_data via licence_image.brand_logo), else its name;
              Trial cards show a faint AIDL logo (static/aidl/logo-transparent.png)
@@ -42,7 +42,7 @@ from .licence_image import brand_logo, text_watermark
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "12"
+DESIGN_VERSION = "13"
 
 
 def valid_kind(kind: str) -> bool:
@@ -334,8 +334,9 @@ def _action_list(d, y, items, label) -> float:
 
 
 def _is_policy(kind: str) -> bool:
-    """A company's own policy card, as opposed to one AIDL wrote."""
-    return kind.startswith("aup-")
+    """A company's policy card (its 14 points, or an awareness card from its AI
+    policy), as opposed to one of AIDL's own."""
+    return kind.startswith(("aup-", "paw-"))
 
 
 def _footer(d, y, press: str, *, aidl_brand: bool = True) -> float:
@@ -652,7 +653,7 @@ def _policy_awareness(d, org, card_id: str) -> float:
         y = _para(d, PAD + 22, y, line, "text", 17, W - 2 * PAD - 22, line=24) + 6
     if closing:
         y = _action(d, y + 8, closing, label="REMEMBER") + 10
-    return _footer(d, y + 10, "GOT IT")
+    return _footer(d, y + 10, "GOT IT", aidl_brand=False)
 
 
 # ---------- the finished card ----------
