@@ -44,7 +44,6 @@
     <label class="check"><input class="redraw" type="radio" name="when" value="day"{% if when == "day" %} checked{% endif %}> Pick a day <span class="muted">· at 10:00</span></label>
     {% if when == "day" %}<label for="day">Day</label><input id="day" type="date" name="day" value="{{ day }}">{% endif %}
   </div>
-  <p class="muted">AIDL writes the card from your answers. Check it against what your regulators expect. Not legal advice.</p>
   <div class="row">
     <button class="btn ok" name="action" value="approve">{% if when == "today" %}Approve &amp; send{% else %}Approve &amp; schedule{% endif %}</button>
     <a class="btn" href="{% url 'teams-app-policy' %}">← Topics</a>

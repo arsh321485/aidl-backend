@@ -243,8 +243,6 @@ def card_view(org: Organization, n: int, a: dict, meta: dict, *, when: str = "to
         blocks.append({"type": "input", "block_id": "day", "label": _text("Day"),
                        "element": {"type": "datepicker", "action_id": "v",
                                    "initial_date": day or (timezone.localdate() + timedelta(days=1)).isoformat()}})
-    blocks.append(_ctx("AIDL writes the card from your answers. Check it against what your regulators expect. "
-                       "Not legal advice."))
     blocks.append({"type": "actions", "block_id": "aidl_pc_nav", "elements": [
         {"type": "button", "text": _text("← Topics"), "action_id": "aidl_pc_back", "value": "topics"}]})
     return _modal(CARD, "Policy card", blocks, submit="Approve & send" if when == "today" else "Approve & schedule",

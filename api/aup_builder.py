@@ -69,6 +69,17 @@ _ADD_OPTIONS = {
     "5.3": [(4, {"id": "5.3.it", "text": "IT systems (servers, admin and IT tools)", "recommended": True})],
     "9.2": [(None, {"id": "9.2.x", "text": "Something else (add your own)", "recommended": False})],
 }
+# No law or legal terms in what people see (manager, Nov 2026).
+_REWORD = {
+    "2.2.i": {"note": ""},
+    "12.5.a": {"text": "Cost deducted from final settlement",
+               "wording": "If Company assets are not returned, their cost may be deducted from the final settlement."},
+    "12.5.b": {"text": "Further action may be taken",
+               "wording": "If Company assets are not returned, further action may be taken."},
+    "12.5.c": {"wording": "If Company assets are not returned, their cost may be deducted from the final settlement "
+                          "and further action may be taken."},
+    "13.1.f": {"text": "Further action or reporting to authorities"},
+}
 
 
 class AupAnswersError(ValueError):
@@ -89,6 +100,8 @@ def bank() -> dict:
             if not any(o["id"] == opt["id"] for o in q["options"]):
                 full = {"note": "", "wording": "", "no_sentence": False, **opt}
                 q["options"].insert(len(q["options"]) if at is None else at, full)
+        for o in q["options"]:
+            o.update(_REWORD.get(o["id"], {}))
     data["by_id"] = {q["id"]: q for q in data["questions"]}
     for q in data["questions"]:
         q["option_by_id"] = {o["id"]: o for o in q["options"]}

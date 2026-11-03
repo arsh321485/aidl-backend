@@ -2380,13 +2380,41 @@ class PolicyCardsSlackTests(TestCase):
         self.assertEqual(resp["view"]["callback_id"], "aidl_policy_topics")       # then the topics
         dm = json.dumps([b for m, b in self.calls if m == "chat.postMessage"], ensure_ascii=False)
         for name in ("Regulators for Acme", "Data Protection Board of India", "CERT-In", "Reserve Bank of India",
-                     "https://www.rbi.org.in", "DRAFT", "not legal advice"):
+                     "https://www.rbi.org.in", "DRAFT"):
             self.assertIn(name, dm)
         self.assertNotIn("PCI DSS", dm)                                            # a standard, not a regulator
         self.calls.clear()
         self._post({"type": "block_actions", "trigger_id": "TR2", "channel": {"id": "C42"},
                     "actions": [{"action_id": "aidl_policy_open", "value": "policy"}]})
         self.assertEqual(_shown_views(self.calls)[-1]["callback_id"], "aidl_policy_topics")  # asked once
+
+    def test_no_law_or_legal_wording_in_what_admins_see(self):
+        import re
+
+        from . import aup_store, aup_upload_slack, policy_cards, regulators
+        from .models import AupUpload
+        from .policy_cards_slack import company_view, regulators_view
+
+        words = re.compile(r"\b(legal|legally|law|laws|lawful|unlawful|illegal|statutory|legislation|act|gdpr|hipaa)\b", re.I)
+        seen = [json.dumps(company_view(self.org, {}), ensure_ascii=False),
+                json.dumps(aup_upload_slack.upload_view(self.org, {}), ensure_ascii=False),
+                json.dumps(aup_upload_slack.review_view(self.org, AupUpload(file_name="p.pdf", status="ready", cards="[]")),
+                           ensure_ascii=False)]
+        for n in policy_cards.TOPICS:
+            seen.append(json.dumps(self._card(n), ensure_ascii=False))
+        for country in regulators.COUNTRIES:
+            for industry in regulators.INDUSTRIES:
+                with self.settings(REGULATORS_PREVIEW=True):
+                    seen.append(json.dumps(regulators.card_blocks("Acme", [country], industry), ensure_ascii=False))
+        for text in seen:
+            found = words.search(re.sub(r"https?://[^\"]+", "", text).replace("\\u", " "))
+            self.assertIsNone(found, found and text[max(0, found.start() - 60):found.end() + 60])
+        self.assertNotIn("regulators expect", seen[3])
+        self.assertNotIn("AIDL writes the card", seen[3])
+        a = aup_store.answers(self.org)
+        a["answers"]["12.5"] = "12.5.c"
+        self.assertNotIn("law", " ".join(policy_cards.lines(12, a)))
+        self.assertIn("further action", " ".join(policy_cards.lines(12, a)))
 
     def test_topics_list_and_card_questions(self):
         from .policy_cards_slack import topics_view
@@ -2398,7 +2426,7 @@ class PolicyCardsSlackTests(TestCase):
         text = json.dumps(card, ensure_ascii=False)
         self.assertNotIn("Recommended", text)                                     # no label, still pre-selected
         self.assertNotIn("already picked", text)
-        self.assertNotIn(" law", json.dumps(self._card(12), ensure_ascii=False).replace("permitted by law", ""))
+        self.assertNotIn(" law", json.dumps(self._card(12), ensure_ascii=False))
         self.assertNotIn("Report phishing", text)
         self.assertIn("Something else (add your own)", text)
         how = next(b for b in card["blocks"] if b.get("block_id") == "q|9.2")
@@ -4873,6 +4901,8 @@ class TeamsWithoutBotTests(TestCase):
         page = client.get("/api/teams/app/admin/policy/2/").content.decode()
         self.assertIn("Send now", page)
         self.assertNotIn("Today, now", page)
+        self.assertNotIn("legal", page.lower())
+        self.assertNotIn("AIDL writes the card", page)
         self.org.refresh_from_db()
         a = aup_store.answers(self.org)["answers"]
         from .policy_cards import questions

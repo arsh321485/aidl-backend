@@ -23,8 +23,7 @@ from .models import AIDLUser, AupUpload, Organization
 logger = logging.getLogger(__name__)
 UPLOAD = "aidl_aup_upload"
 REVIEW = "aidl_aup_upload_review"
-_LEGAL = ("AI writes these cards from your file. Check each one before you approve it — AIDL doesn't give legal "
-          "advice.")
+_CHECK = "AI writes these cards from your file. Check each one before you approve it."
 
 
 def _text(t: str) -> dict:
@@ -60,7 +59,7 @@ def upload_view(org: Organization, meta: dict, notice: str = "") -> dict:
     blocks.append({"type": "input", "block_id": "file", "label": _text("Your AI policy (PDF, Word or text file)"),
                    "element": {"type": "file_input", "action_id": "v", "filetypes": ["pdf", "docx", "txt", "md"],
                                "max_files": 1}})
-    blocks.append({"type": "context", "elements": [_md(_LEGAL)]})
+    blocks.append({"type": "context", "elements": [_md(_CHECK)]})
     return _modal(UPLOAD, "Upload your AUP", blocks, submit="Write my cards", meta=meta)
 
 
@@ -137,7 +136,7 @@ def review_view(org: Organization, upload: AupUpload | None, notice: str = "") -
                                              "description": _text("Pick it below · 10:00 in each person's time zone")}]}},
                    {"type": "input", "block_id": "day", "label": _text("Day (if not today)"), "optional": True,
                     "element": {"type": "datepicker", "action_id": "v"}}]
-    blocks.append({"type": "context", "elements": [_md(_LEGAL)]})
+    blocks.append({"type": "context", "elements": [_md(_CHECK)]})
     return _modal(REVIEW, "Your AUP cards", blocks, submit="" if published else "Use these cards",
                   meta={"upload_id": str(upload.pk)})
 

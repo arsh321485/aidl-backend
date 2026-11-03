@@ -36,7 +36,7 @@ _CONFIDENTIAL_RULE = {
 }
 _REVIEW_RULE = {
     "Always": "A person must review every AI output before it's shared outside the company.",
-    "Only for high-risk content": "Get a second person to review high-risk AI output (legal, financial, customer-facing).",
+    "Only for high-risk content": "Get a second person to review high-risk AI output (financial, customer-facing).",
     "No, it is optional": "Review is optional — but you're responsible for anything you send.",
 }
 _DISCLOSURE_RULE = {
