@@ -1,15 +1,12 @@
-"""✅ Got it, 📚 My cards and acknowledgement numbers for admins
+"""✅ Got it and acknowledgement numbers for admins
 (design: E:\\slack-cards.html, approved by the manager).
 
 Employees
-- Every awareness card has ✅ Got it · 📚 My cards · 🛣 Request an app.
+- Every awareness card has ✅ Got it · ☰ Menu (employee_flow.menu_view).
   Got it edits the same message to "✅ Acknowledged · <date>" and sets
   PackageDelivery.acked_at.
 - A card not acknowledged after 7 days gets one reminder, as a reply in the
   card's thread (send_reminders, from the daily schedule_package_cards job).
-- 📚 My cards opens a popup with every card received: search, Status /
-  Topic / Month / Latest filters, card view (one card, Previous / Next) and
-  list view (10 a page, ← Newer / Older →).
 
 Admins (no message per Got it)
 - Admin Center: most / least acknowledged card (step 4); cards acknowledged
@@ -32,7 +29,6 @@ from . import slack_client
 from .models import AIDLUser, Organization, PackageDelivery
 
 logger = logging.getLogger(__name__)
-PAGE = 10
 REMIND_AFTER = timedelta(days=7)
 OVERDUE_AFTER = timedelta(days=3)
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
@@ -429,7 +425,7 @@ def send_overdue_alerts(org: Organization) -> int:
     return told
 
 
-# ---------- 📚 My cards popup ----------
+# ---------- the list on the Teams My cards page ----------
 
 def _blank_state(**extra) -> dict:
     return {"q": "", "status": "all", "topic": "all", "month": "all", "latest": "all", "view": "card", "idx": 0,
@@ -455,212 +451,8 @@ def _filtered(rows: list[PackageDelivery], m: dict) -> list[PackageDelivery]:
     return lst
 
 
-def _select(action_id: str, placeholder: str, options: list[tuple[str, str]], current: str) -> dict:
-    opts = [{"text": _t(label[:75]), "value": value} for value, label in options[:100]]
-    return {"type": "static_select", "action_id": action_id, "placeholder": _t(placeholder), "options": opts,
-            "initial_option": next((o for o in opts if o["value"] == current), opts[0])}
-
-
 def _month_name(key: str) -> str:
     return f"{MONTHS[int(key[5:]) - 1]} {key[:4]}"
-
-
-def next_card_line(org: Organization, member: AIDLUser, received_count: int) -> str:
-    """When the learner's next card arrives, in their own time zone (Slack's
-    date token). Only the date — admins can still approve, skip or swap
-    which card it is."""
-    if not member.licence_issued or member.slack_left_at:
-        return ""
-    nxt = (PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
-                                          post_at__gt=timezone.now()).order_by("post_at").first())
-    if nxt is not None:
-        when = int(nxt.post_at.timestamp())
-        fallback = f"{nxt.post_at:%a %d %b, %H:%M} UTC"
-        return f"📅 *Next card:* <!date^{when}^{{date_long_pretty}} at {{time}}|{fallback}>"
-    total = _total(org)
-    if received_count >= total:
-        return f"🎉 You've received all {total} cards for this year."
-    return "📅 *Your next card is on its way.*"
-
-
-def my_cards_view(org: Organization, member: AIDLUser, m: dict | None = None, open_no: str = "") -> dict:
-    from . import card_image
-
-    m = m or _blank_state()
-    rows = received(member)
-    total = len(rows)
-    nxt = next_card_line(org, member, total)
-    if not rows:
-        scheduled = nxt.startswith("📅 *Next card:*")
-        if not member.licence_issued:
-            empty = "*No cards yet.* Your awareness cards appear here once your licence is issued."
-        elif scheduled:
-            empty = "*No cards yet.* Your first card is scheduled."
-        else:
-            empty = ("*No cards yet.* Your admin is still approving your awareness cards, and they'll appear here "
-                     "once they're sent.")
-        blocks = [{"type": "section", "text": _md(empty)}]
-        if scheduled:
-            blocks.append({"type": "context", "elements": [_md(nxt)]})
-        return {"type": "modal", "callback_id": "aidl_my_cards", "title": _t("My cards"), "close": _t("Close"),
-                "private_metadata": json.dumps(m), "blocks": blocks}
-    lst = _filtered(rows, m)
-    open_no = open_no or m.pop("open", "")
-    if open_no:
-        m["idx"] = next((i for i, r in enumerate(lst) if r.card_no == open_no), 0)
-    acked = sum(1 for r in rows if r.acked_at)
-    waiting = total - acked
-    filtered_on = bool(m["q"]) or any(m[k] != "all" for k in ("status", "topic", "month", "latest"))
-    months, topics = [], []
-    for r in reversed(rows):
-        k = r.post_at.strftime("%Y-%m")
-        if k not in months:
-            months.append(k)
-        cat = _card(r.card_no)["category"]
-        if cat and cat not in topics:
-            topics.append(cat)
-    topics.sort()
-    b = [{"type": "context", "elements": [_md(nxt)]}] if nxt else []
-    if waiting and m["status"] != "todo":
-        b.append({"type": "section", "text": _md(f"⏳ *{waiting} card{'s' if waiting != 1 else ''} still "
-                                                 f"need{'s' if waiting == 1 else ''} your acknowledgement*"),
-                  "accessory": _btn("Show them", "mc_waiting", "todo", "primary")})
-    b += [
-        {"type": "input", "block_id": "mc_q", "dispatch_action": True, "optional": True,
-         "label": _t(f"🔍 Search your {total} cards"),
-         "element": {"type": "plain_text_input", "action_id": "mc_search",
-                     **({"initial_value": m["q"]} if m["q"] else {}),
-                     "placeholder": _t("e.g. password, privacy, then press Enter")}},
-        {"type": "actions", "block_id": "mc_filters", "elements": [
-            _select("mc_status", "Status", [("all", "All cards"), ("todo", "Not acknowledged"), ("done", "Acknowledged")],
-                    m["status"]),
-            _select("mc_topic", "Topic", [("all", "All topics")] + [(t, t) for t in topics], m["topic"]),
-            _select("mc_month", "Month", [("all", "All months")] + [(k, _month_name(k)) for k in months], m["month"]),
-            _select("mc_latest", "Latest", [("all", "All"), ("2", "Last 2 cards"), ("5", "Last 5 cards"),
-                                            ("10", "Last 10 cards")], m["latest"]),
-        ]},
-        {"type": "context", "elements": [_md((f"Showing *{len(lst)}* of {total}  ·  " if filtered_on else "")
-                                             + f"*{total} cards*  ·  {acked} acknowledged  ·  {waiting} to go")]},
-        {"type": "actions", "block_id": "mc_mode", "elements": [
-            _btn("🖼️ Card view", "mc_view_card", "card", "primary" if m["view"] == "card" else ""),
-            _btn("📋 List view", "mc_view_list", "list", "primary" if m["view"] == "list" else ""),
-            *([_btn("Clear filters", "mc_clear", "clear")] if filtered_on else []),
-        ]},
-        {"type": "divider"},
-    ]
-    if not lst:
-        b.append({"type": "section", "text": _md("*No cards found*\nTry another word, or clear the filters.")})
-    elif m["view"] == "card":
-        m["idx"] = max(0, min(m["idx"], len(lst) - 1))
-        r = lst[m["idx"]]
-        c = _card(r.card_no)
-        status = f"✅ Acknowledged {_short(r.acked_at)}" if r.acked_at else "🟡 Not acknowledged"
-        b.append({"type": "context", "elements": [_md(f"*{m['idx'] + 1} of {len(lst)}*  ·  Card {r.post_order}  ·  "
-                                                      f"received {_short(r.post_at)} {r.post_at.year}  ·  {status}")]})
-        from .image_cache import predraw
-
-        predraw(card_image.png_for, f"pkg-{r.card_no}", org)  # ready before Slack fetches it
-        b.append({"type": "image", "image_url": card_image.image_url(f"pkg-{r.card_no}", org),
-                  "alt_text": c["title"][:1990]})
-        nav = []
-        if m["idx"] > 0:
-            nav.append(_btn("← Previous", "mc_prev", "prev"))
-        if m["idx"] < len(lst) - 1:
-            nav.append(_btn("Next →", "mc_next", "next"))
-        if not r.acked_at:
-            nav.append(_btn("✅ Got it", "aidl_card_ack", r.card_no, "primary"))
-        nav.append(_btn("🛣 Request an app", "aidl_app_request_open", f"card|{r.card_no}"))
-        b.append({"type": "actions", "block_id": "mc_nav", "elements": nav})
-    else:
-        pages = (len(lst) + PAGE - 1) // PAGE
-        m["page"] = max(0, min(m["page"], pages - 1))
-        start = m["page"] * PAGE
-        page, cur = lst[start:start + PAGE], ""
-        for r in page:
-            k = r.post_at.strftime("%Y-%m")
-            if k != cur:
-                cur = k
-                in_month = [x for x in lst if x.post_at.strftime("%Y-%m") == k]
-                b.append({"type": "section", "text": _md(f"*{_month_name(k)}*  ·  "
-                                                         f"{sum(1 for x in in_month if x.acked_at)} of {len(in_month)} ✅")})
-            c = _card(r.card_no)
-            state_txt = f"✅ {_short(r.acked_at)}" if r.acked_at else "🟡 Not acknowledged"
-            b.append({"type": "section", "text": _md(f"*{r.post_order}. {c['title']}*\n{c['category']}  ·  "
-                                                     f"{_short(r.post_at)}  ·  {state_txt}"),
-                      "accessory": _btn("Open", f"mc_open_{r.card_no}", r.card_no)})
-        b.append({"type": "divider"})
-        nav = []
-        if m["page"] > 0:
-            nav.append(_btn("← Newer", "mc_page_newer", m["page"] - 1))
-        if m["page"] < pages - 1:
-            nav.append(_btn("Older →", "mc_page_older", m["page"] + 1))
-        if nav:
-            b.append({"type": "actions", "block_id": "mc_pages", "elements": nav})
-        b.append({"type": "context", "elements": [_md(f"Page *{m['page'] + 1} of {pages}*  ·  cards {start + 1}–"
-                                                      f"{start + len(page)} of {len(lst)}")]})
-    return {"type": "modal", "callback_id": "aidl_my_cards", "title": _t("My cards"), "submit": _t("Search"),
-            "close": _t("Close"), "private_metadata": json.dumps(m), "blocks": b[:100]}
-
-
-def without_images(view: dict) -> dict:
-    """The same popup with each card image swapped for its text — used when
-    Slack refuses the popup (e.g. it couldn't fetch an image in time)."""
-    blocks = []
-    for b in view.get("blocks") or []:
-        if b.get("type") == "image":
-            blocks.append({"type": "section", "text": _md(f"*{b.get('alt_text', '')}*")})
-        else:
-            blocks.append(b)
-    return {**view, "blocks": blocks}
-
-
-def show_view(org: Organization, view_id: str, view: dict) -> bool:
-    """views.update; on failure retry without images and remember Slack's
-    error in setup_state["last_view_error"] (to diagnose from outside)."""
-    from .admin_setup import update
-
-    token = slack_client.bot_token(org)
-    res = slack_client.slack_api("views.update", token, json={"view_id": view_id, "view": view})
-    if res.get("ok"):
-        return True
-    err = {"error": res.get("error"), "detail": (res.get("response_metadata") or {}).get("messages"),
-           "at": timezone.now().isoformat()}
-    logger.warning("My cards views.update failed: %s", err)
-    update(org, last_view_error=err)
-    return bool(slack_client.slack_api("views.update", token, json={"view_id": view_id,
-                                                                    "view": without_images(view)}).get("ok"))
-
-
-def my_cards_action(m: dict, action: dict) -> dict:
-    """Apply a click inside My cards to its state."""
-    aid = action.get("action_id", "")
-    value = action.get("value") or (action.get("selected_option") or {}).get("value", "")
-    if aid == "mc_search":
-        m.update(q=value or "", idx=0, page=0)
-    elif aid in ("mc_status", "mc_topic", "mc_month", "mc_latest"):
-        m.update({aid[3:]: value, "idx": 0, "page": 0})
-    elif aid.startswith("mc_page"):
-        m["page"] = int(value)
-    elif aid == "mc_waiting":
-        m.update(status="todo", view="list", idx=0, page=0)
-    elif aid.startswith("mc_view"):
-        m.update(view=value, idx=0, page=0)
-    elif aid == "mc_prev":
-        m["idx"] -= 1
-    elif aid == "mc_next":
-        m["idx"] += 1
-    elif aid == "mc_clear":
-        m = _blank_state(view=m.get("view", "card"))
-    elif aid.startswith("mc_open"):
-        m.update(view="card", open=value)
-    return m
-
-
-def search_submit(org: Organization, member: AIDLUser, view: dict) -> dict:
-    m = {**_blank_state(), **json.loads(view.get("private_metadata") or "{}")}
-    values = (view.get("state") or {}).get("values") or {}
-    m.update(q=((values.get("mc_q") or {}).get("mc_search") or {}).get("value") or "", idx=0, page=0)
-    return {"response_action": "update", "view": my_cards_view(org, member, m)}
 
 
 def card_title(no: str) -> str:

@@ -9,6 +9,10 @@ Once saved, the licence card (with the avatar) is posted to their Slack DM.
 
 AIDLUser.avatar_data holds the PNG (base64), avatar_config the builder's
 settings so the avatar can be edited later.
+
+In Slack, creating the first avatar is free and it can then be changed once
+(AIDLUser.avatar_changed_at). Old links still reach the page, so the save is
+what enforces it. Teams people aren't limited.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from django.conf import settings
 from django.shortcuts import redirect
+from django.utils import timezone as django_timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from PIL import Image
@@ -38,6 +43,7 @@ from .models import AIDLUser
 logger = logging.getLogger(__name__)
 MAX_UPLOAD = 2 * 1024 * 1024
 TOKEN_HOURS = 24
+ALREADY_CHANGED = "You've already changed your avatar once, so it can't be changed again."
 
 
 def _signature(user_id: str) -> str:
@@ -87,6 +93,29 @@ def save(member: AIDLUser, png_b64: str, config: dict | None = None) -> None:
     member.save(update_fields=["avatar_data", "avatar_config", "updated_at"])
 
 
+def limited(member: AIDLUser) -> bool:
+    return member.microsoft_id.startswith("slack:")
+
+
+def locked(member: AIDLUser) -> bool:
+    """The avatar can't be changed any more."""
+    return limited(member) and bool(member.avatar_data) and member.avatar_changed_at is not None
+
+
+def can_change(member: AIDLUser) -> bool:
+    """There's an avatar, and its one change hasn't been used."""
+    return bool(member.avatar_data) and not locked(member)
+
+
+def _claim_change(member: AIDLUser) -> bool:
+    """Use up the one change. Only one of two saves at the same time gets it."""
+    now = django_timezone.now()
+    if not AIDLUser.objects.filter(pk=member.pk, avatar_changed_at__isnull=True).update(avatar_changed_at=now):
+        return False
+    member.avatar_changed_at = now
+    return True
+
+
 def _after_save(member: AIDLUser) -> None:
     """Licensed Slack employees get their licence card (with the avatar)."""
     from .employee_flow import post_licence
@@ -132,7 +161,10 @@ def avatar_api(request):
         except ValueError:
             config = None
         return Response({"name": member.full_name or member.email, "has_avatar": bool(member.avatar_data),
-                         "config": config, "licensed": member.licence_issued, "return_url": _return_url(member)})
+                         "config": config, "licensed": member.licence_issued, "return_url": _return_url(member),
+                         "locked": locked(member), "one_change_only": limited(member)})
+    if locked(member):
+        return Response({"detail": ALREADY_CHANGED}, status=status.HTTP_409_CONFLICT)
     raw = str(request.data.get("png") or "")
     if "," in raw[:100]:
         raw = raw.split(",", 1)[1]  # data:image/png;base64,...
@@ -146,6 +178,8 @@ def avatar_api(request):
         png = normalise(data)
     except ValueError:
         return Response({"png": ["That isn't an image."]}, status=status.HTTP_400_BAD_REQUEST)
+    if limited(member) and member.avatar_data and not _claim_change(member):
+        return Response({"detail": ALREADY_CHANGED}, status=status.HTTP_409_CONFLICT)
     config = request.data.get("config")
     save(member, png, config if isinstance(config, dict) else None)
     _after_save(member)
@@ -154,4 +188,4 @@ def avatar_api(request):
     else:
         message = "Your avatar is saved — your AI Driving Licence is ready in AIDL."
     return Response({"ok": True, "licensed": member.licence_issued, "return_url": _return_url(member),
-                     "message": message if member.licence_issued else "Your avatar is saved."})
+                     "locked": locked(member), "message": message if member.licence_issued else "Your avatar is saved."})

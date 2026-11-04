@@ -92,7 +92,7 @@ def _local_line(org: Organization, card: dict) -> str:
 def card_blocks(org: Organization, card: dict, position: int, total: int, acked_at=None) -> list:
     """The awareness card (design E:\slack-cards.html): title + hook, the
     card image (card_image.py — what the admin approved), the company line,
-    then ✅ Got it · 📚 My cards · 🛣 Request an app. Once acknowledged the
+    then ✅ Got it · ☰ Menu (Request an app, Change avatar). Once acknowledged the
     same message shows "✅ Acknowledged · <date>" instead of Got it."""
     from . import card_image
 
@@ -113,7 +113,7 @@ def card_blocks(org: Organization, card: dict, position: int, total: int, acked_
             b["style"] = style
         return b
 
-    more = [btn("📚 My cards", "aidl_my_cards", no), btn("🛣 Request an app", "aidl_app_request_open", f"card|{no}")]
+    more = [btn("☰ Menu", "aidl_employee_menu", f"card|{no}")]
     if acked_at:
         blocks += [{"type": "context", "elements": [{"type": "mrkdwn", "text":
                     f"✅ *Acknowledged* · {acked_at.day} {acked_at.strftime('%b')}"}]},
