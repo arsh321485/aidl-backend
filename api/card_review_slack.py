@@ -113,9 +113,9 @@ def review_view(org, month: int = 1, notice: str = "") -> dict:
     waiting_here = sum(c["approval"] == ca.WAITING for c in cards)
     nav = []
     if month > 1:
-        nav.append(_btn(f"← Month {month - 1}", "aidl_crv_month", month - 1))
+        nav.append(_btn(f"← Month {month - 1}", "aidl_crv_month_prev", month - 1))
     if month < total_months:
-        nav.append(_btn(f"Month {month + 1} →", "aidl_crv_month", month + 1))
+        nav.append(_btn(f"Month {month + 1} →", "aidl_crv_month_next", month + 1))
     if waiting_here:
         nav.append(_btn(f"✅ Approve month {month}", "aidl_crv_approve_month", month, "primary"))
         nav.append(_btn("👤 Ask an admin", "aidl_crv_assign", f"month:{month}"))

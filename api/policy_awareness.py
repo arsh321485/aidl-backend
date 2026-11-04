@@ -32,9 +32,7 @@ def cards() -> list[dict]:
     half = (len(banned) + 1) // 2
     covers = [o["text"] for o in aup_builder.question("1.1")["options"] if o["recommended"]]
     return [
-        {"id": "who-it-covers", "icon": "👥", "title": "Who this policy covers", "lines":
-            ["This AI policy applies to everyone who works for the company or uses its systems:"] + covers + [
-                "Not sure whether it applies to you? It does — ask your AIDL admin."]},
+        {"id": "who-it-covers", "icon": "👥", "title": "Who this policy covers", "lines": covers},
         {"id": "never-ai", "icon": "🔒", "title": "Never paste into AI", "lines": never + [
             "Not sure? Treat it as private and leave it out."]},
         {"id": "not-allowed-1", "icon": "🚫", "title": "Not allowed on company systems (1 of 2)", "lines": banned[:half]},

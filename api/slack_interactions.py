@@ -681,7 +681,11 @@ def _card_review_action(org, user, payload: dict, action: dict, action_id: str, 
     def redraw(notice: str = "", view_id: str = "", at_month: int | None = None) -> None:
         target = view_id or (view.get("id") if view.get("callback_id") == card_review_slack.CALLBACK else "")
         if target:
-            slack_client.slack_api("views.update", token, json={"view_id": target, "view": popup(notice, at_month)})
+            result = slack_client.slack_api("views.update", token, json={"view_id": target,
+                                                                          "view": popup(notice, at_month)})
+            if not result.get("ok"):
+                logger.warning("Approve cards views.update failed: %s %s", result.get("error"),
+                               result.get("response_metadata"))
 
     if action_id == "aidl_cards_review":
         from .card_image import onboarding_kinds, warm
@@ -695,7 +699,7 @@ def _card_review_action(org, user, payload: dict, action: dict, action_id: str, 
         what = value.split("|", 1)[1] if value.startswith("assign|") else value
         _open_modal(org, payload.get("trigger_id", ""), card_review_slack.assign_view(org, user, what), push=True)
         return
-    if action_id == "aidl_crv_month":
+    if action_id.startswith("aidl_crv_month"):  # aidl_crv_month = popups opened before the buttons got their own ids
         redraw(at_month=int(value))
         return
     if action_id == "aidl_crv_preview" or (action_id == "aidl_crv_card" and value.startswith("preview|")):

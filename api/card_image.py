@@ -42,7 +42,7 @@ from .licence_image import brand_logo, text_watermark
 KINDS = ("highway_code", "traffic_light")  # + "aup-<n>" and "pkg-<card no>"
 # Bump when a card's look changes: the image links change, so Slack fetches
 # the new pictures instead of showing the copies it already has.
-DESIGN_VERSION = "14"
+DESIGN_VERSION = "15"
 
 
 def valid_kind(kind: str) -> bool:
