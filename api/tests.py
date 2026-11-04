@@ -3786,6 +3786,21 @@ class BlockKitIdsTests(TestCase):
             ids = [e.get("action_id") for e in b.get("elements") or [] if e.get("action_id")]
             self.assertEqual(len(ids), len(set(ids)), b)
 
+    def test_approve_cards_popup_works_on_every_month(self):
+        from . import card_approval
+        from .card_review_slack import review_view
+
+        org = make_org(plan="basic")
+        for month in range(1, card_approval.months(org) + 1):
+            self._check(review_view(org, month)["blocks"])
+
+    def test_who_this_policy_covers_card_is_only_the_list(self):
+        from .policy_awareness import by_id
+
+        self.assertEqual(by_id("who-it-covers")["lines"], ["Permanent employees", "Contract and temporary staff",
+                                                           "Interns and trainees",
+                                                           "Consultants and vendors with system access"])
+
     def test_employee_cards_and_popups_have_unique_action_ids(self):
         from . import employee_flow
 
