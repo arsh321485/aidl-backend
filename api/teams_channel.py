@@ -231,7 +231,7 @@ def remind_everyone(org: Organization) -> tuple[int, int]:
     pending = [m for m in _people(org) if not m.licence_issued or not m.avatar_data]
     if pending:
         post(org, "Reminder: your AI Driving Licence", "You have cards waiting.",
-             button=("Open my cards →", app_url("me/")), mention=pending)
+             button=("Open AIDL →", app_url("me/")), mention=pending)
     for member in pending:
         email(member, "Reminder: your AI Driving Licence", "You still have cards to finish.", "me/")
     return len(pending), len(pending)
@@ -331,7 +331,7 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
 
 
 def deliver_due(org: Organization, member: AIDLUser | None = None) -> int:
-    """Cards whose time has come: they count as received at once (My cards), and
+    """Cards whose time has come: they count as received at once, and
     each one is posted in the channel once however many people it's for."""
     from .plans import card_by_no
 

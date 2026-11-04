@@ -36,6 +36,10 @@ p { margin:0 0 8px; }
 .btn.no { background:#fff; border-color:var(--red); color:var(--red); }
 .btn.sm { padding:4px 10px; font-size:13px; border-width:2px; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+details.pop > summary { list-style:none; cursor:pointer; }
+details.pop > summary::-webkit-details-marker { display:none; }
+details.pop[open] { flex-basis:100%; }
+details.pop .list { margin-top:8px; }
 .spread { display:flex; gap:12px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
 .spread > div { min-width:0; flex:1 1 220px; }
 .list { display:grid; gap:0; }
@@ -68,7 +72,7 @@ blockquote { margin:0 0 8px; padding:6px 12px; border-left:4px solid var(--yello
     {% if user %}
     <div class="who">
       {% if is_admin %}<a href="{% url 'teams-app-admin' %}">Admin Center</a>
-      {% elif org %}<a href="{% url 'teams-app-me' %}">My licence</a> <a href="{% url 'teams-app-my-cards' %}">My cards</a> <a href="{% url 'teams-app-request' %}">Request an app</a>{% endif %}
+      {% elif org %}<a href="{% url 'teams-app-me' %}">My licence</a>{% endif %}
       <span>{{ user.full_name|default:user.email }}</span>
       <form method="post" action="{% url 'teams-app-logout' %}">{% csrf_token %}<button>Sign out</button></form>
     </div>

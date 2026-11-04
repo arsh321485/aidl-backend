@@ -10,8 +10,7 @@
   <div class="row" style="margin-top:14px">
     {% if row.acked_at %}<span class="pill">✅ Acknowledged · {{ row.acked_at|date:"j M" }}</span>
     {% else %}<form method="post">{% csrf_token %}<button class="btn ok">✅ Got it</button></form>{% endif %}
-    <a class="btn" href="{% url 'teams-app-my-cards' %}">📚 My cards</a>
-    <a class="btn" href="{% url 'teams-app-request' %}?from={{ card.no }}">🛣 Request an app</a>
+    {% include "teams_app/_menu.html" %}
   </div>
 </section>
 {% endblock %}

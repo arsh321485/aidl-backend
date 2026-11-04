@@ -3676,8 +3676,8 @@ class CardAckTests(TestCase):
         self.assertTrue(read["locked"])
         teams = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="ms-1", email="t@example.com",
                           avatar_data="x")
-        self.assertEqual(save(teams).status_code, 200)                           # Teams isn't limited
-        self.assertEqual(save(teams).status_code, 200)
+        self.assertEqual(save(teams).status_code, 200)                           # the same in Teams
+        self.assertEqual(save(teams).status_code, 409)
 
     def test_menu_button_opens_the_menu_and_old_my_cards_buttons_do_too(self):
         no = self.cards[2]["no"]
@@ -5022,7 +5022,19 @@ class TeamsWithoutBotTests(TestCase):
         self.assertEqual(rows.filter(status="sent").count(), 1)
         self.assertGreater(rows.filter(status="scheduled").count(), 50)
         first = rows.get(status="sent")
-        self.assertIn(first.card_no, me.get("/api/teams/app/me/cards/").content.decode())
+        self.assertRedirects(me.get("/api/teams/app/me/cards/"), "/api/teams/app/me/")  # My cards is gone
+        page = me.get("/api/teams/app/me/").content.decode()
+        self.assertNotIn("My cards", page)
+        self.assertIn("☰ Menu", page)
+        for part in ("Download licence", "Share on LinkedIn", "📤 Share", "wa.me", "Change avatar"):
+            self.assertIn(part, page)
+        self.member.avatar_changed_at = timezone.now()
+        self.member.save(update_fields=["avatar_changed_at"])
+        self.assertNotIn("Change avatar", me.get("/api/teams/app/me/").content.decode())  # the one change is used
+        card_page = me.get(f"/api/teams/app/me/cards/{first.card_no}/").content.decode()
+        self.assertIn("☰ Menu", card_page)
+        self.assertIn(f"?from={first.card_no}", card_page)
+        self.assertNotIn("My cards", card_page)
         me.post(f"/api/teams/app/me/cards/{first.card_no}/")
         first.refresh_from_db()
         self.assertIsNotNone(first.acked_at)

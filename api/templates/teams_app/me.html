@@ -34,11 +34,20 @@
   <img class="lic" src="{{ licence.image }}" alt="AI Driving Licence {{ user.licence_number }}">
   <div class="row" style="margin-top:14px">
     <a class="btn go" href="{{ licence.download }}">📥 Download licence</a>
-    <a class="btn" href="{{ avatar_url }}">🎨 Change avatar</a>
     <a class="btn" href="{{ licence.share }}" target="_blank" rel="noopener">🔗 Share on LinkedIn</a>
-    <a class="btn" href="{% url 'teams-app-my-cards' %}">📚 My cards</a>
-    <a class="btn" href="{% url 'teams-app-request' %}">🛣 Request an app</a>
+    <details class="pop">
+      <summary class="btn">📤 Share</summary>
+      <div class="list">
+        <div><b>Copy your link</b><br>{{ licence.link }}</div>
+        <div class="row">
+          <a class="btn" href="{{ licence.share_x }}" target="_blank" rel="noopener">𝕏 Post on X</a>
+          <a class="btn" href="{{ licence.share_facebook }}" target="_blank" rel="noopener">Facebook</a>
+          <a class="btn" href="{{ licence.share_whatsapp }}" target="_blank" rel="noopener">WhatsApp</a>
+        </div>
+      </div>
+    </details>
   </div>
+  <div class="row" style="margin-top:8px">{% include "teams_app/_menu.html" %}</div>
   <p class="muted" style="margin-top:12px">🗓 {% if licence.next %}Your next card arrives {{ licence.next.post_at|date:"j F Y" }}.{% else %}Your next card is on its way.{% endif %} Keep the Traffic Light and Highway Code cards handy.</p>
 </section>
 {% endif %}

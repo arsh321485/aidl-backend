@@ -95,7 +95,7 @@ urlpatterns = [
     path("teams/app/dispatch/", teams_portal.dispatch_view, name="teams-app-dispatch"),
     path("teams/app/me/", teams_portal.me, name="teams-app-me"),
     path("teams/app/me/action/", teams_portal.me_action, name="teams-app-me-action"),
-    path("teams/app/me/cards/", teams_portal.my_cards, name="teams-app-my-cards"),
+    path("teams/app/me/cards/", teams_portal.my_cards_moved),
     path("teams/app/me/cards/<str:no>/", teams_portal.card_page, name="teams-app-card"),
     path("teams/app/me/request-app/", teams_portal.request_app, name="teams-app-request"),
     path("teams/app/admin/", teams_portal.admin_home, name="teams-app-admin"),
