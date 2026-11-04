@@ -3399,7 +3399,7 @@ class CardApprovalTests(TestCase):
         self.assertGreater(late.post_at, last)                                   # … follows the last scheduled card
         sent = [b for m, b in self.calls if m in ("chat.postMessage", "chat.scheduleMessage")]
         self.assertIn("/api/cards/pkg-", json.dumps(sent))                       # awareness cards are images
-        self.assertIn("aidl_app_request_open", json.dumps(sent))                 # … with Request an app
+        self.assertIn("aidl_employee_menu", json.dumps(sent))                    # … with the Menu
 
     def test_employee_waits_for_unapproved_card_then_gets_it(self):
         from . import employee_flow
@@ -3541,7 +3541,7 @@ class AppRequestTests(TestCase):
 
 
 class CardAckTests(TestCase):
-    """✅ Got it · 📚 My cards · reminders · acknowledgement numbers for admins
+    """✅ Got it · ☰ Menu · reminders · acknowledgement numbers for admins
     (design E:\\slack-cards.html)."""
 
     SECRET = "shh"
@@ -3583,13 +3583,13 @@ class CardAckTests(TestCase):
             return self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
                                 "application/x-www-form-urlencoded")
 
-    def test_card_has_got_it_my_cards_and_request(self):
+    def test_card_has_got_it_and_menu(self):
         from .package_delivery import card_blocks
 
         text = json.dumps(card_blocks(self.org, self.cards[0], 1, 104))
-        for part in ("aidl_card_ack", "aidl_my_cards", "aidl_app_request_open", f"card|{self.cards[0]['no']}",
-                     self.cards[0]["hook"]):
+        for part in ("aidl_card_ack", "aidl_employee_menu", f"card|{self.cards[0]['no']}", self.cards[0]["hook"]):
             self.assertIn(part, text)
+        self.assertNotIn("aidl_my_cards", text)
 
     def test_got_it_updates_the_same_message_and_counts(self):
         row = self.rows[-1]
@@ -3604,81 +3604,105 @@ class CardAckTests(TestCase):
         counter = [b for m, b in self.calls if m == "chat.postMessage" and b.get("channel") == "U1"]
         self.assertIn("Today: 1 acknowledged", json.dumps(counter))              # master's live message
 
-    def test_my_cards_search_filters_views_and_paging(self):
-        from . import card_ack
+    def _with_avatar(self):
+        self.member.avatar_data = "x"
+        self.member.save(update_fields=["avatar_data"])
 
-        view = card_ack.my_cards_view(self.org, self.member)
-        text = json.dumps(view, ensure_ascii=False)
-        for part in ("Search your 12 cards", "mc_status", "mc_topic", "mc_month", "mc_latest", "1 of 12",
-                     "12 cards still need your acknowledgement"):
+    def test_licence_card_has_its_actions_under_the_image_and_one_menu(self):
+        from . import employee_flow
+
+        self._with_avatar()
+        blocks = employee_flow.licence(self.member, self.org)["attachments"][0]["blocks"]
+        at = next(i for i, b in enumerate(blocks) if b["type"] == "image")
+        self.assertEqual([e["action_id"] for e in blocks[at + 1]["elements"]],
+                         ["aidl_link_download", "aidl_licence_share", "aidl_link_share"])
+        text = json.dumps(blocks, ensure_ascii=False)
+        self.assertIn("aidl_employee_menu", text)
+        for gone in ("aidl_my_cards", "My cards", "aidl_link_avatar", "aidl_app_request_open"):
+            self.assertNotIn(gone, text)
+
+    def test_menu_offers_change_avatar_until_it_is_used(self):
+        from django.utils import timezone
+
+        from . import employee_flow
+
+        text = lambda: json.dumps(employee_flow.menu_view(self.member, "licence"), ensure_ascii=False)
+        self.assertNotIn("Change avatar", text())                                # nothing to change yet
+        self.assertIn("aidl_app_request_open", text())
+        self._with_avatar()
+        self.assertIn("Change avatar", text())
+        self.member.avatar_changed_at = timezone.now()
+        self.member.save(update_fields=["avatar_changed_at"])
+        self.assertNotIn("Change avatar", text())                                # gone for good
+        self.assertIn("aidl_app_request_open", text())
+
+    def test_avatar_can_be_changed_once_on_the_server(self):
+        import base64
+        import io
+
+        from PIL import Image
+
+        from .avatar import _token
+
+        buf = io.BytesIO()
+        Image.new("RGB", (20, 20), "#BFE3F0").save(buf, "PNG")
+        png = base64.b64encode(buf.getvalue()).decode()
+
+        def save(member):
+            with patch("api.slack_client.slack_api", side_effect=self._fake):
+                return self.client.post("/api/avatar/", json.dumps({"token": _token(member), "png": png}),
+                                        content_type="application/json")
+
+        first = save(self.member)                                                # creating isn't a change
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertFalse(first.json()["locked"])
+        self.member.refresh_from_db()
+        self.assertIsNone(self.member.avatar_changed_at)
+        bad = self.client.post("/api/avatar/", json.dumps({"token": _token(self.member), "png": "bad"}),
+                               content_type="application/json")
+        self.assertEqual(bad.status_code, 400)                                   # a bad file doesn't use it up
+        self.member.refresh_from_db()
+        self.assertIsNone(self.member.avatar_changed_at)
+        self.assertTrue(save(self.member).json()["locked"])                      # the one change
+        self.member.refresh_from_db()
+        self.assertIsNotNone(self.member.avatar_changed_at)
+        stored = self.member.avatar_data
+        again = save(self.member)
+        self.assertEqual(again.status_code, 409)                                 # an old link can't do it again
+        self.assertIn("detail", again.json())
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.avatar_data, stored)
+        read = self.client.get(f"/api/avatar/?token={_token(self.member)}").json()
+        self.assertTrue(read["locked"])
+        teams = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="ms-1", email="t@example.com",
+                          avatar_data="x")
+        self.assertEqual(save(teams).status_code, 200)                           # Teams isn't limited
+        self.assertEqual(save(teams).status_code, 200)
+
+    def test_menu_button_opens_the_menu_and_old_my_cards_buttons_do_too(self):
+        no = self.cards[2]["no"]
+        for action_id, value in (("aidl_employee_menu", f"card|{no}"), ("aidl_my_cards", no)):
+            self.calls.clear()
+            self._post("U5", {"type": "block_actions", "actions": [{"action_id": action_id, "value": value}]})
+            opened = next(b for m, b in self.calls if m == "views.open")
+            self.assertEqual(opened["view"]["callback_id"], "aidl_employee_menu")
+            self.assertIn(f"card|{no}", json.dumps(opened))                      # the request still names the card
+        self.calls.clear()
+        self._post("U5", {"type": "block_actions", "actions": [{"action_id": "aidl_my_cards", "value": "0"}]})
+        self.assertIn("aidl_app_request_open", json.dumps(next(b for m, b in self.calls if m == "views.open")))
+
+    def test_request_from_the_menu_opens_on_top_of_it(self):
+        self._post("U5", {"type": "block_actions", "view": {"id": "V1", "callback_id": "aidl_employee_menu"},
+                          "actions": [{"action_id": "aidl_app_request_open", "value": "licence"}]})
+        self.assertTrue(any(m == "views.push" for m, _b in self.calls))
+
+    def test_share_opens_a_popup_with_the_link(self):
+        self._post("U5", {"type": "block_actions", "actions": [{"action_id": "aidl_licence_share", "value": "share"}]})
+        opened = next(b for m, b in self.calls if m == "views.open")
+        text = json.dumps(opened)
+        self.assertIn("/home#verify?lic=AIDL-L-1-2", text)
+        for part in ("twitter.com", "facebook.com", "wa.me"):
             self.assertIn(part, text)
-        m = json.loads(view["private_metadata"])
-        m = card_ack.my_cards_action(m, {"action_id": "mc_view_list", "value": "list"})
-        listed = json.dumps(card_ack.my_cards_view(self.org, self.member, m), ensure_ascii=False)
-        self.assertIn("Older →", listed)                                         # 10 a page
-        m = card_ack.my_cards_action(m, {"action_id": "mc_latest", "selected_option": {"value": "2"}})
-        self.assertIn("Showing *2* of 12", json.dumps(card_ack.my_cards_view(self.org, self.member, m)))
-        word = self.cards[3]["title"].split()[0].lower()
-        m = card_ack.my_cards_action(card_ack._blank_state(), {"action_id": "mc_search", "value": word})
-        found = card_ack._filtered(card_ack.received(self.member), m)
-        self.assertTrue(any(r.card_no == self.cards[3]["no"] for r in found))
-        opened = card_ack.my_cards_view(self.org, self.member, open_no=self.cards[0]["no"])
-        self.assertIn(f"/api/cards/pkg-{self.cards[0]['no']}/", json.dumps(opened))   # opens on that card
-
-    def test_my_cards_empty_message_says_why(self):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        from . import card_ack
-        from .models import PackageDelivery
-        from .plans import package_cards
-
-        PackageDelivery.objects.filter(user_id=str(self.member.pk)).delete()
-        text = lambda: json.dumps(card_ack.my_cards_view(self.org, self.member), ensure_ascii=False)
-        self.assertIn("still approving", text())                                # licence, nothing approved
-        self.assertNotIn("once your licence is issued", text())
-        self.assertNotIn("on its way", text())
-        PackageDelivery.objects.create(organization_id=str(self.org.pk), user_id=str(self.member.pk), package="basic",
-                                       card_no=package_cards(self.org)[0]["no"], post_order=1,
-                                       post_at=timezone.now() + timedelta(days=3), status="scheduled")
-        self.assertIn("Next card", text())                                      # scheduled: says when
-        self.assertNotIn("still approving", text())
-        self.member.licence_issued = False
-        self.member.save()
-        self.assertIn("once your licence is issued", text())                    # no licence yet
-
-    def test_my_cards_says_when_the_next_card_arrives(self):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        from . import card_ack
-        from .models import PackageDelivery
-        from .plans import package_cards
-
-        self.cards_all = package_cards(self.org)
-        text = json.dumps(card_ack.my_cards_view(self.org, self.member), ensure_ascii=False)
-        self.assertIn("Your next card is on its way", text)                     # nothing scheduled yet
-        when = timezone.now() + timedelta(days=3)
-        PackageDelivery.objects.create(organization_id=str(self.org.pk), user_id=str(self.member.pk), package="basic",
-                                       card_no=self.cards_all[12]['no'], post_order=13, post_at=when,
-                                       status="scheduled")
-        text = json.dumps(card_ack.my_cards_view(self.org, self.member), ensure_ascii=False)
-        self.assertIn(f"Next card:* <!date^{int(when.timestamp())}^", text)    # shown in the learner's time zone
-        self.assertNotIn(card_ack.card_title(self.cards_all[12]['no']), text.split("Next card")[1][:80])
-
-    def test_got_it_inside_my_cards_refreshes_popup(self):
-        from . import card_ack
-
-        view = card_ack.my_cards_view(self.org, self.member)
-        row = self.rows[-1]
-        self._post("U5", {"type": "block_actions", "view": {**view, "id": "V1"},
-                          "actions": [{"action_id": "aidl_card_ack", "block_id": "mc_nav", "value": row.card_no}]})
-        row.refresh_from_db()
-        self.assertIsNotNone(row.acked_at)
-        self.assertTrue(any(m == "views.update" and b.get("view_id") == "V1" for m, b in self.calls))
-        self.assertTrue(any(m == "chat.update" and b.get("ts") == row.message_ts for m, b in self.calls))
 
     def test_one_reminder_after_7_days_then_overdue_and_admin_remind(self):
         from datetime import timedelta
@@ -3755,34 +3779,22 @@ class CardAckTests(TestCase):
 
 class BlockKitIdsTests(TestCase):
     """Slack refuses a view or message when two buttons in one block share an
-    action_id (that kept My cards on "Loading…")."""
+    action_id."""
 
     def _check(self, blocks):
         for b in blocks:
             ids = [e.get("action_id") for e in b.get("elements") or [] if e.get("action_id")]
             self.assertEqual(len(ids), len(set(ids)), b)
 
-    def test_my_cards_views_have_unique_action_ids(self):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        from . import card_ack
-        from .models import PackageDelivery
-        from .plans import package_cards
+    def test_employee_cards_and_popups_have_unique_action_ids(self):
+        from . import employee_flow
 
         org = make_org(plan="basic")
-        member = make_user(org, role=AIDLUser.Role.LEARNER, licence_issued=True)
-        for i, c in enumerate(package_cards(org)[:14]):
-            PackageDelivery.objects.create(organization_id=str(org.pk), user_id=str(member.pk), package="basic",
-                                           card_no=c["no"], post_order=i + 1, status="sent",
-                                           post_at=timezone.now() - timedelta(days=30 - i))
-        m = card_ack._blank_state()
-        for view in ("card", "list"):
-            m["view"] = view
-            for page in (0, 1):
-                m["page"] = page
-                self._check(card_ack.my_cards_view(org, member, dict(m))["blocks"])
+        member = make_user(org, role=AIDLUser.Role.LEARNER, licence_issued=True, licence_number="AIDL-L-1-2",
+                           avatar_data="x")
+        self._check(employee_flow.licence(member, org)["attachments"][0]["blocks"])
+        self._check(employee_flow.menu_view(member, "licence")["blocks"])
+        self._check(employee_flow.share_view(member, org)["blocks"])
 
 
 @override_settings(WAITLIST_NOTIFY_EMAIL="team@aidl.example",

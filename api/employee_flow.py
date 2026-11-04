@@ -255,8 +255,12 @@ def avatar_card(member: AIDLUser, org: Organization, notice: str = "") -> dict:
     ])
 
 
+def _verify_url(number: str) -> str:
+    return f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={number}"
+
+
 def licence(member: AIDLUser, org: Organization) -> dict:
-    from . import avatar, licence_image
+    from . import licence_image
 
     if not member.licence_issued:
         return card("All cards done — your license is waiting for a free seat.", "*License*", COLOR["yellow"], [
@@ -276,7 +280,7 @@ def licence(member: AIDLUser, org: Organization) -> dict:
     nxt = (PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SCHEDULED,
                                           post_at__gt=timezone.now()).order_by("post_at").first())
     when = (f"*<!date^{int(nxt.post_at.timestamp())}^{{date_long_pretty}}|soon>*" if nxt else "*soon*")
-    verify = f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={number}"
+    verify = _verify_url(number)
     return card(f"You're road-ready, {_first(member)}! Here's your AI Driving License.", "*License issued*",
                 COLOR["green"], [
         _header(f":tada: You're road-ready, {_first(member)}!"),
@@ -285,21 +289,51 @@ def licence(member: AIDLUser, org: Organization) -> dict:
         {"type": "image", "image_url": licence_image.image_url(number, version=version),
          "title": _t(f"AI Driving License · {number}"),
          "alt_text": "AI Driving License"},  # short: Slack shows it as the hover tooltip
+        _actions("aidl_flow_licence",
+                 _button(":inbox_tray: Download license", "aidl_link_download", "download",
+                         url=licence_image.image_url(number, download=True, version=version)),
+                 _button(":outbox_tray: Share", "aidl_licence_share", "share"),
+                 _button(":link: Share on LinkedIn", "aidl_link_share", "linkedin",
+                         url="https://www.linkedin.com/sharing/share-offsite/?url=" + quote(verify, safe=""))),
         DIVIDER,
         _section(f":white_check_mark: {org.name} policy cards agreed\n:white_check_mark: Traffic Light Check\n"
                  ":white_check_mark: The Highway Code"),
         _section(f":spiral_calendar_pad: Your next card arrives {when}. Keep the Traffic Light and Highway Code "
                  "cards handy."),
-        _actions("aidl_flow_licence",
-                 _button(":inbox_tray: Download license", "aidl_link_download", "download",
-                         url=licence_image.image_url(number, download=True, version=version)),
-                 _button(":art: Change avatar", "aidl_link_avatar", "change", url=avatar.start_url(member)),
-                 _button(":link: Share on LinkedIn", "aidl_link_share", "linkedin",
-                         url="https://www.linkedin.com/sharing/share-offsite/?url=" + quote(verify, safe=""))),
-        _actions("aidl_licence_more",
-                 _button(":books: My cards", "aidl_my_cards", "0"),
-                 _button(":motorway: Request an app", "aidl_app_request_open", "licence")),
+        _actions("aidl_licence_more", _button("☰ Menu", "aidl_employee_menu", "licence")),
     ])
+
+
+def menu_view(member: AIDLUser, source: str = "") -> dict:
+    """☰ Menu on the licence and awareness cards. Built when it's pressed, so
+    Change avatar is gone from every old message once the one change is used."""
+    from . import avatar
+
+    blocks = []
+    if avatar.can_change(member):
+        blocks.append(_section("*Change avatar*\nYou can change it once. After that it stays on your licence.",
+                               accessory=_button("🎨 Change avatar", "aidl_link_avatar", "change",
+                                                 url=avatar.start_url(member))))
+    blocks.append(_section("*Request an app*\nAsk your admin to approve an AI app you need.",
+                           accessory=_button("🛣 Request an app", "aidl_app_request_open", source or "menu")))
+    return {"type": "modal", "callback_id": "aidl_employee_menu", "title": _t("Menu"), "close": _t("Close"),
+            "blocks": blocks}
+
+
+def share_view(member: AIDLUser, org: Organization) -> dict:
+    """Share under the licence: the link to copy, and the places to post it."""
+    verify = _verify_url(member.licence_number)
+    link = quote(verify, safe="")
+    text = quote(f"I just earned my AI Driving License from {org.name}!")
+    return {"type": "modal", "callback_id": "aidl_licence_share", "title": _t("Share your licence"),
+            "close": _t("Close"), "blocks": [
+        _section(f"*Copy your link*\n{verify}"),
+        _actions("aidl_share_to",
+                 _button("𝕏 Post on X", "aidl_link_x", "x", url=f"https://twitter.com/intent/tweet?text={text}&url={link}"),
+                 _button("Facebook", "aidl_link_facebook", "facebook",
+                         url=f"https://www.facebook.com/sharer/sharer.php?u={link}"),
+                 _button("WhatsApp", "aidl_link_whatsapp", "whatsapp", url=f"https://wa.me/?text={text}%20{link}")),
+    ]}
 
 
 # ---------- moving through the flow ----------

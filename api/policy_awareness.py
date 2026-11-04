@@ -81,8 +81,8 @@ def blocks(org: Organization, c: dict, acked: bool = False) -> list:
               {"type": "actions", "block_id": "aidl_paw", "elements": [
                   {"type": "button", "text": {"type": "plain_text", "text": "✅ Got it", "emoji": True},
                    "action_id": "aidl_paw_ack", "value": c["id"], "style": "primary"},
-                  {"type": "button", "text": {"type": "plain_text", "text": "📚 My cards", "emoji": True},
-                   "action_id": "aidl_my_cards", "value": "0"}]})
+                  {"type": "button", "text": {"type": "plain_text", "text": "☰ Menu", "emoji": True},
+                   "action_id": "aidl_employee_menu", "value": "paw"}]})
     return [
         {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*AI awareness · {c['icon']} {c['title']}*"}]},
         {"type": "image", "image_url": card_image.image_url(kind, org), "alt_text": c["title"]},  # short hover tooltip
