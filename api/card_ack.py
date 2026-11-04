@@ -31,8 +31,6 @@ from .models import AIDLUser, Organization, PackageDelivery
 logger = logging.getLogger(__name__)
 REMIND_AFTER = timedelta(days=7)
 OVERDUE_AFTER = timedelta(days=3)
-MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
-          "November", "December")
 LIVE = {"none": ("Don't message me", "Only the numbers in Admin Center"),
         "counter": ("One live message a day", "It updates itself, so at most one ping a day"),
         "every": ("A message for every Got it", "One DM each time someone taps Got it")}
@@ -83,15 +81,6 @@ def _total(org: Organization) -> int:
     from .card_approval import sequence
 
     return len(sequence(org)) or 1
-
-
-def received(member: AIDLUser) -> list[PackageDelivery]:
-    """The cards Slack has posted to this learner, oldest first."""
-    from .package_delivery import _mark_sent
-
-    _mark_sent(member)
-    return list(PackageDelivery.objects.filter(user_id=str(member.pk), status=PackageDelivery.Status.SENT)
-                .order_by("post_at"))
 
 
 def _message(org: Organization, row: PackageDelivery) -> dict:
@@ -423,36 +412,6 @@ def send_overdue_alerts(org: Organization) -> int:
                            "accessory": _btn("⏰ Remind", "aidl_ack_remind", p["user_id"])})
         told += bool(_dm(org, admin, "AIDL: people overdue on their cards", blocks).get("ok"))
     return told
-
-
-# ---------- the list on the Teams My cards page ----------
-
-def _blank_state(**extra) -> dict:
-    return {"q": "", "status": "all", "topic": "all", "month": "all", "latest": "all", "view": "card", "idx": 0,
-            "page": 0, **extra}
-
-
-def _filtered(rows: list[PackageDelivery], m: dict) -> list[PackageDelivery]:
-    lst = list(reversed(rows))  # newest first
-    if m["latest"] != "all":
-        lst = lst[: int(m["latest"])]
-    if m["status"] == "todo":
-        lst = [r for r in lst if not r.acked_at]
-    elif m["status"] == "done":
-        lst = [r for r in lst if r.acked_at]
-    if m["month"] != "all":
-        lst = [r for r in lst if r.post_at.strftime("%Y-%m") == m["month"]]
-    if m["topic"] != "all":
-        lst = [r for r in lst if _card(r.card_no)["category"] == m["topic"]]
-    q = m["q"].strip().lower()
-    if q:
-        lst = [r for r in lst if q in " ".join(str(_card(r.card_no).get(k, "")) for k in
-                                                ("title", "category", "type", "hook", "message", "action")).lower()]
-    return lst
-
-
-def _month_name(key: str) -> str:
-    return f"{MONTHS[int(key[5:]) - 1]} {key[:4]}"
 
 
 def card_title(no: str) -> str:

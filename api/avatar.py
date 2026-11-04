@@ -10,9 +10,9 @@ Once saved, the licence card (with the avatar) is posted to their Slack DM.
 AIDLUser.avatar_data holds the PNG (base64), avatar_config the builder's
 settings so the avatar can be edited later.
 
-In Slack, creating the first avatar is free and it can then be changed once
-(AIDLUser.avatar_changed_at). Old links still reach the page, so the save is
-what enforces it. Teams people aren't limited.
+Creating the first avatar is free and it can then be changed once, in Slack
+and Teams (AIDLUser.avatar_changed_at). Old links still reach the page, so the
+save is what enforces it.
 """
 
 from __future__ import annotations
@@ -93,13 +93,9 @@ def save(member: AIDLUser, png_b64: str, config: dict | None = None) -> None:
     member.save(update_fields=["avatar_data", "avatar_config", "updated_at"])
 
 
-def limited(member: AIDLUser) -> bool:
-    return member.microsoft_id.startswith("slack:")
-
-
 def locked(member: AIDLUser) -> bool:
     """The avatar can't be changed any more."""
-    return limited(member) and bool(member.avatar_data) and member.avatar_changed_at is not None
+    return bool(member.avatar_data) and member.avatar_changed_at is not None
 
 
 def can_change(member: AIDLUser) -> bool:
@@ -162,7 +158,7 @@ def avatar_api(request):
             config = None
         return Response({"name": member.full_name or member.email, "has_avatar": bool(member.avatar_data),
                          "config": config, "licensed": member.licence_issued, "return_url": _return_url(member),
-                         "locked": locked(member), "one_change_only": limited(member)})
+                         "locked": locked(member)})
     if locked(member):
         return Response({"detail": ALREADY_CHANGED}, status=status.HTTP_409_CONFLICT)
     raw = str(request.data.get("png") or "")
@@ -178,7 +174,7 @@ def avatar_api(request):
         png = normalise(data)
     except ValueError:
         return Response({"png": ["That isn't an image."]}, status=status.HTTP_400_BAD_REQUEST)
-    if limited(member) and member.avatar_data and not _claim_change(member):
+    if member.avatar_data and not _claim_change(member):
         return Response({"detail": ALREADY_CHANGED}, status=status.HTTP_409_CONFLICT)
     config = request.data.get("config")
     save(member, png, config if isinstance(config, dict) else None)

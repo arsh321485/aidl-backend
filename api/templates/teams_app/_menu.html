@@ -1,0 +1,7 @@
+<details class="pop">
+  <summary class="btn">☰ Menu</summary>
+  <div class="list">
+    {% if can_change_avatar %}<div class="spread"><div><b>Change avatar</b><br><span class="muted">You can change it once. After that it stays on your licence.</span></div> <a class="btn" href="{{ avatar_url }}">🎨 Change avatar</a></div>{% endif %}
+    <div class="spread"><div><b>Request an app</b><br><span class="muted">Ask your admin to approve an AI app you need.</span></div> <a class="btn" href="{% url 'teams-app-request' %}{% if from_card %}?from={{ from_card }}{% endif %}">🛣 Request an app</a></div>
+  </div>
+</details>

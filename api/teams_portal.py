@@ -5,7 +5,7 @@ the pages do what Slack's buttons and popups do, through the same modules.
     /api/teams/app/             sends you to your page
     /api/teams/app/me/          employee: Welcome → policy cards, Traffic Light,
                                 Highway Code → avatar → licence
-    /api/teams/app/me/cards/    My cards, one card + Got it, Request an app
+    /api/teams/app/me/cards/<no>/   one card + Got it, Menu
     /api/teams/app/admin/       Admin Center: the 6 setup steps and their pages
 
 Sign-in: Microsoft → auth_views.teams_callback → finish_login → an HttpOnly
@@ -219,7 +219,7 @@ def me(request, user, org):
     now = stage(user, org)
     from .avatar import start_url
 
-    ctx = {"welcome": not user.slack_onboarded_at, "stage": now, "avatar_url": start_url(user),
+    ctx = {"welcome": not user.slack_onboarded_at, "stage": now, "avatar_url": start_url(user), **_menu(user),
            "cadence": cadence(org)[:1].upper() + cadence(org)[1:], "first": _first(user)}
     if ctx["welcome"]:
         ctx["policy_count"] = len(aup_store.required_points(org))
@@ -234,7 +234,13 @@ def me(request, user, org):
     if now == "licence" and user.licence_issued and user.avatar_data:
         version = licence_image.url_version(user, org)
         verify = f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={user.licence_number}"
+        text = quote(f"I just earned my AI Driving Licence from {org.name}!")
+        link = quote(verify, safe="")
         ctx["licence"] = {
+            "link": verify,
+            "share_x": f"https://twitter.com/intent/tweet?text={text}&url={link}",
+            "share_facebook": f"https://www.facebook.com/sharer/sharer.php?u={link}",
+            "share_whatsapp": f"https://wa.me/?text={text}%20{link}",
             "image": licence_image.image_url(user.licence_number, version=version),
             "download": licence_image.image_url(user.licence_number, download=True, version=version),
             "share": "https://www.linkedin.com/sharing/share-offsite/?url=" + quote(verify, safe=""),
@@ -244,6 +250,13 @@ def me(request, user, org):
     ctx["awareness"] = [{**c, "image": card_image.image_url(f"paw-{c['id']}", org)}
                         for c in policy_awareness.approved(org) if user.licence_issued and c["id"] not in acked]
     return _render(request, user, org, "me.html", **ctx)
+
+
+def _menu(user: AIDLUser, from_card: str = "") -> dict:
+    """What teams_app/_menu.html needs."""
+    from .avatar import can_change, start_url
+
+    return {"avatar_url": start_url(user), "can_change_avatar": can_change(user), "from_card": from_card}
 
 
 def _paw_acked(user: AIDLUser) -> list[str]:
@@ -308,25 +321,9 @@ def _tell_no_seat(org: Organization, member: AIDLUser) -> None:
 
 
 @_page
-def my_cards(request, user, org):
-    teams_channel.deliver_due(org, user)
-    rows = card_ack.received(user)
-    m = {**card_ack._blank_state(), **{k: request.GET[k] for k in ("q", "status", "topic", "month", "latest")
-                                        if request.GET.get(k)}}
-    m["latest"] = m["latest"] if m["latest"] in ("all", "2", "5", "10") else "all"
-    shown = card_ack._filtered(rows, m)
-    months, topics = [], set()
-    for r in reversed(rows):
-        key = r.post_at.strftime("%Y-%m")
-        if key not in months:
-            months.append(key)
-        topics.add(card_ack._card(r.card_no)["category"])
-    acked = sum(1 for r in rows if r.acked_at)
-    return _render(request, user, org, "my_cards.html", m=m, total=len(rows), acked=acked, waiting=len(rows) - acked,
-                   cards=[{"row": r, "card": card_ack._card(r.card_no),
-                           "image": card_image.image_url(f"pkg-{r.card_no}", org)} for r in shown[:50]],
-                   months=[(k, card_ack._month_name(k)) for k in months], topics=sorted(t for t in topics if t),
-                   next=_next_card(user), more=max(len(shown) - 50, 0))
+def my_cards_moved(request, user, org):
+    """The My cards page is gone; old links land on the person's own page."""
+    return redirect("teams-app-me")
 
 
 @_page
@@ -347,7 +344,7 @@ def card_page(request, user, org, no: str):
             in_background(teams_channel.after_ack, org, user, card["title"])
         return redirect("teams-app-card", no=no)
     return _render(request, user, org, "card.html", row=row, card=card, image=card_image.image_url(f"pkg-{no}", org),
-                   local=re.sub(r"[*]", "", _local_line(org, card)) if card.get("local_link") else "")
+                   **_menu(user, no), local=re.sub(r"[*]", "", _local_line(org, card)) if card.get("local_link") else "")
 
 
 @_page
