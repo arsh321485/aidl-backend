@@ -17,6 +17,7 @@
 
 {% if no_team %}<div class="error" role="alert"><b>AIDL couldn't create your Teams team.</b> Your company may not allow you to create teams. Ask your Microsoft 365 admin to allow it, then <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-admin' %}">sign in again</a>.</div>{% endif %}
 {% if lost %}<div class="error" role="alert"><b>AIDL can't post in your Teams channel.</b> Your Microsoft sign-in has expired. <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-admin' %}">Sign in again</a> to reconnect.</div>{% endif %}
+{% if no_home_card and not lost %}<div class="notice">AIDL hasn't been able to post in your Teams channel yet, so the channel looks empty. AIDL keeps trying, and you can run everything from this page.</div>{% endif %}
 {% if pending_apps and can.can_apps %}<div class="notice">🛣 {{ pending_apps }} app request{{ pending_apps|pluralize }} waiting. <a href="{% url 'teams-app-apps' %}">Review</a></div>{% endif %}
 
 <section class="box step">

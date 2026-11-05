@@ -376,6 +376,7 @@ def admin_home(request, user, org):
                    can=_can(user), master=admin_perms.is_master(org, user), bar=range(st["done_count"]),
                    rest=range(5 - st["done_count"]), lost=admin_setup.state(org).get("teams_login_lost"),
                    no_team=not org.teams_team_id,
+                   no_home_card=bool(org.teams_team_id and not org.teams_welcome_message_id),
                    tz_known=admin_setup.state(org).get("tz_offset_min") is not None,
                    policy_days=[{**c, "day": _day(c.get("send_on"))} for c in st["policy"]],
                    pending_apps=AppRequest.objects.filter(organization_id=str(org.pk),

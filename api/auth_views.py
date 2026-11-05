@@ -405,6 +405,8 @@ def teams_callback(request):
         # Admin Center's Home once it sees this user's role is Learner.
         landing_url = f"{settings.BACKEND_URL}{reverse('teams-app')}"
 
+    import logging
+
     welcome_card_sent = False
     welcome_card_error = ""
     channel_tabs_created = 0
@@ -422,8 +424,10 @@ def teams_callback(request):
 
             forget_token(org)
             org.teams_welcome_channel_id = channel_info.get("channel_id") or ""
-            org.save(update_fields=["teams_welcome_channel_id", "updated_at"])
-            welcome_result = publish_home(org, ms_token)
+            if channel_recreated:  # the old card went with the old channel
+                org.teams_welcome_message_id = ""
+            org.save(update_fields=["teams_welcome_channel_id", "teams_welcome_message_id", "updated_at"])
+            welcome_result = publish_home(org, ms_token, settle=True)
             welcome_card_sent = bool(welcome_result and welcome_result.get("ok"))
             if not welcome_card_sent:
                 welcome_card_error = (
@@ -431,6 +435,9 @@ def teams_callback(request):
                     or (welcome_result or {}).get("detail")
                     or "send_failed"
                 )[:180]
+                logging.getLogger(__name__).warning("Teams home card not posted for org %s: %s", org.pk, welcome_card_error)
+                # The channel has nothing to open AIDL from: go to the Admin Center.
+                landing_url = f"{settings.BACKEND_URL}{reverse('teams-app-admin')}"
         tab_info = channel_info.get("channel_tabs") or {}
         channel_tabs_created = len(tab_info.get("tabs_created") or [])
 
