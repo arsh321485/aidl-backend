@@ -5024,6 +5024,85 @@ class LicenceDesignTests(TestCase):
         self.assertIn("/cards/learners-permit/download/?email=", card["url"])
 
 
+class ResetSlackProgressTests(TestCase):
+    def setUp(self):
+        from .models import Acknowledgement, CardApproval, RegisteredApp
+
+        self.org = make_org(slack_team_id="T1", slack_bot_token="x", plan="enterprise", logo_data="LOGO",
+                            billing='{"history": []}', setup_state='{"a": 1}', aup_data='{"cards": {}}', policy_answers="{}")
+        self.admin = make_user(self.org, perm_billing=True, perm_manage_admins=True, licence_issued=True,
+                               licence_number="AIDL-1", avatar_data="A")
+        self.member = make_user(self.org, role=AIDLUser.Role.LEARNER, licence_issued=True, licence_number="AIDL-2",
+                                avatar_data="B", aup_signed=True)
+        self.teams = make_org(ms_tenant_id="t", teams_team_id="team", setup_state='{"keep": 1}', aup_data="{}")
+        self.teams_member = make_user(self.teams, role=AIDLUser.Role.LEARNER, licence_issued=True, licence_number="AIDL-3")
+        for org, user in ((self.org, self.member), (self.teams, self.teams_member)):
+            Acknowledgement.objects.create(organization_id=str(org.pk), user_id=str(user.pk), item="traffic_light")
+            CardApproval.objects.create(organization_id=str(org.pk), card_key="traffic_light")
+            RegisteredApp.objects.create(organization_id=str(org.pk), name="ChatGPT")
+
+    def _run(self, *args, api=None):
+        import io
+
+        from django.core.management import call_command
+
+        def default(method, token, **kw):
+            if method == "chat.scheduledMessages.list":
+                return {"ok": True, "scheduled_messages": [{"id": "Q1", "channel_id": "D1"}]}
+            return {"ok": True}
+
+        out = io.StringIO()
+        with patch("api.management.commands.reset_slack_progress.slack_client.bot_token", return_value="tok"),                 patch("api.management.commands.reset_slack_progress.slack_client.slack_api",
+                      side_effect=api or default) as slack,                 patch("api.slack_blocks.publish_admin_center"):
+            call_command("reset_slack_progress", *args, stdout=out, stderr=out)
+        return out.getvalue(), slack
+
+    def _progress(self):
+        from .models import Acknowledgement, CardApproval, RegisteredApp
+
+        return [m.objects.filter(organization_id=str(self.org.pk)).count() for m in (Acknowledgement, CardApproval, RegisteredApp)]
+
+    def test_preview_changes_nothing(self):
+        out, slack = self._run()
+        self.assertIn("Preview only", out)
+        self.assertEqual(self._progress(), [1, 1, 1])
+        self.assertTrue(AIDLUser.objects.get(pk=self.member.pk).licence_issued)
+        self.assertFalse(any(c.args[0] == "chat.deleteScheduledMessage" for c in slack.call_args_list))
+
+    def test_confirm_clears_progress_and_keeps_plan_logo_and_admins(self):
+        out, slack = self._run("--confirm")
+        self.assertEqual(self._progress(), [0, 0, 0])
+        self.assertTrue(any(c.args[0] == "chat.deleteScheduledMessage" for c in slack.call_args_list))
+        member = AIDLUser.objects.get(pk=self.member.pk)
+        self.assertEqual((member.licence_issued, member.licence_number, member.avatar_data, member.aup_signed),
+                         (False, "", "", False))
+        admin = AIDLUser.objects.get(pk=self.admin.pk)
+        self.assertEqual((admin.role, admin.perm_billing, admin.perm_manage_admins), (AIDLUser.Role.ADMIN, True, True))
+        self.assertEqual((admin.licence_issued, admin.avatar_data), (False, ""))
+        self.org.refresh_from_db()
+        self.assertEqual((self.org.plan, self.org.logo_data, self.org.billing), ("enterprise", "LOGO", '{"history": []}'))
+        self.assertEqual((self.org.setup_state, self.org.aup_data, self.org.policy_answers), ("", "", ""))
+
+    def test_teams_organizations_are_not_touched(self):
+        from .models import Acknowledgement, RegisteredApp
+
+        self._run("--confirm")
+        self.teams.refresh_from_db()
+        self.assertEqual(self.teams.setup_state, '{"keep": 1}')
+        self.assertTrue(AIDLUser.objects.get(pk=self.teams_member.pk).licence_issued)
+        self.assertEqual(Acknowledgement.objects.filter(organization_id=str(self.teams.pk)).count(), 1)
+        self.assertEqual(RegisteredApp.objects.filter(organization_id=str(self.teams.pk)).count(), 1)
+
+    def test_nothing_is_deleted_if_slack_will_not_list_its_messages(self):
+        out, _slack = self._run("--confirm", api=lambda method, token, **kw: {"ok": False, "error": "internal_error"})
+        self.assertIn("SKIPPED", out)
+        self.assertEqual(self._progress(), [1, 1, 1])
+
+    def test_a_workspace_without_the_bot_is_still_reset(self):
+        self._run("--confirm", api=lambda method, token, **kw: {"ok": False, "error": "account_inactive"})
+        self.assertEqual(self._progress(), [0, 0, 0])
+
+
 class TeamsHomeCardTests(TestCase):
     """The channel's only way into AIDL must not depend on one post at sign-in."""
 
