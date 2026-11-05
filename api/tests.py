@@ -3777,6 +3777,238 @@ class CardAckTests(TestCase):
         self.assertEqual(AppRequest.objects.get().from_card, self.cards[2]["title"])
 
 
+class ApprovedToolsListTests(TestCase):
+    """Only Approved apps appear on the lists employees see."""
+
+    def setUp(self):
+        from .aup_store import save_answers
+
+        self.org = make_org(slack_team_id="T9", plan="basic")
+        self.admin = make_user(self.org, microsoft_id="slack:T9:U1")
+        self.save_answers = save_answers
+
+    def _app(self, name, status, app_type="ai"):
+        return RegisteredApp.objects.create(organization_id=str(self.org.pk), name=name, app_type=app_type, status=status)
+
+    def _allowed(self):
+        from .aup import generate_aup
+
+        aup = generate_aup(self.org)
+        return [a["name"] for a in aup["allowed_ai"] + aup["allowed_it"]]
+
+    def test_prohibited_and_pending_apps_are_not_listed(self):
+        self._app("Claude", "approved")
+        self._app("Jira", "approved", "it")
+        self._app("Otter.ai", "rejected")
+        self._app("Shadow Drive", "rejected", "it")
+        self._app("Maybe AI", "pending")
+        allowed = self._allowed()
+        self.assertIn("Claude", allowed)
+        self.assertIn("Jira", allowed)
+        for name in ("Otter.ai", "Shadow Drive", "Maybe AI"):
+            self.assertNotIn(name, allowed)
+
+    def test_older_duplicate_rows_count_as_prohibited(self):
+        self._app("Otter.ai", "approved")
+        self._app("otter.ai", "rejected")
+        self.assertNotIn("Otter.ai", self._allowed())
+
+    def test_adding_an_app_again_replaces_the_old_decision(self):
+        from .admin_ops import add_registered_app
+
+        add_registered_app(self.org, app_type="ai", name="Notion AI", status="approved")
+        add_registered_app(self.org, app_type="ai", name=" notion ai ", status="rejected")
+        rows = RegisteredApp.objects.filter(organization_id=str(self.org.pk), name__iexact="Notion AI")
+        self.assertEqual([r.status for r in rows], ["rejected"])
+        self.assertNotIn("Notion AI", self._allowed())
+        add_registered_app(self.org, app_type="ai", name="Notion AI", status="approved")
+        self.assertIn("Notion AI", self._allowed())
+
+    def test_a_policy_answer_does_not_overturn_prohibited(self):
+        from .slack_cards import _apply_app_effects, _app_row
+
+        rows = [_app_row("ChatGPT", "Assistant / Chatbot", "None", "Prohibited")]
+        fx = {"apps_mode": "any_public", "enterprise_only": False}
+        statuses = {a["name"]: a["status"] for a in _apply_app_effects(rows, fx)}
+        self.assertEqual(statuses["ChatGPT"], "Prohibited")
+        self.assertEqual(statuses["Claude"], "Approved")
+
+    def test_policy_card_drops_a_tool_marked_prohibited_later(self):
+        from . import aup_store, card_image, policy_cards as pc
+
+        a = aup_store.answers(self.org)
+        a["answers"]["7.1"] = pc.APPROVED_AI
+        a["tools"] = ["ChatGPT", "Claude", "Gemini"]
+        pc.approve(self.org, self.admin, 7, a, deliver=False)
+        saved = aup_store.card(self.org, 7)["lines"]
+        self.assertIn("Approved AI tools: ChatGPT, Claude and Gemini.", saved)
+        before = card_image.version_for("aup-7", self.org)
+        agreed = aup_store.card_version(self.org, 7)
+        self._app("chatgpt", "rejected")
+        shown = json.dumps(pc.card_rules(self.org, 7, saved))
+        self.assertNotIn("ChatGPT", shown)
+        self.assertIn("Claude", shown)
+        self.assertNotEqual(before, card_image.version_for("aup-7", self.org))   # Slack fetches the new picture
+        self.assertEqual(aup_store.card_version(self.org, 7), agreed)            # nobody has to agree again
+        clauses = " ".join(c["text"] for c in aup_store.point(self.org, 7)["clauses"])
+        self.assertNotIn("ChatGPT", clauses)
+        self.assertNotIn("ChatGPT", aup_store.answers(self.org)["tools"])
+
+    def test_tool_marked_prohibited_cannot_be_picked_or_pasted(self):
+        from . import aup_store, policy_cards as pc
+        from .policy_cards_slack import _tools_options, read_state
+
+        self._app("ChatGPT Team", "rejected")
+        offered = json.dumps(_tools_options(self.org, []))
+        self.assertNotIn("ChatGPT Team", offered)
+        self.assertIn("Microsoft 365 Copilot", offered)
+        a = aup_store.answers(self.org)
+        a["answers"]["7.1"] = pc.APPROVED_AI
+        a["tools"] = ["ChatGPT Team", "Claude"]
+        pc.approve(self.org, self.admin, 7, a, deliver=False)
+        self.assertNotIn("ChatGPT Team", " ".join(aup_store.card(self.org, 7)["lines"]))
+        view = {"state": {"values": {f"paste_0": {"v": {"value": "ChatGPT Team, Perplexity"}}}}}
+        pasted = read_state(self.org, view)[3]
+        self.assertEqual(pasted, ["Perplexity"])
+
+    def test_employee_is_not_told_a_prohibited_duplicate_is_approved(self):
+        from . import app_requests
+
+        self._app("Otter.ai", "approved")
+        self._app("Otter.ai", "rejected")
+        self.assertNotIn("Otter.ai", self._allowed())
+        member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5")
+        values = {"name": {"v": {"value": "Otter.ai"}}, "purpose": {"v": {"value": "Notes"}},
+                  "data": {"v": {"selected_option": {"value": "green"}}}}
+        with patch("api.slack_client.slack_api", return_value={"ok": True, "channel": {"id": "D1"}, "ts": "1.1"}), \
+                patch("api.slack_modals.in_background") as bg:
+            app_requests.submit(member, self.org, {"private_metadata": "{}", "state": {"values": values}})
+        self.assertFalse(any("already approved" in str(c) for c in bg.call_args_list))
+
+
+@override_settings(STRIPE_SECRET_KEY="sk_test_x", BILLING_PROVIDER="stripe", BILLING_TEST_MODE=False,
+                   STRIPE_PRICES={"basic": "price_basic", "enterprise": "price_ent"})
+class PromoCodeTests(TestCase):
+    TESTER = "tester@secureitlab.example"
+    SCHEDULE = {"days": [0, 1, 2, 3], "hour": 9}
+
+    def setUp(self):
+        import io
+
+        from django.core.management import call_command
+
+        self.org = make_org(slack_team_id="T9", plan="trial")
+        self.tester = make_user(self.org, microsoft_id="slack:T9:U1", email=self.TESTER)
+        self.customer_org = make_org(name="Customer", slack_team_id="T8", plan="trial")
+        self.customer = make_user(self.customer_org, microsoft_id="slack:T8:U1", email="owner@customer.example")
+        out = io.StringIO()
+        call_command("promo_code", "create", "--label", "QA", "--email", self.TESTER, "--max-uses", "3", stdout=out)
+        self.code = out.getvalue().split()[0]
+
+    def _checkout(self, user, code, plan="enterprise", **extra):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(user)}")
+        body = {"plan": plan, "topics": ["C10"], "schedule": self.SCHEDULE, "promo_code": code, **extra}
+        with patch("api.stripe_billing.requests.post") as stripe:
+            resp = client.post("/api/billing/checkout/", body, format="json")
+        self.assertFalse(stripe.called)                                          # never touches Stripe
+        return resp
+
+    def test_only_the_hash_is_stored(self):
+        from .models import PromoCode
+
+        self.assertTrue(self.code.startswith("AIDL-"))
+        row = PromoCode.objects.get()
+        self.assertNotEqual(row.code_hash, self.code)
+        self.assertNotIn(self.code, json.dumps([row.code_hash, row.label, row.allowed_emails]))
+
+    def test_named_tester_gets_enterprise_without_paying(self):
+        resp = self._checkout(self.tester, self.code.lower())
+        self.assertEqual(resp.json()["status"], "activated", resp.content)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "enterprise")
+        self.assertIn('"how": "promo"', self.org.billing)
+        self.assertNotIn(self.code, self.org.billing)
+        self.assertNotIn("stripe", json.loads(self.org.billing))
+        from .plans import PLANS, plan_key
+
+        self.assertEqual(plan_key(self.org), "enterprise")
+        self.assertTrue(PLANS[plan_key(self.org)]["all_topics"])
+
+    def test_ordinary_customer_is_refused_even_with_the_code(self):
+        resp = self._checkout(self.customer, self.code)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json(), {"promo_code": ["This code isn't valid for your account."]})
+        self.customer_org.refresh_from_db()
+        self.assertEqual(self.customer_org.plan, "trial")
+
+    def test_box_is_only_shown_to_named_people(self):
+        for user, shown in ((self.tester, True), (self.customer, False)):
+            client = APIClient()
+            client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(user)}")
+            self.assertEqual(client.get("/api/billing/plans/").json()["promo_available"], shown)
+
+    def test_wrong_expired_disabled_and_used_up_codes_are_refused(self):
+        from datetime import timedelta
+
+        from django.core.management import call_command
+        from django.utils import timezone
+
+        from .models import PromoCode
+
+        self.assertEqual(self._checkout(self.tester, "AIDL-WRONG").status_code, 400)
+        PromoCode.objects.update(expires_at=timezone.now() - timedelta(days=1))
+        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
+        PromoCode.objects.update(expires_at=timezone.now() + timedelta(days=1), uses=3)
+        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
+        PromoCode.objects.update(uses=0)
+        call_command("promo_code", "disable", "--label", "QA", verbosity=0)
+        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "trial")
+
+    def test_a_basic_code_does_not_open_enterprise(self):
+        import io
+
+        from django.core.management import call_command
+
+        out = io.StringIO()
+        call_command("promo_code", "create", "--label", "B", "--email", self.TESTER, "--plan", "basic", stdout=out)
+        code = out.getvalue().split()[0]
+        self.assertEqual(self._checkout(self.tester, code).status_code, 400)
+        self.assertEqual(self._checkout(self.tester, code, plan="basic").json()["status"], "activated")
+
+    def test_real_subscriptions_are_left_alone(self):
+        self.org.plan = "basic"
+        self.org.billing = json.dumps({"stripe": {"subscription": "sub_1"}})
+        self.org.save()
+        resp = self._checkout(self.tester, self.code)
+        self.assertIn("paid subscription", resp.json()["promo_code"][0])
+        self.org.plan = "basic"
+        self.org.billing = ""                                                    # set up by hand for a customer
+        self.org.save()
+        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "basic")
+        from .models import PromoCode
+
+        self.assertEqual(PromoCode.objects.get().uses, 0)                        # refused: no use taken
+
+    def test_tester_can_move_up_after_a_promo_basic(self):
+        self.assertEqual(self._checkout(self.tester, self.code, plan="basic").json()["status"], "activated")
+        self.assertEqual(self._checkout(self.tester, self.code).json()["status"], "activated")
+
+    def test_no_code_still_goes_to_payment(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(self.customer)}")
+        with patch("api.stripe_billing.requests.post") as post:
+            post.return_value.status_code = 200
+            post.return_value.content = b"{}"
+            post.return_value.json.return_value = {"url": "https://checkout.stripe.com/x"}
+            resp = client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]}, format="json")
+        self.assertEqual(resp.json()["status"], "redirect")
+
+
 class BlockKitIdsTests(TestCase):
     """Slack refuses a view or message when two buttons in one block share an
     action_id."""

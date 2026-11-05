@@ -146,6 +146,16 @@ def version_for(kind: str, org) -> str:
         from .aup_store import card_version
 
         version += "-" + (card_version(org, int(kind[4:])) or "none")
+        if kind == "aup-7":  # a tool on it was marked Prohibited since
+            from hashlib import sha256
+
+            from .aup_store import card as saved_card
+            from .policy_cards import visible_lines
+
+            lines = (saved_card(org, 7) or {}).get("lines") or []
+            shown = visible_lines(org, lines)
+            if shown != lines:
+                version += "-" + sha256("|".join(shown).encode()).hexdigest()[:6]
     return version
 
 

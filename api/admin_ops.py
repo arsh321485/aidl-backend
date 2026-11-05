@@ -87,6 +87,19 @@ def add_registered_app(
     if status not in VALID_APP_STATUS:
         status = RegisteredApp.Status.PENDING
 
+    # The same app added again: the newest decision replaces the old one, so
+    # one app can't be Approved and Prohibited at once.
+    same = RegisteredApp.objects.filter(organization_id=str(org.pk), app_type=app_type, name__iexact=name, is_active=True)
+    existing = same.first()
+    if existing is not None:
+        same.update(status=status)
+        existing.status = status
+        existing.category = category.strip() or existing.category
+        existing.data_allowed = data_allowed or existing.data_allowed
+        existing.description = description.strip() or existing.description
+        existing.save(update_fields=["category", "data_allowed", "description"])
+        return existing
+
     return RegisteredApp.objects.create(
         organization_id=str(org.pk),
         name=name,

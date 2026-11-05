@@ -3,7 +3,7 @@ from the Slack "Upgrade plan" link.
 
     GET  /api/billing/plans/      current plan, the plans, topics, schedule
     POST /api/billing/preview/    {plan, topics} → {cards: first 12 it adds (titles only), total}
-    POST /api/billing/checkout/   {plan, topics, schedule?, seats?} →
+    POST /api/billing/checkout/   {plan, topics, schedule?, seats?, promo_code?} →
                                   {status: redirect|activated|pending, url?, message}
 """
 
@@ -58,6 +58,7 @@ def plans_view(request):
 
     data = billing.catalog(org)
     data["can_upgrade"] = has(org, request.user, "billing")
+    data["promo_available"] = billing.promo_available(request.user)
     return Response(data)
 
 
@@ -95,7 +96,8 @@ def checkout_view(request):
     schedule = request.data.get("schedule") if isinstance(request.data.get("schedule"), dict) else None
     try:
         result = billing.checkout(org, request.user, str(request.data.get("plan") or ""),
-                                  _topics(request.data.get("topics")), schedule, seats)
+                                  _topics(request.data.get("topics")), schedule, seats,
+                                  str(request.data.get("promo_code") or ""))
     except billing.UpgradeError as exc:
         return Response({k: [v] for k, v in exc.errors.items()}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as exc:  # noqa: BLE001 — e.g. Stripe refused the session

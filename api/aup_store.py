@@ -33,7 +33,7 @@ from datetime import date
 from django.utils import timezone
 
 from . import aup_builder
-from .models import Acknowledgement, AIDLUser, Organization
+from .models import Acknowledgement, AIDLUser, Organization, RegisteredApp
 
 POINTS = 14
 
@@ -96,6 +96,19 @@ def _from_published(org: Organization, data: dict) -> dict:
 
 # ---------- the admin's answers ----------
 
+def prohibited_tools(org: Organization | None) -> set[str]:
+    """Names (lower case) of the apps the admin marked Prohibited."""
+    if org is None:
+        return set()
+    return {name.strip().lower() for name in RegisteredApp.objects.filter(
+        organization_id=str(org.pk), is_active=True, status=RegisteredApp.Status.REJECTED).values_list("name", flat=True)}
+
+
+def allowed_tools(org: Organization | None, tools: list[str]) -> list[str]:
+    hidden = prohibited_tools(org)
+    return [t for t in tools if t.strip().lower() not in hidden]
+
+
 def _starting_tools(org: Organization) -> list[str]:
     try:
         from .aup import generate_aup
@@ -116,12 +129,12 @@ def answers(org: Organization, *, with_tools: bool = True) -> dict:
     tools = data.get("tools")
     if tools is None:
         tools = _starting_tools(org) if with_tools else []
-    return {"answers": a, "fills": dict(data.get("fills") or {}), "tools": list(tools)}
+    return {"answers": a, "fills": dict(data.get("fills") or {}), "tools": allowed_tools(org, list(tools))}
 
 
 def save_answers(org: Organization, answers: dict, fills: dict, tools: list[str]) -> None:
     data = _load(org)
-    data["answers"], data["fills"], data["tools"] = answers, fills, tools
+    data["answers"], data["fills"], data["tools"] = answers, fills, allowed_tools(org, tools)
     _save(org, data)
 
 
@@ -205,7 +218,10 @@ def point(org: Organization | None, n: int) -> dict | None:
     c = card(org, n)
     if c is None:
         return None
-    return {"no": n, "title": c["title"], "intro": "", "clauses": [{"qid": "", "text": t} for t in c["lines"]]}
+    from .policy_cards import visible_lines
+
+    return {"no": n, "title": c["title"], "intro": "", "clauses": [{"qid": "", "text": t}
+                                                                   for t in visible_lines(org, c["lines"])]}
 
 
 def current(org: Organization | None) -> dict | None:

@@ -21,6 +21,7 @@ people who start later, get every card that's due.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 
 from django.utils import timezone
@@ -104,10 +105,28 @@ def _capital(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
+def visible_lines(org: Organization, approved: list[str]) -> list[str]:
+    """A card's approved words, minus any tool that has been marked Prohibited
+    since: it must not stay listed as approved."""
+    hidden = aup_store.prohibited_tools(org)
+    if not hidden:
+        return approved
+    prefix, out = "Approved AI tools: ", []
+    for line in approved:
+        if line.startswith(prefix) and line.endswith("."):
+            names = re.split(r", | and ", line[len(prefix):-1])
+            kept = [x for x in names if x.strip().lower() not in hidden]
+            if len(kept) != len(names):
+                line = f"{prefix}{_join(kept)}." if kept else f"{prefix}ask your AIDL admin."
+        out.append(line)
+    return out
+
+
 def card_rules(org: Organization, n: int, approved: list[str]) -> list[tuple]:
     """What the card image shows. Lists are only split up when the current
     answers still give exactly the approved words; anything else (an uploaded
     policy, answers edited since) is shown line by line, as approved."""
+    approved = visible_lines(org, approved)
     try:
         a = aup_store.answers(org, with_tools=False)
         if lines(n, a) == approved:
@@ -184,6 +203,7 @@ def approve(org: Organization, admin: AIDLUser | None, n: int, a: dict, send_on:
     (saved for the next edit); `card_lines` overrides the generated text
     (uploaded AUPs)."""
     if a:
+        a = {**a, "tools": aup_store.allowed_tools(org, a["tools"])}
         aup_store.save_answers(org, a["answers"], a["fills"], a["tools"])
     old = aup_store.card(org, n)
     if old:
