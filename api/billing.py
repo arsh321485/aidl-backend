@@ -6,8 +6,9 @@ covers all topics) and — for Enterprise — the delivery days and time,
 previews the first cards (blurred) and goes to checkout.
 
 Checkout:
-- an internal promo code (PromoCode): free for the people it names, and never
-  on an organization with a real subscription; Stripe is not involved
+- internal testing access (PromoCode, entered in Slack: slack_promo.py) is not
+  checkout. It never involves Stripe, and an organization that has it is never
+  sent to payment (see checkout)
 - admins listed in BILLING_UNLIMITED_ADMIN_EMAILS upgrade without paying
 - Stripe (stripe_billing.py) when STRIPE_SECRET_KEY and the plan's
   STRIPE_PRICE_<PLAN> are set → hosted Checkout; the webhook activates it
@@ -84,7 +85,7 @@ def catalog(org: Organization) -> dict:
         "pending": data.get("pending"),
         "test_mode": settings.BILLING_TEST_MODE,
         "provider": settings.BILLING_PROVIDER,
-        "payment_ready": {k: _stripe_ready(k) for k in ("basic", "enterprise")},
+        "payment_ready": {k: _stripe_ready(k) and not on_promo(org) for k in ("basic", "enterprise")},
         "sales_email": settings.BILLING_SALES_EMAIL,
         "preview_cards": PREVIEW_CARDS,
         "weekdays": list(plans.WEEKDAYS),
@@ -135,9 +136,19 @@ def validate(org: Organization, plan: str, topics: list[str], schedule: dict | N
     return errors
 
 
+def _settle(org: Organization, by: AIDLUser | None) -> None:
+    from .package_delivery import sync_organization
+
+    sync_organization(org)
+    if by is not None:
+        refresh_slack(org, by)
+
+
 def activate(org: Organization, plan: str, topics: list[str], schedule: dict | None, seats: int | None,
-             by: AIDLUser | None, how: str, stripe: dict | None = None, promo: str = "") -> None:
-    """Switch the plan, save the picks and reschedule everyone's cards."""
+             by: AIDLUser | None, how: str, stripe: dict | None = None, promo: str = "",
+             background: bool = False) -> None:
+    """Switch the plan, save the picks and reschedule everyone's cards.
+    `background`: a Slack popup must answer in 3 seconds, so the slow part follows."""
     data = _load(org)
     if stripe:
         data["stripe"] = {k: v for k, v in stripe.items() if v}
@@ -157,9 +168,12 @@ def activate(org: Organization, plan: str, topics: list[str], schedule: dict | N
         org.seats_purchased = seats
         fields.append("seats_purchased")
     org.save(update_fields=fields)
-    from .package_delivery import sync_organization
+    if background:
+        from .slack_modals import in_background
 
-    sync_organization(org)
+        in_background(_settle, org, by)
+        return
+    _settle(org, None)
 
 
 def _stripe_ready(plan: str) -> bool:
@@ -181,9 +195,9 @@ def unlimited(user: AIDLUser) -> bool:
     return (user.email or "").strip().lower() in settings.BILLING_UNLIMITED_ADMIN_EMAILS
 
 
-# ---------- internal promo codes ----------
+# ---------- internal testing access (promo codes, Slack only) ----------
 
-PROMO_REFUSED = "This code isn't valid for your account."
+PROMO_REFUSED = "This code isn't valid for this workspace."
 _FREE_ACTIVATIONS = {"promo", "complimentary", "test_mode"}
 
 
@@ -191,14 +205,23 @@ def promo_hash(code: str) -> str:
     return hashlib.sha256(code.strip().upper().encode()).hexdigest()
 
 
-def _names(row: PromoCode, user: AIDLUser) -> bool:
-    return (user.email or "").strip().lower() in row.allowed_emails.split(",")
+def _authorised(row: PromoCode, org: Organization, user: AIDLUser) -> bool:
+    """Every restriction on the code must pass; a code with none opens nothing."""
+    workspaces = [t for t in row.allowed_slack_teams.split(",") if t]
+    emails = [e for e in row.allowed_emails.split(",") if e]
+    if not workspaces and not emails:
+        return False
+    if workspaces and org.slack_team_id not in workspaces:
+        return False
+    return not emails or (user.email or "").strip().lower() in emails
 
 
-def promo_available(user: AIDLUser) -> bool:
-    """Whether the plans page shows this person the promo code box."""
-    return any(_names(row, user) for row in PromoCode.objects.filter(
-        is_active=True, expires_at__gt=timezone.now(), uses__lt=F("max_uses")))
+def on_promo(org: Organization) -> bool:
+    """This organization's current plan came from a code."""
+    data = _load(org)
+    last = (data.get("history") or [{}])[-1]
+    return (org.plan != "trial" and last.get("how") == "promo" and last.get("plan") == org.plan
+            and not (data.get("stripe") or {}).get("subscription"))
 
 
 def _real_subscription(org: Organization) -> bool:
@@ -210,20 +233,41 @@ def _real_subscription(org: Organization) -> bool:
     return org.plan != "trial" and (not history or history[-1].get("how") not in _FREE_ACTIVATIONS)
 
 
-def _redeem(org: Organization, by: AIDLUser, code: str, plan: str, topics: list[str], schedule: dict | None,
-            seats: int | None) -> dict:
+def promo_available(org: Organization, user: AIDLUser) -> bool:
+    """Whether the Slack Admin Center shows this person Enter promo code."""
+    if not org.slack_team_id or org.plan == "enterprise" or _real_subscription(org):
+        return False
+    return any(_authorised(row, org, user) for row in PromoCode.objects.filter(
+        is_active=True, expires_at__gt=timezone.now(), uses__lt=F("max_uses")))
+
+
+def redeem(org: Organization, by: AIDLUser, code: str) -> None:
+    """Turn on the code's plan. Raises UpgradeError; never reaches Stripe."""
+    if not org.slack_team_id:
+        raise UpgradeError({"promo_code": "Promo codes only work for organizations using Slack."})
     row = PromoCode.objects.filter(code_hash=promo_hash(code), is_active=True, expires_at__gt=timezone.now()).first()
-    if row is None or not _names(row, by) or plans.rank(plan) > plans.rank(row.plan):
+    if row is None or not _authorised(row, org, by):
         raise UpgradeError({"promo_code": PROMO_REFUSED})
+    if on_promo(org):
+        raise UpgradeError({"promo_code": "This organization already has testing access."})
     if _real_subscription(org):
         raise UpgradeError({"promo_code": "This organization has a paid subscription, so a promo code can't be used."})
     # Only one of two people at the same moment can take the last use.
     if not PromoCode.objects.filter(pk=row.pk, uses__lt=F("max_uses")).update(uses=F("uses") + 1):
         raise UpgradeError({"promo_code": PROMO_REFUSED})
-    activate(org, plan, topics, schedule, seats, by, how="promo", promo=row.label)
-    refresh_slack(org, by)
-    return {"status": "activated",
-            "message": f"Your {plans.PLANS[plan]['label']} plan is active with your internal code — no payment was taken."}
+    activate(org, row.plan, [], None, None, by, how="promo", promo=row.label, background=True)
+
+
+def _promo_label(org: Organization) -> str:
+    return ((_load(org).get("history") or [{}])[-1]).get("promo", "")
+
+
+def change_testing_schedule(org: Organization, by: AIDLUser, days: list[int], hour: int) -> None:
+    schedule = {"days": days, "hour": hour}
+    errors = validate(org, org.plan, [], schedule, None)
+    if errors:
+        raise UpgradeError(errors)
+    activate(org, org.plan, [], schedule, None, by, how="promo", promo=_promo_label(org), background=True)
 
 
 def seen_event(org: Organization, event_id: str) -> bool:
@@ -262,12 +306,16 @@ def downgrade_to_trial(org: Organization, how: str) -> None:
 
 
 def checkout(org: Organization, by: AIDLUser, plan: str, topics: list[str], schedule: dict | None,
-             seats: int | None, promo_code: str = "") -> dict:
+             seats: int | None) -> dict:
     errors = validate(org, plan, topics, schedule, seats)
     if errors:
         raise UpgradeError(errors)
-    if promo_code.strip():  # a refused code stops here: it never falls through to payment
-        return _redeem(org, by, promo_code, plan, topics, schedule, seats)
+    if on_promo(org):  # testing access is never sent to payment, whichever page it comes from
+        if plans.rank(plan) > plans.rank(org.plan):
+            raise UpgradeError({"plan": "Internal testing access doesn't include this plan."})
+        activate(org, plan, topics, schedule, seats, by, how="promo", promo=_promo_label(org))
+        refresh_slack(org, by)
+        return {"status": "activated", "message": "Saved. No payment is involved with internal testing access."}
     request_data = {"plan": plan, "topics": topics, "schedule": schedule, "seats": seats}
     if unlimited(by):
         activate(org, plan, topics, schedule, seats, by, how="complimentary")

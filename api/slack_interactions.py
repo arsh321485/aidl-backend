@@ -23,6 +23,7 @@ from django.views.decorators.http import require_POST
 
 from .auth_jwt import create_access_token
 from .models import AIDLUser
+from . import billing, slack_promo
 from . import (admin_setup, app_requests, aup_slack, aup_store, aup_upload, aup_upload_slack, card_ack, card_approval,
                card_review_slack, employee_flow, policy_cards_slack, slack_client, slack_modals)
 from .org_service import get_organization_for_user
@@ -107,6 +108,7 @@ _POPUP_TITLES = {
     "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview", "aidl_ack_alerts": "Acknowledgement alerts",
     "aidl_appreq_reject": "Reject app", "aidl_appreq_info": "Ask for more info",
     "aidl_aup_upload_open": "Upload your AUP", "aidl_aup_upload_review": "Your AUP cards",
+    "aidl_promo_open": "Enter promo code", "aidl_promo_schedule": "Change schedule",
 }
 
 
@@ -162,6 +164,7 @@ def _notify(org, channel_id: str, slack_user: str, text: str, admin: AIDLUser) -
 
 # Which tab a modal belongs to, for the permission check on submit.
 _SUBMIT_TAB = {
+    slack_promo.CODE: "home", slack_promo.SCHEDULE: "home",
     "aidl_add_admin": "add-admin",
     "aidl_card_request": "cards",
     "aidl_card_send": "cards",
@@ -205,6 +208,8 @@ def _handle_submission(payload: dict):
         allowed = d["can_policy"]
     elif callback == "aidl_logo":
         allowed = d["can_admins"]
+    elif callback in (slack_promo.CODE, slack_promo.SCHEDULE):
+        allowed = d["can_billing"]
     elif callback == card_review_slack.ASSIGN:
         allowed = d["can_approve_cards"]
     elif callback in (app_requests.REJECT, app_requests.INFO):
@@ -229,6 +234,8 @@ def _handle_submission(payload: dict):
         "aidl_ack_alerts": lambda: card_ack.save_alerts(org, admin, view),
         app_requests.REJECT: lambda: app_requests.submit_reason(admin, org, view),
         app_requests.INFO: lambda: app_requests.submit_reason(admin, org, view),
+        slack_promo.CODE: lambda: slack_promo.submit_code(admin, org, view),
+        slack_promo.SCHEDULE: lambda: slack_promo.submit_schedule(admin, org, view),
     }
     result = handlers[callback]() or {}
     if "response_action" in result:
@@ -879,11 +886,25 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                             response_url=response_url, view_id=(payload.get("view") or {}).get("id", ""))
         return HttpResponse(status=200)
 
+    # Internal testing access: both popups stay in Slack.
+    if org is not None and action_id == "aidl_promo_open" and d["can_billing"]:
+        _open_modal(org, payload.get("trigger_id", ""),
+                    slack_promo.code_view() if billing.promo_available(org, user) else slack_promo.closed_view())
+        return HttpResponse(status=200)
+    if org is not None and action_id == "aidl_promo_schedule" and d["can_billing"]:
+        _open_modal(org, payload.get("trigger_id", ""),
+                    slack_promo.schedule_view(org) if billing.on_promo(org) else slack_promo.closed_view())
+        return HttpResponse(status=200)
+
     # Upgrade plan: a private link (only this admin sees it) to the plans page
     # on the website, signed in with a short-lived AIDL token.
     if org is not None and action_id == "aidl_upgrade":
         if not d["can_billing"]:
             _reply(response_url, text="Only the master admin, or admins allowed to manage the plan, can upgrade.")
+            return HttpResponse(status=200)
+        if billing.on_promo(org):  # an Admin Center card from before the code was entered
+            _reply(response_url, text="This organization has internal testing access, so no payment is needed. "
+                                      "Use ⚙️ Change schedule in the Admin Center.")
             return HttpResponse(status=200)
         url = f"{settings.FRONTEND_URL.rstrip('/')}/plans?token={create_access_token(user)}"
         _reply(response_url, text="Open the plans page to upgrade", blocks=[

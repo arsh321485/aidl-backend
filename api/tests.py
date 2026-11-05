@@ -3889,64 +3889,127 @@ class ApprovedToolsListTests(TestCase):
 @override_settings(STRIPE_SECRET_KEY="sk_test_x", BILLING_PROVIDER="stripe", BILLING_TEST_MODE=False,
                    STRIPE_PRICES={"basic": "price_basic", "enterprise": "price_ent"})
 class PromoCodeTests(TestCase):
+    """Internal testing access: Slack only, bound, and never near Stripe."""
+
     TESTER = "tester@secureitlab.example"
-    SCHEDULE = {"days": [0, 1, 2, 3], "hour": 9}
+    WORKSPACE = "T0INTERNAL"
 
     def setUp(self):
+        self.org = make_org(slack_team_id=self.WORKSPACE, plan="trial")
+        self.tester = make_user(self.org, microsoft_id=f"slack:{self.WORKSPACE}:U1", email=self.TESTER)
+        self.other_org = make_org(name="Other", slack_team_id="T0OTHER99", plan="trial")
+        self.other = make_user(self.other_org, microsoft_id="slack:T0OTHER99:U1", email="owner@other.example")
+        self.code = self._make("QA", "--workspace", self.WORKSPACE)
+        for target in ("api.slack_client.slack_api",):
+            p = patch(target, return_value={"ok": True})
+            p.start()
+            self.addCleanup(p.stop)
+        stripe = patch("api.stripe_billing.requests.post")
+        self.stripe = stripe.start()
+        self.addCleanup(stripe.stop)
+
+    def _make(self, label, *args) -> str:
         import io
 
         from django.core.management import call_command
 
-        self.org = make_org(slack_team_id="T9", plan="trial")
-        self.tester = make_user(self.org, microsoft_id="slack:T9:U1", email=self.TESTER)
-        self.customer_org = make_org(name="Customer", slack_team_id="T8", plan="trial")
-        self.customer = make_user(self.customer_org, microsoft_id="slack:T8:U1", email="owner@customer.example")
         out = io.StringIO()
-        call_command("promo_code", "create", "--label", "QA", "--email", self.TESTER, "--max-uses", "3", stdout=out)
-        self.code = out.getvalue().split()[0]
+        call_command("promo_code", "create", "--label", label, *args, stdout=out)
+        return out.getvalue().split()[0]
 
-    def _checkout(self, user, code, plan="enterprise", **extra):
+    def _slack(self, user, payload):
+        team = user.microsoft_id.split(":")[1]
+        slack_id = user.microsoft_id.split(":")[2]
+        body = {"team": {"id": team}, "user": {"id": slack_id, "team_id": team}, **payload}
+        with patch("api.slack_interactions.verify_slack_signature", return_value=True), \
+                self.settings(SLACK_REPLY_SYNC=True):
+            return self.client.post("/api/slack/interactions/", {"payload": json.dumps(body)})
+
+    def _apply(self, user, code):
+        return self._slack(user, {"type": "view_submission", "view": {
+            "callback_id": "aidl_promo", "private_metadata": "{}",
+            "state": {"values": {"code": {"v": {"value": code}}}}}})
+
+    def _schedule(self, user, days, hour=9):
+        return self._slack(user, {"type": "view_submission", "view": {
+            "callback_id": "aidl_promo_schedule", "private_metadata": "{}",
+            "state": {"values": {"days": {"v": {"selected_options": [{"value": str(d)} for d in days]}},
+                                 "hour": {"v": {"selected_option": {"value": str(hour)}}}}}}})
+
+    def _website(self, user, **body):
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(user)}")
-        body = {"plan": plan, "topics": ["C10"], "schedule": self.SCHEDULE, "promo_code": code, **extra}
-        with patch("api.stripe_billing.requests.post") as stripe:
-            resp = client.post("/api/billing/checkout/", body, format="json")
-        self.assertFalse(stripe.called)                                          # never touches Stripe
-        return resp
+        return client.post("/api/billing/checkout/", body, format="json")
+
+    def _uses(self):
+        from .models import PromoCode
+
+        return PromoCode.objects.get(label="QA").uses
 
     def test_only_the_hash_is_stored(self):
         from .models import PromoCode
 
         self.assertTrue(self.code.startswith("AIDL-"))
-        row = PromoCode.objects.get()
+        row = PromoCode.objects.get(label="QA")
         self.assertNotEqual(row.code_hash, self.code)
-        self.assertNotIn(self.code, json.dumps([row.code_hash, row.label, row.allowed_emails]))
+        self.assertEqual(row.allowed_slack_teams, self.WORKSPACE)
 
-    def test_named_tester_gets_enterprise_without_paying(self):
-        resp = self._checkout(self.tester, self.code.lower())
-        self.assertEqual(resp.json()["status"], "activated", resp.content)
+    def test_a_code_must_be_bound_to_someone(self):
+        from django.core.management import CommandError
+
+        with self.assertRaises(CommandError):
+            self._make("Open")
+        with self.assertRaises(CommandError):
+            self._make("Bad", "--workspace", "not-a-workspace")
+
+    def test_authorised_workspace_gets_full_enterprise_without_stripe(self):
+        from django.conf import settings
+
+        from .plans import PLANS, plan_key, total_cards
+
+        resp = self._apply(self.tester, self.code.lower())
+        self.assertEqual(resp.json()["response_action"], "update", resp.content)
         self.org.refresh_from_db()
         self.assertEqual(self.org.plan, "enterprise")
-        self.assertIn('"how": "promo"', self.org.billing)
+        self.assertEqual(self._uses(), 1)
+        billing = json.loads(self.org.billing)
+        self.assertEqual(billing["history"][-1]["how"], "promo")
+        self.assertNotIn("stripe", billing)
         self.assertNotIn(self.code, self.org.billing)
-        self.assertNotIn("stripe", json.loads(self.org.billing))
-        from .plans import PLANS, plan_key
+        key = plan_key(self.org)
+        self.assertTrue(PLANS[key]["all_topics"])
+        self.assertTrue(PLANS[key]["custom_schedule"])
+        self.assertEqual(total_cards(key), 208)
+        self.assertIn(key, settings.AUP_UPLOAD_PLANS)
+        self.stripe.assert_not_called()
 
-        self.assertEqual(plan_key(self.org), "enterprise")
-        self.assertTrue(PLANS[plan_key(self.org)]["all_topics"])
+    def test_unauthorised_workspace_is_refused_even_with_the_code(self):
+        resp = self._apply(self.other, self.code)
+        self.assertEqual(resp.json(), {"response_action": "errors",
+                                       "errors": {"code": "This code isn't valid for this workspace."}})
+        self.other_org.refresh_from_db()
+        self.assertEqual(self.other_org.plan, "trial")
+        self.assertEqual(self._uses(), 0)
+        self.stripe.assert_not_called()
 
-    def test_ordinary_customer_is_refused_even_with_the_code(self):
-        resp = self._checkout(self.customer, self.code)
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json(), {"promo_code": ["This code isn't valid for your account."]})
-        self.customer_org.refresh_from_db()
-        self.assertEqual(self.customer_org.plan, "trial")
+    def test_teams_organizations_are_refused(self):
+        from . import billing
 
-    def test_box_is_only_shown_to_named_people(self):
-        for user, shown in ((self.tester, True), (self.customer, False)):
-            client = APIClient()
-            client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(user)}")
-            self.assertEqual(client.get("/api/billing/plans/").json()["promo_available"], shown)
+        org = make_org(name="On Teams", teams_team_id="team-1", ms_tenant_id="tenant-1", plan="trial")
+        admin = make_user(org, email=self.TESTER)
+        code = self._make("Teams", "--email", self.TESTER)
+        with self.assertRaises(billing.UpgradeError) as ctx:
+            billing.redeem(org, admin, code)
+        self.assertIn("Slack", ctx.exception.errors["promo_code"])
+        org.refresh_from_db()
+        self.assertEqual(org.plan, "trial")
+        self.assertFalse(billing.promo_available(org, admin))
+
+    def test_with_a_workspace_and_an_email_both_must_match(self):
+        code = self._make("Both", "--workspace", self.WORKSPACE, "--email", "someone@else.example")
+        self.assertEqual(self._apply(self.tester, code).json()["response_action"], "errors")
+        code = self._make("Both2", "--workspace", self.WORKSPACE, "--email", self.TESTER)
+        self.assertEqual(self._apply(self.tester, code).json()["response_action"], "update")
 
     def test_wrong_expired_disabled_and_used_up_codes_are_refused(self):
         from datetime import timedelta
@@ -3956,56 +4019,118 @@ class PromoCodeTests(TestCase):
 
         from .models import PromoCode
 
-        self.assertEqual(self._checkout(self.tester, "AIDL-WRONG").status_code, 400)
+        self.assertEqual(self._apply(self.tester, "AIDL-WRONG").json()["response_action"], "errors")
         PromoCode.objects.update(expires_at=timezone.now() - timedelta(days=1))
-        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
-        PromoCode.objects.update(expires_at=timezone.now() + timedelta(days=1), uses=3)
-        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
+        self.assertEqual(self._apply(self.tester, self.code).json()["response_action"], "errors")
+        PromoCode.objects.update(expires_at=timezone.now() + timedelta(days=1), uses=10)
+        self.assertEqual(self._apply(self.tester, self.code).json()["response_action"], "errors")
         PromoCode.objects.update(uses=0)
         call_command("promo_code", "disable", "--label", "QA", verbosity=0)
-        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
+        self.assertEqual(self._apply(self.tester, self.code).json()["response_action"], "errors")
         self.org.refresh_from_db()
         self.assertEqual(self.org.plan, "trial")
 
-    def test_a_basic_code_does_not_open_enterprise(self):
-        import io
-
-        from django.core.management import call_command
-
-        out = io.StringIO()
-        call_command("promo_code", "create", "--label", "B", "--email", self.TESTER, "--plan", "basic", stdout=out)
-        code = out.getvalue().split()[0]
-        self.assertEqual(self._checkout(self.tester, code).status_code, 400)
-        self.assertEqual(self._checkout(self.tester, code, plan="basic").json()["status"], "activated")
+    def test_a_second_use_is_refused_and_takes_no_use(self):
+        self._apply(self.tester, self.code)
+        self.assertEqual(self._apply(self.tester, self.code).json()["response_action"], "errors")
+        self.assertEqual(self._uses(), 1)
 
     def test_real_subscriptions_are_left_alone(self):
-        self.org.plan = "basic"
-        self.org.billing = json.dumps({"stripe": {"subscription": "sub_1"}})
-        self.org.save()
-        resp = self._checkout(self.tester, self.code)
-        self.assertIn("paid subscription", resp.json()["promo_code"][0])
-        self.org.plan = "basic"
-        self.org.billing = ""                                                    # set up by hand for a customer
-        self.org.save()
-        self.assertEqual(self._checkout(self.tester, self.code).status_code, 400)
+        for billing_json in (json.dumps({"stripe": {"subscription": "sub_1"}}), ""):  # paying; set up by hand
+            self.org.plan = "basic"
+            self.org.billing = billing_json
+            self.org.save()
+            self.assertIn("paid subscription", self._apply(self.tester, self.code).json()["errors"]["code"])
+            self.org.refresh_from_db()
+            self.assertEqual(self.org.plan, "basic")
+        self.assertEqual(self._uses(), 0)
+
+    def test_the_button_only_shows_for_an_authorised_workspace(self):
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        shown = json.dumps(admin_card_blocks(build_admin_cards_context(self.tester), "home"))
+        self.assertIn("aidl_promo_open", shown)
+        self.assertNotIn(self.code, shown)
+        hidden = json.dumps(admin_card_blocks(build_admin_cards_context(self.other), "home"))
+        self.assertNotIn("aidl_promo_open", hidden)
+        self.assertIn("aidl_upgrade", hidden)
+
+    def test_after_the_code_change_schedule_stays_in_slack(self):
+        from .plans import schedule_of
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        self._apply(self.tester, self.code)
+        blocks = json.dumps(admin_card_blocks(build_admin_cards_context(self.tester), "home"))
+        self.assertIn("aidl_promo_schedule", blocks)
+        self.assertNotIn("aidl_upgrade", blocks)
+        self.assertNotIn("aidl_promo_open", blocks)
+
+        self.assertEqual(self._schedule(self.tester, [0, 1]).json()["response_action"], "errors")
+        self.assertEqual(self._schedule(self.tester, [0, 2, 3, 4], 9).json()["response_action"], "update")
         self.org.refresh_from_db()
-        self.assertEqual(self.org.plan, "basic")
-        from .models import PromoCode
+        self.assertEqual(schedule_of(self.org), {"days": (0, 2, 3, 4), "hour": 9})
+        self.assertEqual(self.org.plan, "enterprise")
+        self.assertEqual(json.loads(self.org.billing)["history"][-1]["promo"], "QA")
+        self.stripe.assert_not_called()
 
-        self.assertEqual(PromoCode.objects.get().uses, 0)                        # refused: no use taken
+    def _press(self, user, action_id):
+        from .slack_client import slack_api
 
-    def test_tester_can_move_up_after_a_promo_basic(self):
-        self.assertEqual(self._checkout(self.tester, self.code, plan="basic").json()["status"], "activated")
-        self.assertEqual(self._checkout(self.tester, self.code).json()["status"], "activated")
+        slack_api.reset_mock()
+        resp = self._slack(user, {"type": "block_actions", "trigger_id": "trig", "response_url": "",
+                                  "container": {}, "channel": {"id": "C1"},
+                                  "actions": [{"action_id": action_id, "value": "x"}]})
+        self.assertEqual(resp.status_code, 200)
+        return [c.kwargs["json"]["view"] for c in slack_api.call_args_list
+                if "view" in (c.kwargs.get("json") or {}) and c.kwargs["json"]["view"].get("callback_id") != "aidl_loading"]
 
-    def test_no_code_still_goes_to_payment(self):
+    def test_pressing_the_buttons_opens_the_right_popup(self):
+        self.assertEqual(self._press(self.tester, "aidl_promo_open")[-1]["callback_id"], "aidl_promo")
+        self.assertNotIn("callback_id", self._press(self.other, "aidl_promo_open")[-1])    # not authorised
+        self.assertNotIn("callback_id", self._press(self.tester, "aidl_promo_schedule")[-1])  # no access yet
+        self._apply(self.tester, self.code)
+        view = self._press(self.tester, "aidl_promo_schedule")[-1]
+        self.assertEqual(view["callback_id"], "aidl_promo_schedule")
+        self.assertEqual(len(view["blocks"][1]["element"]["initial_options"]), 4)
+        self.stripe.assert_not_called()
+
+    def test_schedule_popup_is_refused_without_testing_access(self):
+        self.assertEqual(self._schedule(self.other, [0, 1, 3, 4]).json()["response_action"], "errors")
+
+    def test_the_website_never_sends_testing_access_to_payment(self):
+        self._apply(self.tester, self.code)
+        with patch("api.billing.create_checkout") as checkout:
+            resp = self._website(self.tester, plan="enterprise", topics=[],
+                                 schedule={"days": [0, 1, 2, 3], "hour": 9}, seats=60)
+        self.assertEqual(resp.json()["status"], "activated", resp.content)
+        checkout.assert_not_called()
+        self.stripe.assert_not_called()
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.seats_purchased, 60)
+        self.assertEqual(json.loads(self.org.billing)["history"][-1]["how"], "promo")
         client = APIClient()
-        client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(self.customer)}")
-        with patch("api.stripe_billing.requests.post") as post:
-            post.return_value.status_code = 200
-            post.return_value.content = b"{}"
-            post.return_value.json.return_value = {"url": "https://checkout.stripe.com/x"}
-            resp = client.post("/api/billing/checkout/", {"plan": "basic", "topics": ["C10"]}, format="json")
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(self.tester)}")
+        self.assertFalse(any(client.get("/api/billing/plans/").json()["payment_ready"].values()))
+
+    def test_the_website_takes_no_code_and_does_not_carry_on_to_payment(self):
+        with patch("api.billing.create_checkout") as checkout:
+            resp = self._website(self.tester, plan="enterprise", topics=[], promo_code=self.code,
+                                 schedule={"days": [0, 1, 2, 3], "hour": 9})
+        self.assertEqual(resp.status_code, 400)
+        checkout.assert_not_called()
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.plan, "trial")
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {create_access_token(self.tester)}")
+        self.assertNotIn("promo_available", client.get("/api/billing/plans/").json())
+
+    def test_ordinary_customers_still_go_to_payment(self):
+        self.stripe.return_value.status_code = 200
+        self.stripe.return_value.content = b"{}"
+        self.stripe.return_value.json.return_value = {"url": "https://checkout.stripe.com/x"}
+        resp = self._website(self.other, plan="basic", topics=["C10"])
         self.assertEqual(resp.json()["status"], "redirect")
 
 

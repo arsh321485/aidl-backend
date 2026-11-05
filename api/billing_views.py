@@ -3,7 +3,7 @@ from the Slack "Upgrade plan" link.
 
     GET  /api/billing/plans/      current plan, the plans, topics, schedule
     POST /api/billing/preview/    {plan, topics} → {cards: first 12 it adds (titles only), total}
-    POST /api/billing/checkout/   {plan, topics, schedule?, seats?, promo_code?} →
+    POST /api/billing/checkout/   {plan, topics, schedule?, seats?} →
                                   {status: redirect|activated|pending, url?, message}
 """
 
@@ -58,7 +58,6 @@ def plans_view(request):
 
     data = billing.catalog(org)
     data["can_upgrade"] = has(org, request.user, "billing")
-    data["promo_available"] = billing.promo_available(request.user)
     return Response(data)
 
 
@@ -88,6 +87,9 @@ def checkout_view(request):
     if not has(org, request.user, "billing"):
         return Response({"detail": "Only the master admin, or admins allowed to manage the plan, can upgrade."},
                         status=status.HTTP_403_FORBIDDEN)
+    if request.data.get("promo_code"):  # an old copy of the page: don't carry on to payment
+        return Response({"promo_code": ["Promo codes are entered in the Slack Admin Center."]},
+                        status=status.HTTP_400_BAD_REQUEST)
     seats = request.data.get("seats")
     try:
         seats = int(seats) if seats not in (None, "") else None
@@ -96,8 +98,7 @@ def checkout_view(request):
     schedule = request.data.get("schedule") if isinstance(request.data.get("schedule"), dict) else None
     try:
         result = billing.checkout(org, request.user, str(request.data.get("plan") or ""),
-                                  _topics(request.data.get("topics")), schedule, seats,
-                                  str(request.data.get("promo_code") or ""))
+                                  _topics(request.data.get("topics")), schedule, seats)
     except billing.UpgradeError as exc:
         return Response({k: [v] for k, v in exc.errors.items()}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as exc:  # noqa: BLE001 — e.g. Stripe refused the session

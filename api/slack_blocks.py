@@ -315,6 +315,7 @@ def _home(d: dict) -> list:
                  "a few short steps, top to bottom.\n" + "🟩" * done + "⬜" * (5 - done)
                  + f"  *{done} of 5 setup steps done*"),
         *_plan_line(d),
+        *_promo_line(d),
         {"type": "divider"},
     ]
     if d.get("policy_only"):  # asked to create the AUP only
@@ -325,6 +326,14 @@ def _home(d: dict) -> list:
     return blocks[:-1]
 
 
+def _promo_line(d: dict) -> list:
+    """Only for workspaces and people a code is bound to (billing.promo_available)."""
+    if not d.get("promo_open") or d.get("policy_only"):
+        return []
+    return [_section("🧪 *Internal testing:* enter your code to turn on Enterprise. No payment is involved.",
+                     accessory=_button("🎟 Enter promo code", "aidl_promo_open", value="promo"))]
+
+
 def _plan_line(d: dict) -> list:
     """Current plan + Upgrade (the owner gets a private link to the plans
     page on the website)."""
@@ -333,7 +342,9 @@ def _plan_line(d: dict) -> list:
         return []
     block = _section(f"📦  *{p['label']} plan*  ·  {p['cards']} awareness cards, {p['cadence']}  ·  "
                      f"{p['used']} of {p['limit']} users")
-    if d.get("can_billing"):
+    if d.get("can_billing") and d.get("testing_access"):  # never the website's payment page
+        block["accessory"] = _button("⚙️ Change schedule", "aidl_promo_schedule", value="schedule")
+    elif d.get("can_billing"):
         block["accessory"] = _button("⬆️ Upgrade plan" if p.get("can_upgrade", True) else "⚙️ Change schedule",
                                      "aidl_upgrade", value="upgrade", style="primary" if p.get("can_upgrade") else "")
     if d.get("can_admins") and p.get("plan") == "trial":
