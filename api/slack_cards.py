@@ -464,6 +464,11 @@ def build_admin_cards_context(user: AIDLUser | None) -> dict:
     data["can_admins"] = owner or bool(user and user.perm_manage_admins)
     data["can_team"] = data["can_admins"]
     data["can_billing"] = owner or bool(user and user.perm_billing)
+    if org is not None and data["can_billing"]:
+        from .billing import on_promo, promo_available
+
+        data["testing_access"] = on_promo(org)
+        data["promo_open"] = promo_available(org, user)
     data["can_approve_cards"] = owner or bool(user and user.perm_approve_cards)
     data["grantable"] = [k for k, _f, _l, _d in admin_perms.PERMS] if owner else (
         admin_perms.grantable(org, user) if user is not None else [])

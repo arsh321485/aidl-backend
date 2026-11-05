@@ -558,14 +558,15 @@ class OAuthState(models.Model):
 
 
 class PromoCode(models.Model):
-    """An internal test code for the plans page (billing.py): free paid-plan
-    access for the named people only. Made with `manage.py promo_code`. The
-    code itself is never stored, only its SHA-256."""
+    """An internal test code, entered in the Slack Admin Center (billing.py):
+    free paid-plan access for the named workspaces and/or people only. Made with
+    `manage.py promo_code`. The code itself is never stored, only its SHA-256."""
 
     code_hash = models.CharField(max_length=64, unique=True)
     label = models.CharField(max_length=120, unique=True)
     plan = models.CharField(max_length=20, default="enterprise")  # the highest plan it opens
-    allowed_emails = models.TextField()  # comma-separated, lower case
+    allowed_slack_teams = models.TextField(blank=True, default="")  # comma-separated Slack workspace ids
+    allowed_emails = models.TextField(blank=True, default="")  # comma-separated, lower case
     expires_at = models.DateTimeField()
     max_uses = models.PositiveIntegerField(default=10)
     uses = models.PositiveIntegerField(default=0)

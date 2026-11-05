@@ -1,15 +1,18 @@
-"""Internal promo codes for testing paid plans without paying (billing.py).
+"""Internal codes for testing Enterprise in Slack without paying (billing.py).
 
-    python manage.py promo_code create --label "QA Nov" --email a@company.com --email b@company.com
-    python manage.py promo_code create --label "QA Basic" --email a@company.com --plan basic --days 7 --max-uses 2
+    python manage.py promo_code create --label "QA Nov" --workspace T0123ABC
+    python manage.py promo_code create --label "QA Nov" --workspace T0123ABC --email a@company.com --days 14
     python manage.py promo_code list
     python manage.py promo_code disable --label "QA Nov"
 
-The code is shown once, when it's created, and only its hash is saved. Only
-the people named by --email can use it, and only until it expires. It changes
-no real subscription: organizations that pay are refused.
+The code is shown once, when it's created, and only its hash is saved. Give it
+--workspace and/or --email: with both, a person must match both. It changes no
+real subscription: organizations that pay are refused. Running this command
+needs access to the production server or database, which is the restriction on
+who can make codes.
 """
 
+import re
 import secrets
 from datetime import timedelta
 
@@ -20,7 +23,6 @@ from django.utils import timezone
 
 from api.billing import promo_hash
 from api.models import PromoCode
-from api.plans import ORDER
 
 
 class Command(BaseCommand):
@@ -30,9 +32,8 @@ class Command(BaseCommand):
         actions = parser.add_subparsers(dest="action", required=True)
         create = actions.add_parser("create")
         create.add_argument("--label", required=True, help="a name for this code (never the code itself)")
-        create.add_argument("--email", action="append", required=True, help="who may use it (repeat for each person)")
-        create.add_argument("--plan", choices=[p for p in ORDER if p != "trial"], default="enterprise",
-                            help="the highest plan it opens")
+        create.add_argument("--workspace", action="append", default=[], help="Slack workspace id, e.g. T0123ABC (repeatable)")
+        create.add_argument("--email", action="append", default=[], help="a tester's Slack email (repeatable)")
         create.add_argument("--days", type=int, default=30, help="days until it expires")
         create.add_argument("--max-uses", type=int, default=10)
         actions.add_parser("list")
@@ -44,7 +45,8 @@ class Command(BaseCommand):
             self._create(opts)
         elif opts["action"] == "list":
             for row in PromoCode.objects.all():
-                self.stdout.write(f"{row.label} | {row.plan} | {row.allowed_emails} | used {row.uses}/{row.max_uses} | "
+                self.stdout.write(f"{row.label} | {row.plan} | workspaces: {row.allowed_slack_teams or '-'} | "
+                                  f"people: {row.allowed_emails or '-'} | used {row.uses}/{row.max_uses} | "
                                   f"expires {row.expires_at:%d %b %Y} | {'active' if row.is_active else 'disabled'}")
         elif not PromoCode.objects.filter(label=opts["label"]).update(is_active=False):
             raise CommandError("No code with that label.")
@@ -53,6 +55,12 @@ class Command(BaseCommand):
 
     def _create(self, opts):
         emails = sorted({e.strip().lower() for e in opts["email"]})
+        workspaces = sorted({w.strip().upper() for w in opts["workspace"]})
+        if not emails and not workspaces:
+            raise CommandError("Give at least one --workspace or --email.")
+        for workspace in workspaces:
+            if not re.fullmatch(r"[TE][A-Z0-9]{5,}", workspace):
+                raise CommandError(f"Not a Slack workspace id: {workspace}")
         for email in emails:
             try:
                 validate_email(email)
@@ -63,7 +71,7 @@ class Command(BaseCommand):
         if PromoCode.objects.filter(label=opts["label"]).exists():
             raise CommandError("That label is already used.")
         code = "AIDL-" + secrets.token_hex(16).upper()
-        PromoCode.objects.create(code_hash=promo_hash(code), label=opts["label"], plan=opts["plan"],
-                                 allowed_emails=",".join(emails), max_uses=opts["max_uses"],
+        PromoCode.objects.create(code_hash=promo_hash(code), label=opts["label"],
+                                 allowed_slack_teams=",".join(workspaces), allowed_emails=",".join(emails), max_uses=opts["max_uses"],
                                  expires_at=timezone.now() + timedelta(days=opts["days"]))
-        self.stdout.write(f"{code}\nSave it now: it can't be shown again. For: {', '.join(emails)}")
+        self.stdout.write(f"{code}\nSave it now: it can't be shown again. For: {', '.join(workspaces + emails)}")
