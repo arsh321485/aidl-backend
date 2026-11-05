@@ -557,6 +557,28 @@ class OAuthState(models.Model):
         return self.state
 
 
+class PromoCode(models.Model):
+    """An internal test code for the plans page (billing.py): free paid-plan
+    access for the named people only. Made with `manage.py promo_code`. The
+    code itself is never stored, only its SHA-256."""
+
+    code_hash = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=120, unique=True)
+    plan = models.CharField(max_length=20, default="enterprise")  # the highest plan it opens
+    allowed_emails = models.TextField()  # comma-separated, lower case
+    expires_at = models.DateTimeField()
+    max_uses = models.PositiveIntegerField(default=10)
+    uses = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.label
+
+
 class WaitlistEntry(models.Model):
     """Someone who isn't a company and wants AIDL later — the "Not a
     company? Join the waitlist" box on the website (waitlist_views.py)."""

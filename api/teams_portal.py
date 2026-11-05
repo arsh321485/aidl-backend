@@ -504,7 +504,7 @@ def _policy_context(org: Organization, n: int, a: dict) -> dict:
                               "label": "Type your own" if own else f"{base} — {q['fill_label'] or 'details'}"})
         out.append({**q, "value": value if not isinstance(value, list) else "", "options": _options(q, value),
                     "fills": fills, "show_tools": q["id"] == "7.1" and value == pc.APPROVED_AI})
-    tools = list(dict.fromkeys(aup_store._starting_tools(org) + pc.POPULAR_AI_TOOLS + a["tools"]))
+    tools = aup_store.allowed_tools(org, list(dict.fromkeys(aup_store._starting_tools(org) + pc.POPULAR_AI_TOOLS + a["tools"])))
     return {"questions": out, "tools": [{"name": t, "checked": t in a["tools"]} for t in tools],
             "preview": pc.lines(n, a)}
 
@@ -524,7 +524,8 @@ def _read_policy(org: Organization, post) -> tuple[dict, str, str]:
     for t in re.split(r"[\n,;]+", post.get("paste", "")):
         if t.strip() and t.strip() not in tools:
             tools.append(t.strip()[:150])
-    return {"answers": answers, "fills": fills, "tools": tools}, post.get("when", "today"), post.get("day", "")
+    return ({"answers": answers, "fills": fills, "tools": aup_store.allowed_tools(org, tools)}, post.get("when", "today"),
+            post.get("day", ""))
 
 
 @_admin_page

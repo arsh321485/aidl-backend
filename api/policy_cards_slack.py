@@ -168,7 +168,7 @@ def _element(q: dict, value) -> dict:
 def _tools_options(org: Organization, chosen: list[str]) -> list[dict]:
     apps = aup_store._starting_tools(org)  # noqa: SLF001
     groups, seen = [], set()
-    for label, names in (("In your AI apps list", apps), ("Popular AI tools", pc.POPULAR_AI_TOOLS),
+    for label, names in (("In your AI apps list", apps), ("Popular AI tools", aup_store.allowed_tools(org, pc.POPULAR_AI_TOOLS)),
                          ("Added by you", chosen)):
         opts = []
         for name in names:
@@ -278,7 +278,8 @@ def read_state(org: Organization, view: dict) -> tuple[dict, str, str, list[str]
             when = value or "today"
         elif block_id == "day":
             day = value
-    return {"answers": answers, "fills": fills, "tools": tools}, when, day, pasted
+    return ({"answers": answers, "fills": fills, "tools": aup_store.allowed_tools(org, tools)}, when, day,
+            aup_store.allowed_tools(org, pasted))
 
 
 def _merge(tools: list[str], more: list[str]) -> list[str]:

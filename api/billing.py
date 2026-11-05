@@ -6,6 +6,8 @@ covers all topics) and — for Enterprise — the delivery days and time,
 previews the first cards (blurred) and goes to checkout.
 
 Checkout:
+- an internal promo code (PromoCode): free for the people it names, and never
+  on an organization with a real subscription; Stripe is not involved
 - admins listed in BILLING_UNLIMITED_ADMIN_EMAILS upgrade without paying
 - Stripe (stripe_billing.py) when STRIPE_SECRET_KEY and the plan's
   STRIPE_PRICE_<PLAN> are set → hosted Checkout; the webhook activates it
@@ -17,13 +19,15 @@ hour}, "pending": {...}, "history": [...]}.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 from django.conf import settings
+from django.db.models import F
 from django.utils import timezone
 
 from . import plans
-from .models import AIDLUser, Organization
+from .models import AIDLUser, Organization, PromoCode
 
 
 class UpgradeError(ValueError):
@@ -132,7 +136,7 @@ def validate(org: Organization, plan: str, topics: list[str], schedule: dict | N
 
 
 def activate(org: Organization, plan: str, topics: list[str], schedule: dict | None, seats: int | None,
-             by: AIDLUser | None, how: str, stripe: dict | None = None) -> None:
+             by: AIDLUser | None, how: str, stripe: dict | None = None, promo: str = "") -> None:
     """Switch the plan, save the picks and reschedule everyone's cards."""
     data = _load(org)
     if stripe:
@@ -144,7 +148,8 @@ def activate(org: Organization, plan: str, topics: list[str], schedule: dict | N
         data["schedule"] = {"days": sorted({int(d) for d in schedule["days"]}), "hour": int(schedule["hour"])}
     data.pop("pending", None)
     data.setdefault("history", []).append({"plan": plan, "from": plans.plan_key(org), "topics": topics, "how": how,
-                                           "by": by.email if by else "", "at": timezone.now().isoformat()})
+                                           "by": by.email if by else "", "at": timezone.now().isoformat(),
+                                           **({"promo": promo} if promo else {})})
     org.billing = json.dumps(data, ensure_ascii=False)
     org.plan = plan
     fields = ["billing", "plan", "updated_at"]
@@ -174,6 +179,51 @@ def create_checkout(org: Organization, request_data: dict, by: AIDLUser) -> str:
 
 def unlimited(user: AIDLUser) -> bool:
     return (user.email or "").strip().lower() in settings.BILLING_UNLIMITED_ADMIN_EMAILS
+
+
+# ---------- internal promo codes ----------
+
+PROMO_REFUSED = "This code isn't valid for your account."
+_FREE_ACTIVATIONS = {"promo", "complimentary", "test_mode"}
+
+
+def promo_hash(code: str) -> str:
+    return hashlib.sha256(code.strip().upper().encode()).hexdigest()
+
+
+def _names(row: PromoCode, user: AIDLUser) -> bool:
+    return (user.email or "").strip().lower() in row.allowed_emails.split(",")
+
+
+def promo_available(user: AIDLUser) -> bool:
+    """Whether the plans page shows this person the promo code box."""
+    return any(_names(row, user) for row in PromoCode.objects.filter(
+        is_active=True, expires_at__gt=timezone.now(), uses__lt=F("max_uses")))
+
+
+def _real_subscription(org: Organization) -> bool:
+    """Paying (Stripe), or on a paid plan set up by hand for a customer."""
+    data = _load(org)
+    if (data.get("stripe") or {}).get("subscription"):
+        return True
+    history = data.get("history") or []
+    return org.plan != "trial" and (not history or history[-1].get("how") not in _FREE_ACTIVATIONS)
+
+
+def _redeem(org: Organization, by: AIDLUser, code: str, plan: str, topics: list[str], schedule: dict | None,
+            seats: int | None) -> dict:
+    row = PromoCode.objects.filter(code_hash=promo_hash(code), is_active=True, expires_at__gt=timezone.now()).first()
+    if row is None or not _names(row, by) or plans.rank(plan) > plans.rank(row.plan):
+        raise UpgradeError({"promo_code": PROMO_REFUSED})
+    if _real_subscription(org):
+        raise UpgradeError({"promo_code": "This organization has a paid subscription, so a promo code can't be used."})
+    # Only one of two people at the same moment can take the last use.
+    if not PromoCode.objects.filter(pk=row.pk, uses__lt=F("max_uses")).update(uses=F("uses") + 1):
+        raise UpgradeError({"promo_code": PROMO_REFUSED})
+    activate(org, plan, topics, schedule, seats, by, how="promo", promo=row.label)
+    refresh_slack(org, by)
+    return {"status": "activated",
+            "message": f"Your {plans.PLANS[plan]['label']} plan is active with your internal code — no payment was taken."}
 
 
 def seen_event(org: Organization, event_id: str) -> bool:
@@ -212,10 +262,12 @@ def downgrade_to_trial(org: Organization, how: str) -> None:
 
 
 def checkout(org: Organization, by: AIDLUser, plan: str, topics: list[str], schedule: dict | None,
-             seats: int | None) -> dict:
+             seats: int | None, promo_code: str = "") -> dict:
     errors = validate(org, plan, topics, schedule, seats)
     if errors:
         raise UpgradeError(errors)
+    if promo_code.strip():  # a refused code stops here: it never falls through to payment
+        return _redeem(org, by, promo_code, plan, topics, schedule, seats)
     request_data = {"plan": plan, "topics": topics, "schedule": schedule, "seats": seats}
     if unlimited(by):
         activate(org, plan, topics, schedule, seats, by, how="complimentary")

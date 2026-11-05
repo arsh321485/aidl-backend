@@ -96,6 +96,9 @@ def submit(member: AIDLUser, org: Organization, view: dict) -> dict:
 
     approved = RegisteredApp.objects.filter(organization_id=str(org.pk), name__iexact=name, is_active=True,
                                             status=RegisteredApp.Status.APPROVED).first()
+    if approved is not None and RegisteredApp.objects.filter(organization_id=str(org.pk), name__iexact=name, is_active=True,
+                                                             status=RegisteredApp.Status.REJECTED).exists():
+        approved = None  # also marked Prohibited (older duplicate rows): an admin decides
     if approved is not None:
         in_background(_dm, org, member, f"✅ *{approved.name}* is already approved at {org.name} — go ahead. "
                                               "Remember the Traffic Light Check before you paste anything.")

@@ -289,6 +289,8 @@ def build_user_dashboard_payload(user: AIDLUser) -> dict:
         is_active=True,
         status=RegisteredApp.Status.APPROVED,
     ).order_by("app_type", "name")
+    banned = {name.strip().lower() for name in RegisteredApp.objects.filter(
+        organization_id=_org_id(org), is_active=True, status=RegisteredApp.Status.REJECTED).values_list("name", flat=True)}
 
     return {
         "full_name": user.full_name,
@@ -299,7 +301,7 @@ def build_user_dashboard_payload(user: AIDLUser) -> dict:
         "licence_issued": bool(user.licence_issued),
         "aup_signed": bool(user.aup_signed),
         "apps": [
-            {"name": a.name, "app_type": a.app_type} for a in apps
+            {"name": a.name, "app_type": a.app_type} for a in apps if a.name.strip().lower() not in banned
         ],
         "empty": False,
     }

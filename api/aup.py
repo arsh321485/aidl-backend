@@ -80,8 +80,10 @@ def generate_aup(org: Organization) -> dict:
     fx = policy_effects(answers)
     ai, it = _apps(org)
 
-    allowed = [_entry(a, "ai") for a in ai if a["status"] == "Approved"] + \
-              [_entry(a, "it") for a in it if a["status"] == "Approved"]
+    # A name that's also marked Prohibited (older duplicate rows) is not allowed.
+    banned = {a["name"].strip().lower() for a in ai + it if a["status"] != "Approved"}
+    allowed = [_entry(a, "ai") for a in ai if a["status"] == "Approved" and a["name"].strip().lower() not in banned] + \
+              [_entry(a, "it") for a in it if a["status"] == "Approved" and a["name"].strip().lower() not in banned]
     prohibited = [_entry(a, "ai") for a in ai if a["status"] != "Approved"] + \
                  [_entry(a, "it") for a in it if a["status"] != "Approved"]
 

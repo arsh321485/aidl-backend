@@ -354,6 +354,8 @@ def _apply_app_effects(ai_apps: list[dict], fx: dict) -> list[dict]:
         top = []
         for name, category in _PUBLIC_AI_TOOLS:
             existing = next((a for a in apps if a["name"].lower() == name.lower()), None)
+            if existing and existing["status"] == "Prohibited":  # the admin's decision stands
+                continue
             if existing:
                 apps.remove(existing)
             row = existing or _app_row(name, category, "Public only", "Approved")
