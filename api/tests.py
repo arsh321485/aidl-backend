@@ -4899,6 +4899,59 @@ class LicenceDesignTests(TestCase):
         self.assertIn("/cards/learners-permit/download/?email=", card["url"])
 
 
+class TeamsHomeCardTests(TestCase):
+    """The channel's only way into AIDL must not depend on one post at sign-in."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Acme", slug="acme-home", ms_tenant_id="t1", teams_team_id="T1",
+                                                teams_welcome_channel_id="C1")
+
+    def _reply(self, code, message_id="m1"):
+        from unittest.mock import MagicMock
+
+        resp = MagicMock(status_code=code, content=b"{}", text="", headers={})
+        resp.json.return_value = {"id": message_id}
+        return resp
+
+    def test_new_team_not_ready_is_tried_again(self):
+        from . import teams_channel
+
+        with patch("api.teams_channel.requests.post", side_effect=[self._reply(404), self._reply(403), self._reply(201)]) as post, \
+                patch("api.teams_channel.time.sleep") as sleep:
+            result = teams_channel.publish_home(self.org, "tok", settle=True)
+        self.assertTrue(result["ok"])
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [3, 5])
+        self.assertEqual(Organization.objects.get(pk=self.org.pk).teams_welcome_message_id, "m1")
+
+    def test_settling_gives_up(self):
+        from . import teams_channel
+
+        with patch("api.teams_channel.requests.post", return_value=self._reply(403)) as post, \
+                patch("api.teams_channel.time.sleep"):
+            result = teams_channel.publish_home(self.org, "tok", settle=True)
+        self.assertEqual(result["error"], "graph_http_403")
+        self.assertEqual(post.call_count, 3)
+
+    def test_later_runs_post_only_a_missing_card(self):
+        from . import teams_channel
+
+        with patch("api.teams_channel.token_for", return_value="tok"), \
+                patch("api.teams_channel.requests.post", return_value=self._reply(201)) as post:
+            teams_channel.ensure_home(self.org)
+            self.org.refresh_from_db()
+            teams_channel.ensure_home(self.org)
+        self.assertEqual(post.call_count, 1)
+
+    def test_no_team_posts_nothing(self):
+        from . import teams_channel
+
+        self.org.teams_team_id = ""
+        with patch("api.teams_channel.requests.post") as post:
+            teams_channel.ensure_home(self.org)
+        post.assert_not_called()
+
+
 @override_settings(SLACK_REPLY_SYNC=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
                    TEAMS_CRON_SECRET="cron-secret", DEBUG=False)
 class TeamsWithoutBotTests(TestCase):
@@ -5102,6 +5155,14 @@ class TeamsWithoutBotTests(TestCase):
         self.assertEqual(open_refresh_token(owner.ms_refresh_token), "rt")
         self.assertIn("AI Driving Licence", self._titles())
         self.assertIn("aidl_teams", resp.cookies)
+
+    def test_a_failed_home_card_lands_on_the_admin_center_not_an_empty_channel(self):
+        info = {"team_id": "team-8", "channel_id": "chan-8", "channel_name": "aidl dashboard", "teams_url": "https://teams/l/channel/x"}
+        with patch("api.auth_views.ensure_aidl_channel", return_value=info),                 patch("api.auth_views.tenant_display_name", return_value="Fresh Co"),                 patch("api.teams_channel.publish_home", return_value={"ok": False, "error": "graph_http_403"}):
+            resp = self._callback({"microsoft_id": "aad-8", "email": "o@eight.example", "full_name": "Owner"}, "tenant-8")
+        self.assertIn("api%2Fteams%2Fapp%2Fadmin", resp["Location"])
+        self.assertIn("welcome_card_error=graph_http_403", resp["Location"])
+        self.assertNotIn("l%2Fchannel", resp["Location"].split("teams_platform_url")[0])
 
     def test_tokens_saved_before_encryption_still_work(self):
         from .microsoft_auth import open_refresh_token, seal_refresh_token

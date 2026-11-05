@@ -40,6 +40,7 @@ _TOKEN_SECONDS = 30 * 60
 MAX_MENTIONS = 20
 SEND_HOUR = 10
 DISPATCH_EVERY = timedelta(minutes=15)
+HOME_SETTLE_SECONDS = (3, 5, None)  # the wait after each try; None = the last one
 
 
 def is_teams(org: Organization | None) -> bool:
@@ -194,14 +195,19 @@ def email(user: AIDLUser, subject: str, text: str, path: str = "") -> bool:
 
 # ---------- the channel's home card ----------
 
-def publish_home(org: Organization, token: str = "") -> dict:
+def publish_home(org: Organization, token: str = "", settle: bool = False) -> dict:
     """The one card everyone opens AIDL from. Graph can't edit a card, so post the
-    new one, then remove the old one."""
+    new one, then remove the old one. `settle`: the team may have been made seconds
+    ago, and Microsoft refuses posts until it's ready, so wait and try again."""
     token = token or token_for(org)
     old = org.teams_welcome_message_id
-    result = post(org, "AI Driving Licence", f"{org.name} runs its AI Driving Licence programme here. Open AIDL to "
-                  "see your next card, or to run the programme if you're an admin.",
-                  button=("Open AIDL", app_url()), token=token)
+    for wait in HOME_SETTLE_SECONDS if settle else (None,):
+        result = post(org, "AI Driving Licence", f"{org.name} runs its AI Driving Licence programme here. Open AIDL "
+                      "to see your next card, or to run the programme if you're an admin.",
+                      button=("Open AIDL", app_url()), token=token)
+        if wait is None or result.get("error") not in ("graph_http_403", "graph_http_404"):
+            break
+        time.sleep(wait)
     if result.get("ok") and result.get("message_id"):
         org.teams_welcome_message_id = result["message_id"]
         org.save(update_fields=["teams_welcome_message_id", "updated_at"])
@@ -210,6 +216,12 @@ def publish_home(org: Organization, token: str = "") -> dict:
 
             delete_channel_message(token, team_id=org.teams_team_id, channel_id=channel_id(org), message_id=old)
     return result
+
+
+def ensure_home(org: Organization) -> None:
+    """Post the home card if sign-in couldn't: without it the channel is empty."""
+    if org.teams_team_id and channel_id(org) and not org.teams_welcome_message_id:
+        publish_home(org)
 
 
 # ---------- starting the programme, reminders ----------
@@ -557,6 +569,7 @@ def dispatch(org: Organization) -> dict:
     from .card_approval import remind
 
     update(org, teams_dispatched_at=timezone.now().isoformat())
+    ensure_home(org)
     out = {"team": sync_team(org)}
     if not started(org):
         return out
