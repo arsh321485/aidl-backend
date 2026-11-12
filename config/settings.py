@@ -287,6 +287,7 @@ MIGRATION_MODULES = {
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # serves /static/ (the Django Admin's styles) on Render
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -344,6 +345,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Django doesn't serve static files when DEBUG is off. WhiteNoise does, and with USE_FINDERS it reads the admin's
+# files straight from the installed packages, so the deploy needs no collectstatic step.
+WHITENOISE_USE_FINDERS = True
 
 DEFAULT_AUTO_FIELD = "django_mongodb_backend.fields.ObjectIdAutoField"
 

@@ -4115,6 +4115,21 @@ class PromoCodeTests(TestCase):
         self.assertEqual(self.other_org.plan, "trial")
 
 
+class AdminStaticFilesTests(TestCase):
+    """The Django Admin's style files are served in production (DEBUG off): WhiteNoise."""
+
+    def test_admin_styles_are_served(self):
+        for path in ("/static/admin/css/base.css", "/static/admin/css/login.css", "/static/admin/js/theme.js"):
+            resp = self.client.get(path)
+            self.assertEqual(resp.status_code, 200, path)
+            self.assertGreater(len(b"".join(resp.streaming_content) if resp.streaming else resp.content), 100, path)
+
+    def test_the_login_page_points_at_files_that_exist(self):
+        page = self.client.get("/admin/login/").content.decode()
+        self.assertIn("/static/admin/css/base.css", page)
+        self.assertEqual(self.client.get("/static/admin/css/nope.css").status_code, 404)
+
+
 class BlockKitIdsTests(TestCase):
     """Slack refuses a view or message when two buttons in one block share an
     action_id."""
