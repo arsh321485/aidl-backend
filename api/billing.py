@@ -20,11 +20,9 @@ hour}, "pending": {...}, "history": [...]}.
 
 from __future__ import annotations
 
-import hashlib
 import json
 
 from django.conf import settings
-from django.db.models import F
 from django.utils import timezone
 
 from . import plans
@@ -201,19 +199,9 @@ PROMO_REFUSED = "This code isn't valid for this workspace."
 _FREE_ACTIVATIONS = {"promo", "complimentary", "test_mode"}
 
 
-def promo_hash(code: str) -> str:
-    return hashlib.sha256(code.strip().upper().encode()).hexdigest()
-
-
-def _authorised(row: PromoCode, org: Organization, user: AIDLUser) -> bool:
-    """Every restriction on the code must pass; a code with none opens nothing."""
-    workspaces = [t for t in row.allowed_slack_teams.split(",") if t]
-    emails = [e for e in row.allowed_emails.split(",") if e]
-    if not workspaces and not emails:
-        return False
-    if workspaces and org.slack_team_id not in workspaces:
-        return False
-    return not emails or (user.email or "").strip().lower() in emails
+def internal_workspace(org: Organization) -> bool:
+    """One of our own Slack workspaces (settings.INTERNAL_SLACK_TEAMS)."""
+    return bool(org.slack_team_id) and org.slack_team_id in settings.INTERNAL_SLACK_TEAMS
 
 
 def on_promo(org: Organization) -> bool:
@@ -234,28 +222,38 @@ def _real_subscription(org: Organization) -> bool:
 
 
 def promo_available(org: Organization, user: AIDLUser) -> bool:
-    """Whether the Slack Admin Center shows this person Enter promo code."""
-    if not org.slack_team_id or org.plan == "enterprise" or _real_subscription(org):
+    """Whether the Slack Admin Center shows Enter promo code: our workspace, and a code is ON."""
+    if not internal_workspace(org) or org.plan == "enterprise" or _real_subscription(org):
         return False
-    return any(_authorised(row, org, user) for row in PromoCode.objects.filter(
-        is_active=True, expires_at__gt=timezone.now(), uses__lt=F("max_uses")))
+    return PromoCode.objects.filter(is_active=True).exists()
 
 
 def redeem(org: Organization, by: AIDLUser, code: str) -> None:
     """Turn on the code's plan. Raises UpgradeError; never reaches Stripe."""
     if not org.slack_team_id:
         raise UpgradeError({"promo_code": "Promo codes only work for organizations using Slack."})
-    row = PromoCode.objects.filter(code_hash=promo_hash(code), is_active=True, expires_at__gt=timezone.now()).first()
-    if row is None or not _authorised(row, org, by):
+    code = (code or "").strip().upper()
+    row = PromoCode.objects.filter(code=code, is_active=True).first() if code else None
+    if row is None or not internal_workspace(org):
         raise UpgradeError({"promo_code": PROMO_REFUSED})
     if on_promo(org):
         raise UpgradeError({"promo_code": "This organization already has testing access."})
     if _real_subscription(org):
         raise UpgradeError({"promo_code": "This organization has a paid subscription, so a promo code can't be used."})
-    # Only one of two people at the same moment can take the last use.
-    if not PromoCode.objects.filter(pk=row.pk, uses__lt=F("max_uses")).update(uses=F("uses") + 1):
-        raise UpgradeError({"promo_code": PROMO_REFUSED})
-    activate(org, row.plan, [], None, None, by, how="promo", promo=row.label, background=True)
+    activate(org, row.plan, [], None, None, by, how="promo", promo=row.code, background=True)
+
+
+def set_internal_plan(org: Organization, plan: str, by_name: str) -> None:
+    """Django Admin: switch one of our own test organizations between Trial and
+    Enterprise. The same activation as a code; no payment."""
+    if not internal_workspace(org) or plan not in ("trial", "enterprise"):
+        raise UpgradeError({"plan": "Only our own test workspaces can be switched, to Trial or Enterprise."})
+    activate(org, plan, [], None, None, None, how="promo", promo=f"django-admin:{by_name}")
+    from .slack_onboarding import primary_admin
+
+    admin = primary_admin(org)
+    if admin is not None:
+        refresh_slack(org, admin)
 
 
 def _promo_label(org: Organization) -> str:

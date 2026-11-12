@@ -1,3 +1,5 @@
+import re
+
 from django.db import models
 
 
@@ -558,26 +560,42 @@ class OAuthState(models.Model):
 
 
 class PromoCode(models.Model):
-    """An internal test code, entered in the Slack Admin Center (billing.py):
-    free paid-plan access for the named workspaces and/or people only. Made with
-    `manage.py promo_code`. The code itself is never stored, only its SHA-256."""
+    """The internal testing code (e.g. TESTING_QA): managed in Django Admin, entered in
+    the Slack Admin Center. Only our own Slack workspaces (settings.INTERNAL_SLACK_TEAMS)
+    can use it (billing.redeem); it never involves payment."""
 
-    code_hash = models.CharField(max_length=64, unique=True)
-    label = models.CharField(max_length=120, unique=True)
-    plan = models.CharField(max_length=20, default="enterprise")  # the highest plan it opens
-    allowed_slack_teams = models.TextField(blank=True, default="")  # comma-separated Slack workspace ids
-    allowed_emails = models.TextField(blank=True, default="")  # comma-separated, lower case
-    expires_at = models.DateTimeField()
-    max_uses = models.PositiveIntegerField(default=10)
-    uses = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
+    PLAN_CHOICES = [("enterprise", "Enterprise"), ("basic", "Basic")]
+
+    code = models.CharField(max_length=40, unique=True,
+                            help_text="Letters, digits, _ or -, e.g. TESTING_QA. Capitals don't matter.")
+    is_active = models.BooleanField("ON", default=True)
+    plan = models.CharField(max_length=20, choices=PLAN_CHOICES, default="enterprise")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        self.code = (self.code or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9_-]{4,40}", self.code):
+            raise ValidationError({"code": "Use 4 to 40 letters, digits, _ or -."})
+
+    def save(self, *args, **kwargs):
+        self.code = (self.code or "").strip().upper()
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return self.label
+        return self.code
+
+
+class InternalTestOrganization(Organization):
+    """Django Admin's view of our own Slack test organizations (switch Trial / Enterprise)."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "internal test organization"
 
 
 class WaitlistEntry(models.Model):

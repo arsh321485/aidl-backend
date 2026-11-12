@@ -327,7 +327,7 @@ def _home(d: dict) -> list:
 
 
 def _promo_line(d: dict) -> list:
-    """Only for workspaces and people a code is bound to (billing.promo_available)."""
+    """Only for our own workspaces while a code is ON (billing.promo_available)."""
     if not d.get("promo_open") or d.get("policy_only"):
         return []
     return [_section("🧪 *Internal testing:* enter your code to turn on Enterprise. No payment is involved.",

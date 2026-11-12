@@ -253,6 +253,9 @@ BILLING_SALES_EMAIL = os.getenv("BILLING_SALES_EMAIL", "")
 # Admins (emails, comma-separated) who can upgrade without paying.
 BILLING_UNLIMITED_ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("BILLING_UNLIMITED_ADMIN_EMAILS", "").split(",")
                                   if e.strip()}
+# Internal testing access: only these Slack workspaces (ours) may use a promo code (billing.redeem)
+# and be switched between Trial and Enterprise in Django Admin.
+INTERNAL_SLACK_TEAMS = {t.strip() for t in os.getenv("INTERNAL_SLACK_TEAMS", "T0BS9K6MT6G").split(",") if t.strip()}
 BILLING_TEST_MODE = os.getenv("BILLING_TEST_MODE", "False").lower() in ("1", "true", "yes")
 PLAN_PRICES = {
     "trial": os.getenv("PLAN_PRICE_TRIAL", "Free"),
