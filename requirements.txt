@@ -37,3 +37,4 @@ urllib3==2.7.0
 wheel==0.47.0
 Pillow>=10.1
 pypdf==6.1.1
+whitenoise==6.12.0
