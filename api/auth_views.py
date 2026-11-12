@@ -514,6 +514,28 @@ def _slack_error_redirect(error: str, description: str = ""):
     return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
 
 
+def _already_set_up(profile: dict) -> str:
+    """"" when this person may set AIDL up for their Slack workspace, else why not.
+    One workspace = one organization. Once it has an admin, only its own admins may
+    install again (for example after new scopes); everyone else is added by an admin
+    in Slack (Add admin / Add people) and never needs to sign up here."""
+    team_id = profile.get("team_id") or ""
+    org = Organization.objects.filter(slack_team_id=team_id, is_active=True).first() if team_id else None
+    if org is None:
+        return ""
+    members = AIDLUser.objects.filter(organization_id=str(org.pk), is_active=True)
+    if not members.filter(role=AIDLUser.Role.ADMIN).exists():
+        return ""  # nobody runs it any more: the next person to install takes over
+    me = members.filter(microsoft_id=profile["slack_id"]).first()
+    if me is not None and me.role == AIDLUser.Role.ADMIN:
+        return ""
+    if me is not None:
+        return (f"You're already part of {org.name}'s AIDL programme, so there is nothing to set up here. "
+                "Your cards arrive in Slack.")
+    return (f"AIDL is already set up for {org.name}. Ask your AIDL admin to add you from the Admin Center "
+            "in Slack. You don't need to sign up here.")
+
+
 def _upsert_slack_user(profile: dict, enroll_as: str) -> AIDLUser:
     """Find the user by Slack id, else by verified email (links an existing
     website/Teams account), else create one. Slack users reuse the unique
@@ -694,6 +716,10 @@ def slack_callback(request):
     if not profile.get("slack_id"):
         return _slack_error_redirect("unable_to_fetch_profile", "Could not read your Slack profile.")
 
+    if is_org:
+        refusal = _already_set_up(profile)
+        if refusal:  # nothing is created or changed
+            return _slack_error_redirect("already_set_up", refusal)
     user = _upsert_slack_user(profile, enroll_as)
     if not user:
         return _slack_error_redirect("account_disabled", "This AIDL account is disabled.")
