@@ -979,6 +979,102 @@ class SlackWorkspaceSetupTests(TestCase):
         self.assertEqual(Organization.objects.filter(slack_team_id="T9").count(), 1)
 
 
+class SlackSecondInstallTests(TestCase):
+    """One Slack workspace = one AIDL organization. Once someone runs it, a colleague who
+    uses "Add to Slack" on the website is NOT made an admin: an admin adds them in Slack."""
+
+    def _install(self, slack_id):
+        return {"ok": True, "access_token": "xoxb-test", "bot_user_id": "UBOT",
+                "team": {"id": "T9", "name": "Acme"}, "authed_user": {"id": slack_id}}
+
+    def _api(self, calls):
+        def fake(method, token, *, json=None, params=None):
+            calls.append((method, json or params))
+            if method == "users.info":
+                who = (params or {}).get("user", "U?")
+                return {"ok": True, "user": {"profile": {"email": f"{who.lower()}@acme.example",
+                                                         "real_name": f"Person {who}"}}}
+            if method == "conversations.create":
+                return {"ok": True, "channel": {"id": "C42"}}
+            if method == "conversations.info":
+                return {"ok": True, "channel": {"id": "C42", "is_archived": False}}
+            if method == "chat.postMessage":
+                return {"ok": True, "ts": "111.222"}
+            return {"ok": True}
+        return fake
+
+    def _login(self, slack_id, calls):
+        from .microsoft_auth import create_oauth_state
+
+        state = create_oauth_state("organization")
+        with self.settings(SLACK_CLIENT_ID="cid", SLACK_CLIENT_SECRET="sec"), \
+                patch("api.slack_client.exchange_install_code", return_value=self._install(slack_id)), \
+                patch("api.slack_client.slack_api", side_effect=self._api(calls)):
+            return self.client.get(f"/api/auth/slack/callback/?code=abc&state={state}")
+
+    def _owner_installs(self):
+        calls = []
+        resp = self._login("U1", calls)
+        self.assertNotIn("error=", resp["Location"], resp["Location"])
+        return Organization.objects.get(slack_team_id="T9")
+
+    def test_a_colleague_is_not_made_an_admin(self):
+        org = self._owner_installs()
+        owner_id = org.owner_user_id
+        calls = []
+        resp = self._login("U2", calls)
+        self.assertIn("error=already_set_up", resp["Location"])
+        self.assertIn("Ask+your+AIDL+admin", resp["Location"])
+        self.assertNotIn("access_token", resp["Location"])
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="slack:T9:U2").exists())
+        self.assertEqual(AIDLUser.objects.filter(organization_id=str(org.pk)).count(), 1)
+        org.refresh_from_db()
+        self.assertEqual(org.owner_user_id, owner_id)
+        self.assertFalse([m for m, _ in calls if m in ("conversations.invite", "chat.postMessage", "chat.update")])
+
+    def test_someone_already_added_as_a_learner_stays_a_learner(self):
+        org = self._owner_installs()
+        learner = make_user(org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U3", email="u3@acme.example")
+        resp = self._login("U3", [])
+        self.assertIn("error=already_set_up", resp["Location"])
+        self.assertIn("already+part+of", resp["Location"])
+        learner.refresh_from_db()
+        self.assertEqual(learner.role, AIDLUser.Role.LEARNER)
+
+    def test_the_owner_and_other_admins_can_install_again(self):
+        org = self._owner_installs()
+        second = make_user(org, microsoft_id="slack:T9:U4", email="u4@acme.example")  # added by the owner
+        for slack_id in ("U1", "U4"):
+            resp = self._login(slack_id, [])
+            self.assertNotIn("error=", resp["Location"], resp["Location"])
+            self.assertIn("access_token", resp["Location"])
+        org.refresh_from_db()
+        self.assertEqual(AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN).count(), 2)
+        second.refresh_from_db()
+        self.assertEqual(second.role, AIDLUser.Role.ADMIN)
+
+    def test_a_workspace_with_no_admin_left_can_be_taken_over(self):
+        org = self._owner_installs()
+        AIDLUser.objects.filter(organization_id=str(org.pk)).update(role=AIDLUser.Role.LEARNER)
+        resp = self._login("U5", [])
+        self.assertNotIn("error=", resp["Location"], resp["Location"])
+        self.assertTrue(AIDLUser.objects.filter(microsoft_id="slack:T9:U5", role=AIDLUser.Role.ADMIN).exists())
+
+    def test_another_workspace_is_a_separate_organization(self):
+        self._owner_installs()
+        from .microsoft_auth import create_oauth_state
+
+        other = {"ok": True, "access_token": "xoxb-other", "bot_user_id": "UBOT",
+                 "team": {"id": "T7", "name": "Other Co"}, "authed_user": {"id": "U1"}}
+        state = create_oauth_state("organization")
+        with self.settings(SLACK_CLIENT_ID="cid", SLACK_CLIENT_SECRET="sec"), \
+                patch("api.slack_client.exchange_install_code", return_value=other), \
+                patch("api.slack_client.slack_api", side_effect=self._api([])):
+            resp = self.client.get(f"/api/auth/slack/callback/?code=abc&state={state}")
+        self.assertNotIn("error=", resp["Location"], resp["Location"])
+        self.assertEqual(Organization.objects.filter(slack_team_id__in=["T9", "T7"]).count(), 2)
+
+
 class SlackInteractionsTests(TestCase):
     SECRET = "shh"
 
