@@ -3114,6 +3114,92 @@ class StripeBillingTests(TestCase):
 
 
 
+class PolicyCardDeliveredOnceTests(TestCase):
+    """An employee is on the Welcome card (Let's go not pressed yet) and an admin approves a policy
+    card: it reaches them at once, and pressing Let's go must not send the same card again."""
+
+    SECRET = "shh"
+    _signed = SlackOnboardingTests._signed
+    _fake = PlanLimitTests._fake
+    _event = PlanLimitTests._event
+
+    def setUp(self):
+        from .slack_client import encrypt_token
+
+        self.org = make_org(name="SpinifexIT", slack_team_id="T9", slack_channel_id="C42", slack_bot_user_id="UBOT",
+                            slack_bot_token=encrypt_token("xoxb-t"))
+        self.owner = make_user(self.org, microsoft_id="slack:T9:U1", full_name="Priya Raman")
+        self.calls = []
+        _answer_policy(self.org)                      # the AUP is added: 14 cards approved, none delivered yet
+        _approve_all(self.org)
+        from .admin_setup import update
+
+        update(self.org, flow_started="2026-10-14")   # the programme has started
+        self._event("U5")                             # the employee joins and gets the Welcome card
+        self.member = AIDLUser.objects.get(microsoft_id="slack:T9:U5")
+        self.calls.clear()
+
+    def _approve_card(self, n, send_on="", **kw):
+        from . import aup_store, policy_cards
+
+        a = {} if kw else {"answers": aup_store.answers(self.org, with_tools=False), "fills": dict(AUP_FILLS),
+                           "tools": []}
+        with self.settings(SLACK_REPLY_SYNC=True), patch("api.slack_client.slack_api", side_effect=self._fake):
+            policy_cards.approve(self.org, None, n, a, send_on, **kw)
+
+    def _press_lets_go(self):
+        from urllib.parse import urlencode
+
+        payload = {"type": "block_actions", "team": {"id": "T9"}, "user": {"id": "U5", "team_id": "T9"},
+                   "container": {"channel_id": "D5", "message_ts": "1.1"},
+                   "actions": [{"action_id": "aidl_flow_start", "value": "start"}]}
+        self._signed("/api/slack/interactions/", urlencode({"payload": json.dumps(payload)}),
+                     "application/x-www-form-urlencoded")
+
+    def _sent(self, n):
+        """Messages that give this person policy card n, now or scheduled."""
+        mark = f"/api/cards/aup-{n}/"
+        return [b for m, b in self.calls
+                if m in ("chat.postMessage", "chat.scheduleMessage") and mark in json.dumps(b)
+                and b.get("channel") in ("U5", "D7")]
+
+    def test_a_card_approved_on_the_welcome_screen_is_not_sent_again_by_lets_go(self):
+        self._approve_card(2)
+        self.assertEqual(len(self._sent(2)), 1)        # delivered at once
+        self._press_lets_go()
+        self.assertEqual(len(self._sent(2)), 1)        # NOT again
+        for n in (1, 3, 14):                           # the cards they had not got are sent, once each
+            self.assertEqual(len(self._sent(n)), 1, n)
+        self._press_lets_go()                          # a second press of the same button
+        self.assertEqual(len(self._sent(2)), 1)
+        self.assertEqual(len(self._sent(1)), 1)
+
+    def test_a_dated_card_is_scheduled_once_not_again_by_lets_go(self):
+        day = (timezone.localdate() + timedelta(days=3)).isoformat()
+        self._approve_card(2, send_on=day)
+        self.assertEqual([m for m, b in self.calls if m == "chat.scheduleMessage" and "/api/cards/aup-2/" in json.dumps(b)],
+                         ["chat.scheduleMessage"])
+        self._press_lets_go()
+        self.assertEqual(len([1 for m, b in self.calls
+                              if m == "chat.scheduleMessage" and "/api/cards/aup-2/" in json.dumps(b)]), 1)
+
+    def test_a_card_they_agreed_to_is_not_sent_again(self):
+        from . import aup_store
+        from .licensing import acknowledge
+
+        self._approve_card(2)
+        acknowledge(self.member, aup_store.point_item(2), aup_store.card_version(self.org, 2))
+        self._press_lets_go()
+        self.assertEqual(len(self._sent(2)), 1)
+
+    def test_a_new_version_is_delivered_again_once(self):
+        self._approve_card(2)
+        self._approve_card(2, card_lines=["A different rule.", "Another new rule."])
+        self.assertEqual(len(self._sent(2)), 2)        # the first version, then the new one
+        self._press_lets_go()
+        self.assertEqual(len(self._sent(2)), 2)        # Let's go adds nothing for card 2
+
+
 class EmployeeFlowTests(TestCase):
     """The design's card flow: Welcome → AUP (14 points) → Traffic Light →
     Highway Code → licence card with the licence image."""

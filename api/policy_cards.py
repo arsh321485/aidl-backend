@@ -235,18 +235,31 @@ def deliver_cards(org_pk, ns: list[int]) -> int:
 
 def deliver_to(org: Organization, member: AIDLUser) -> int:
     """A person starts (or the programme starts): every approved card they
-    haven't agreed to — due ones now, later ones scheduled."""
+    haven't agreed to and haven't been given yet — due ones now, later ones scheduled."""
     done = aup_store.points_accepted(member, org)
     return sum(_send(org, member, n) for n in sorted(aup_store.cards(org)) if n not in done)
 
 
 def _send(org: Organization, member: AIDLUser, n: int) -> int:
+    """Give this person card n once. A card an admin approved while they were still on the Welcome
+    card is already theirs, so "Let's go" must not send (or schedule) it again."""
+    from . import employee_flow
+
+    if aup_store.card(org, n) is None or not employee_flow._slack_id(member):
+        return 0
+    if not aup_store.claim_delivery(org, n, member):
+        return 0
+    sent = _deliver(org, member, n)
+    if not sent:
+        aup_store.release_delivery(org, n, member)
+    return sent
+
+
+def _deliver(org: Organization, member: AIDLUser, n: int) -> int:
     from . import employee_flow
 
     c = aup_store.card(org, n)
     slack_id = employee_flow._slack_id(member)
-    if c is None or not slack_id:
-        return 0
     payload = employee_flow.policy_card(member, org, n)
     when = _post_at(org, slack_id, c.get("send_on") or "")
     if when is None:
