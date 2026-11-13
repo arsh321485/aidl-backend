@@ -234,8 +234,8 @@ def policy_left(member: AIDLUser, org: Organization) -> dict:
                 COLOR["yellow"], [
         _header(":scroll: One more step for your licence"),
         _section(f"Agree to {'this policy card' if len(left) == 1 else f'these {len(left)} policy cards'} from "
-                 f"{org.name} and your AI Driving License is issued:\n{names}"),
-        _actions("aidl_flow_policy", _button("Show them again", "aidl_flow_policy", "show")),
+                 f"{org.name} and your AI Driving License is issued:\n{names}\n"
+                 "You'll find them in your messages above: press *I agree* on each one."),
     ])
 
 

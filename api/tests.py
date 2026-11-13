@@ -3236,6 +3236,15 @@ class EmployeeFlowTests(TestCase):
     def _posted(self):
         return [b for m, b in self.calls if m == "chat.postMessage" and b["channel"] == "U5"]
 
+    def test_one_more_step_points_to_the_cards_and_has_no_button(self):
+        from . import employee_flow
+
+        message = json.dumps(employee_flow.policy_left(self.member, self.org))
+        self.assertIn("One more step for your licence", message)
+        self.assertIn("in your messages above", message)
+        self.assertNotIn("Show them again", message)
+        self.assertNotIn("aidl_flow_policy", message)
+
     def test_full_flow_to_licence(self):
         from . import aup_store
 
