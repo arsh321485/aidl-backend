@@ -1492,7 +1492,7 @@ class SlackHomeVisualTests(TestCase):
         self.assertFalse(any(b.get("block_id") == "aidl_tabs" for b in blocks))
         text = json.dumps(blocks, ensure_ascii=False)
         for label in ("Signed in as *Priya*", "Welcome, Priya.", "1 of 5 setup steps done",
-                      "✅  *1 · Your AI policy*  ·  14 of 14 policy cards approved", "goes out when you start the programme",
+                      "✅  *1 · Your AI policy*\\n14 of 14 policy cards approved", "goes out when you start the programme",
                       "From your AI policy: *0* of 6 awareness cards approved", "aidl_aup_view", "aidl_tab_ai-apps", "aidl_tab_it-apps",
                       "*2 · Add admins (optional)*", "aidl_open_add-admin", "aidl_setup_skip",
                       "3 · Add your team*  —  _after step 2_"):
@@ -2104,12 +2104,12 @@ class SetupStepsTests(TestCase):
         self.assertIn("*3 · Add your team*", self._home())
         self._event("U5")                                         # someone joins
         home = self._home()
-        self.assertIn("✅  *3 · Team*  ·  1 member", home)
+        self.assertIn("✅  *3 · Team*\\n1 member", home)
         self.assertIn("*4 · Card approval*\\nNothing reaches your team", home)
         self.assertEqual(home.count("aidl_send_item"), 0)         # can't start before the cards are approved
         _approve_all(self.org)
         home = self._home()
-        self.assertIn("✅  *4 · Card approval*  ·  onboarding cards approved", home)
+        self.assertIn("✅  *4 · Card approval*\\nOnboarding cards approved", home)
         self.assertEqual(home.count("aidl_send_item"), 1)         # Start the programme
         update(self.org, flow_started="2026-10-09")
         self.assertIn("*6 · Licences & awareness cards*", self._home())

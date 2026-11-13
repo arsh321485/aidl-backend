@@ -13,6 +13,11 @@ from .licensing import licence_status
 from .slack_cards import ADMIN_TABS
 
 _DOT = {"g": "🟢", "a": "🟡", "r": "🔴"}
+# Spacing is all Slack gives us (no CSS), so it is built from wide spaces: a pipe between counters
+# ("4 sent | 2 scheduled") and a dot between a label and its detail. Titles sit on their own line,
+# their counts on the next, and groups are told apart by one blank line.
+SEP = "\u2003|\u2003"
+DOT = "\u2003·\u2003"
 _OPEN_LABEL = {
     "home": "⬇ Export Coverage CSV",
     "add-admin": "Send Admin Invite",
@@ -118,12 +123,12 @@ def _policy_lines(st: dict) -> str:
     out = []
     for c in st.get("policy") or []:
         if c["state"] == "sent" and not st["cards_done"]:
-            out.append(f"✅ {c['icon']} *{c['title']}* · approved · goes out when you start the programme")
+            out.append(f"✅ {c['icon']} *{c['title']}*{DOT}approved{DOT}goes out when you start the programme")
         elif c["state"] == "sent":
-            out.append(f"✅ {c['icon']} *{c['title']}* · sent · {c['agreed']} of {st['members']} agreed")
+            out.append(f"✅ {c['icon']} *{c['title']}*{DOT}sent{DOT}{c['agreed']} of {st['members']} agreed")
         else:
             day = date.fromisoformat(c["send_on"])
-            out.append(f"🗓 {c['icon']} *{c['title']}* · goes out {day:%a} {day.day} {day:%b}")
+            out.append(f"🗓 {c['icon']} *{c['title']}*{DOT}goes out {day:%a} {day.day} {day:%b}")
     return "\n".join(out)
 
 
@@ -139,8 +144,8 @@ def _step_aup(d: dict, st: dict) -> list:
                 + ("\nAlready have a policy? Upload it and AIDL turns it into the cards." if st.get("aup_upload_allowed")
                    else ""))
     else:
-        head = (f"✅  *1 · Your AI policy*  ·  {sent} of 14 policy cards {'sent' if st['cards_done'] else 'approved'}"
-                + (f"  ·  {later} scheduled" if later else ""))
+        head = (f"✅  *1 · Your AI policy*\n{sent} of 14 policy cards {'sent' if st['cards_done'] else 'approved'}"
+                + (f"{SEP}{later} scheduled" if later else ""))
     blocks = [_section(head)]
     if cards:
         blocks.append(_context(_policy_lines(st)))
@@ -174,14 +179,14 @@ def _step_admins(d: dict, st: dict) -> list:
         return [_locked(2, "Add admins (optional)", "step 1")]
     if not st["admins_done"]:
         blocks = [_section("*2 · Add admins (optional)*\nInvite HR, IT or Compliance colleagues to help run AIDL — "
-                           f"you choose what each one can do.  ·  _{seats}_")]
+                           f"you choose what each one can do.\n_{seats}_")]
         if d["can_admins"]:
             blocks.append(_actions("aidl_step_admins",
                                    _button("🧑‍💼 Add admin", "aidl_open_add-admin", value="add-admin", style="primary"),
                                    _button("Skip →", "aidl_setup_skip", value="admins")))
         return blocks
     return [
-        _section(f"✅  *2 · Admins*  ·  {seats}"),
+        _section(f"✅  *2 · Admins*\n{seats}"),
         *([_actions("aidl_step_admins", _button("🧑‍💼 Add or remove admins", "aidl_open_add-admin", value="add-admin"))]
           if d["can_admins"] else []),
     ]
@@ -192,10 +197,12 @@ def _step_team(d: dict, st: dict) -> list:
         return [_locked(3, "Add your team", "step 2")]
     p = d.get("plan") or {}
     seats = f"{p.get('used', st['members'])} of {p.get('limit', '—')} users on your {p.get('label', '')} plan".strip()
-    head = ("*3 · Add your team*\nAdd the people who should earn an AI licence. They join the AIDL channel and "
-            "get their cards automatically." if not st["team_done"]
-            else f"✅  *3 · Team*  ·  {st['members']} member{'s' if st['members'] != 1 else ''}")
-    blocks = [_section(f"{head}  ·  _{seats}_")]
+    if st["team_done"]:
+        text = f"✅  *3 · Team*\n{st['members']} member{'s' if st['members'] != 1 else ''}{SEP}_{seats}_"
+    else:
+        text = ("*3 · Add your team*\nAdd the people who should earn an AI licence. They join the AIDL channel and "
+                f"get their cards automatically.\n_{seats}_")
+    blocks = [_section(text)]
     blocks += _plan_notice(d)
     if d["can_team"]:
         blocks.append(_actions("aidl_step_team",
@@ -210,24 +217,24 @@ def _step_approve(d: dict, st: dict) -> list:
     if not st["aup_done"]:
         return [_locked(4, "Card approval", "step 1")]
     a = st["approvals"]
-    onboarding = "  ·  ".join(f"{'✅' if r['status'] == 'approved' else '⏳'} {r['label']}" for r in st["onboarding"])
+    onboarding = DOT.join(f"{'✅' if r['status'] == 'approved' else '⏳'} {r['label']}" for r in st["onboarding"])
     paw = st.get("paw") or {}
     if paw:
         onboarding += f"\n🧭 From your AI policy: *{paw['approved']}* of {paw['total']} awareness cards approved"
     awareness = (f"📘 Awareness cards: *{a['approved']}* of {a['total']} approved"
-                 + (f"  ·  ⏳ {a['waiting']} waiting" if a["waiting"] else "")
-                 + (f"  ·  ⏭ {a['skipped']} skipped" if a["skipped"] else ""))
+                 + (f"{SEP}⏳ {a['waiting']} waiting" if a["waiting"] else "")
+                 + (f"{SEP}⏭ {a['skipped']} skipped" if a["skipped"] else ""))
     if not st["approved_ready"]:
         head = ("*4 · Card approval*\nNothing reaches your team until you approve it. Preview every card "
                 "exactly as your team will see it.")
     else:
-        head = "✅  *4 · Card approval*  ·  onboarding cards approved"
-    blocks = [_section(f"{head}\n{onboarding}\n{awareness}")]
+        head = "✅  *4 · Card approval*\nOnboarding cards approved"
+    blocks = [_section(f"{head}\n\n{onboarding}\n\n{awareness}")]
     acks = d.get("acks") or {}
     if acks.get("best"):  # how the cards land (card_ack.admin_stats)
         line = f"🏆 Most acknowledged: *{acks['best'][0]}* {acks['best'][1]}%"
         if acks.get("worst"):
-            line += f"  ·  🔻 Least: *{acks['worst'][0]}* {acks['worst'][1]}%"
+            line += f"{SEP}🔻 Least: *{acks['worst'][0]}* {acks['worst'][1]}%"
         blocks.append(_context(line))
     if st["approved_ready"] and a["waiting"] and st["cards_done"]:
         blocks.append(_context(f"⚠️ {a['waiting']} awareness card{'s are' if a['waiting'] != 1 else ' is'} waiting — "
@@ -254,8 +261,8 @@ def _step_send(d: dict, st: dict) -> list:
         if d["can_send"]:
             block["accessory"] = _button(f"📤 Start for {members}", "aidl_send_item", value="flow", style="primary")
         return [block]
-    blocks = [_section(f"✅  *5 · Programme started*  ·  *{aup['accepted']}* of {members} agreed to every policy card"
-                       f"  ·  *{st.get('licensed', 0)}* of {members} licensed")]
+    blocks = [_section(f"✅  *5 · Programme started*\n*{aup['accepted']}* of {members} agreed to every policy card"
+                       f"{SEP}*{st.get('licensed', 0)}* of {members} licensed")]
     if d["can_send"]:
         if st.get("licensed", 0) < members:
             blocks.append(_actions("aidl_step_send", _button("🔔 Remind people who haven't finished",
@@ -270,11 +277,11 @@ def _step_licences(d: dict, st: dict) -> list:
         return [_locked(6, "Licences & awareness cards", "step 5")]
     t = d.get("team") or {}
     p = d.get("plan") or {}
-    waiting = f"  ·  ⏳ {t['waiting_seat']} waiting for a seat" if t.get("waiting_seat") else ""
+    waiting = f"{SEP}⏳ {t['waiting_seat']} waiting for a seat" if t.get("waiting_seat") else ""
     package = (f"📘 {p['package_label']}: {p['cards']} awareness cards, {p['cadence']} — approved cards are "
                "sent automatically after each licence") if p else ""
     blocks = [_section(f"*6 · Licences & awareness cards*\n🪪 *{t.get('licensed', 0)}* of {t.get('members', 0)} licensed"
-                       f"{waiting}\n{package}")]
+                       f"{waiting}" + (f"\n\n{package}" if package else ""))]
     a = d.get("acks")
     if a and a["sent"]:
         from .card_ack import _bar, _pct, _short, today_line
@@ -312,7 +319,7 @@ def _home(d: dict) -> list:
         {"type": "header", "text": {"type": "plain_text", "text": "AIDL Admin Center", "emoji": True}},
         _context(f"*{d['org_name']}*  ·  AI Driving License  ·  Signed in as *{name}*"),
         _section(f"👋 *Welcome, {name}.* Let's set up AI Driving License for *{d['org_name']}* — "
-                 "a few short steps, top to bottom.\n" + "🟩" * done + "⬜" * (5 - done)
+                 "a few short steps, top to bottom.\n\n" + "🟩" * done + "⬜" * (5 - done)
                  + f"  *{done} of 5 setup steps done*"),
         *_plan_line(d),
         *_promo_line(d),
@@ -340,7 +347,7 @@ def _plan_line(d: dict) -> list:
     p = d.get("plan")
     if not p or d.get("policy_only"):
         return []
-    block = _section(f"📦  *{p['label']} plan*  ·  {p['cards']} awareness cards, {p['cadence']}  ·  "
+    block = _section(f"📦  *{p['label']} plan*\n{p['cards']} awareness cards, {p['cadence']}{SEP}"
                      f"{p['used']} of {p['limit']} users")
     if d.get("can_billing") and d.get("testing_access"):  # never the website's payment page
         block["accessory"] = _button("⚙️ Change schedule", "aidl_promo_schedule", value="schedule")
