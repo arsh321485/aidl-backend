@@ -177,6 +177,7 @@ def save_card(org: Organization, n: int, title: str, lines: list[str], *, by: AI
         "send_on": send_on, "sent_at": "" if send_on else timezone.now().isoformat(),
         "approved_by": str(by.pk) if by else "", "source": source, "file_name": file_name,
         "scheduled": {},  # member id → [channel, scheduled message id]
+        "delivered": {},  # member id → version: who was given this version (sent now or scheduled)
     }
     _save(org, data)
     from .card_image import warm
@@ -190,6 +191,37 @@ def set_scheduled(org: Organization, n: int, scheduled: dict) -> None:
     c = (data.get("cards") or {}).get(str(n))
     if c is not None:
         c["scheduled"] = scheduled
+        _save(org, data)
+
+
+def claim_delivery(org: Organization, n: int, member: AIDLUser) -> bool:
+    """True if this person has not been given card n (at its current version) yet, and records that
+    they now are. The Welcome card's "Let's go" and an approval's own delivery can run at the same
+    moment, so the check and the record are one step against the stored value: only one of them wins."""
+    who = str(member.pk)
+    for _ in range(5):
+        org.refresh_from_db(fields=["aup_data"])
+        before = org.aup_data
+        data = _load(org)
+        c = (data.get("cards") or {}).get(str(n))
+        if c is None or who in (c.get("delivered") or {}):
+            return False
+        c.setdefault("delivered", {})[who] = c.get("version", "")
+        after = json.dumps(data, ensure_ascii=False)
+        if Organization.objects.filter(pk=org.pk, aup_data=before).update(aup_data=after):
+            org.aup_data = after
+            return True
+    return False
+
+
+def release_delivery(org: Organization, n: int, member: AIDLUser) -> None:
+    """Slack didn't take the card: forget the claim so a later delivery tries again."""
+    who = str(member.pk)
+    org.refresh_from_db(fields=["aup_data"])
+    data = _load(org)
+    c = (data.get("cards") or {}).get(str(n))
+    if c is not None and who in (c.get("delivered") or {}):
+        del c["delivered"][who]
         _save(org, data)
 
 
