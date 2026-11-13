@@ -102,7 +102,8 @@ _POPUP_TITLES = {
     "aidl_policy_open": "Add a policy card", "aidl_aup_view": "Your AI policy",
     "aidl_regulators_open": "Your regulators", "aidl_laws_open": "Your regulators",
     "aidl_company_open": "About your company",
-    "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_admin_edit": "Edit permissions", "aidl_team_progress": "Team progress", "aidl_card_view": "Card",
+    "aidl_add_people": "Add your team", "aidl_logo_open": "Company logo", "aidl_admin_edit": "Edit permissions", "aidl_team_manage": "Remove people", "aidl_team_progress": "Remove people",
+    "aidl_card_view": "Card",
     "aidl_card_new": "Approve cards", "aidl_open_home": "Coverage", "aidl_open_add-admin": "Add admin",
     "aidl_open_cards": "Approve cards", "aidl_crv_assign": "Ask an admin", "aidl_open_ai-apps": "Add AI application", "aidl_open_it-apps": "Add IT application",
     "aidl_cards_review": "Approve cards", "aidl_crv_preview": "Preview", "aidl_ack_alerts": "Acknowledgement alerts",
@@ -461,7 +462,7 @@ def _remove_person(org, admin, action_id: str, user_id: str, view_id: str, meta:
         view = slack_modals.add_admin_view(d, json.loads(meta))
     else:
         done, message = remove_member(org, admin, user_id)
-        view = slack_modals.team_progress_view(org, notice=message if done else f"⚠️ {message}")
+        view = slack_modals.team_remove_view(org, notice=message if done else f"⚠️ {message}")
     if view_id:
         slack_client.slack_api("views.update", slack_client.bot_token(org), json={"view_id": view_id, "view": view})
     if done:
@@ -835,7 +836,7 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                                        slack_modals.card_view(d, card, meta), push=True)
         return HttpResponse(status=200)
 
-    # Remove buttons in the Add Admin and Team progress popups.
+    # Remove buttons in the Add Admin and Remove people popups.
     if action_id in ("aidl_admin_remove", "aidl_member_remove") and org is not None:
         view = payload.get("view") or {}
         slack_modals.in_background(_remove_person, org, user, action_id, action.get("value", ""),
@@ -946,10 +947,9 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
                    blocks=admin_card_blocks(build_admin_cards_context(user), "home"), replace=True)
         return HttpResponse(status=200)
 
-    if action_id == "aidl_team_progress":
+    if action_id in ("aidl_team_manage", "aidl_team_progress"):  # the second: Admin Center messages sent before
         if org is not None:
-            _open_modal(org, payload.get("trigger_id", ""),
-                                       slack_modals.team_progress_view(org))
+            _open_modal(org, payload.get("trigger_id", ""), slack_modals.team_remove_view(org))
         return HttpResponse(status=200)
 
     if action_id == "aidl_aup_remind":

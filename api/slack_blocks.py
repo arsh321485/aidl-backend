@@ -208,7 +208,7 @@ def _step_team(d: dict, st: dict) -> list:
         blocks.append(_actions("aidl_step_team",
                                _button("👥 Add people", "aidl_add_people", value="team",
                                        style="" if st["team_done"] else "primary"),
-                               _button("View team progress", "aidl_team_progress", value="team") if st["team_done"] else None))
+                               _button("🚪 Remove people", "aidl_team_manage", value="team") if st["team_done"] else None))
     return blocks
 
 
@@ -277,11 +277,16 @@ def _step_licences(d: dict, st: dict) -> list:
         return [_locked(6, "Licences & awareness cards", "step 5")]
     t = d.get("team") or {}
     p = d.get("plan") or {}
-    waiting = f"{SEP}⏳ {t['waiting_seat']} waiting for a seat" if t.get("waiting_seat") else ""
+    total = t.get("members", 0)
+    waiting = f" (⏳ {t['waiting_seat']} waiting for a seat)" if t.get("waiting_seat") else ""
     package = (f"📘 {p['package_label']}: {p['cards']} awareness cards, {p['cadence']} — approved cards are "
                "sent automatically after each licence") if p else ""
-    blocks = [_section(f"*6 · Licences & awareness cards*\n🪪 *{t.get('licensed', 0)}* of {t.get('members', 0)} licensed"
-                       f"{waiting}" + (f"\n\n{package}" if package else ""))]
+    blocks = [_section(f"*6 · Licences & awareness cards*\n"
+                       f"🪪 Licences issued *{t.get('licensed', 0)}/{total}*{waiting}{SEP}"
+                       f"📄 AUP acknowledgement *{t.get('aup', 0)}/{total}*\n"
+                       f"📖 Highway Code accepted *{t.get('highway_code', 0)}/{total}*{SEP}"
+                       f"🚦 Traffic Light Check accepted *{t.get('traffic_light', 0)}/{total}*"
+                       + (f"\n\n{package}" if package else ""))]
     a = d.get("acks")
     if a and a["sent"]:
         from .card_ack import _bar, _pct, _short, today_line
@@ -302,7 +307,6 @@ def _step_licences(d: dict, st: dict) -> list:
                                        accessory=None if reminded else _button("⏰ Remind", "aidl_ack_remind",
                                                                                value=p["user_id"])))
     blocks.append(_actions("aidl_step_licences",
-                           _button("View team progress", "aidl_team_progress", value="team", style="primary"),
                            _button("⬇ Export coverage", "aidl_open_home", value="home"),
                            _button("🔔 Acknowledgement alerts", "aidl_ack_alerts", value="alerts")))
     return blocks
@@ -382,27 +386,6 @@ def _plan_notice(d: dict) -> list:
     return [_context(f"⛔ *Your {p['label']} plan is full* ({p['used']} of {p['limit']} users). People added to the "
                      "channel now are removed again automatically. Remove someone who hasn't earned a license, "
                      + ("or upgrade to *Basic*." if p["label"] == "Trial" else "or buy more seats."))]
-
-
-def _team_progress_blocks(d: dict) -> list:
-    """Admin progress view (summary): joined → accepted → licensed."""
-    t = d.get("team")
-    if not t:
-        return []
-    n = t["members"]
-    licensed = f"*{t['licensed']}* of {n}"
-    if t["waiting_seat"]:
-        licensed += f"  ·  ⏳ {t['waiting_seat']} waiting for a seat"
-    return [
-        {"type": "section", "text": _md("👥  *TEAM PROGRESS*"),
-         "accessory": _button("View team progress", "aidl_team_progress", value="team")},
-        {"type": "section", "fields": [
-            _md(f"*Joined*\n*{n}* member{'s' if n != 1 else ''}"),
-            _md(f"*📖 Highway Code accepted*\n*{t['highway_code']}* of {n}"),
-            _md(f"*🚦 Traffic Light accepted*\n*{t['traffic_light']}* of {n}"),
-            _md(f"*🪪 Licensed*\n{licensed}"),
-        ]},
-    ]
 
 
 def _aup_block(d: dict) -> dict:
