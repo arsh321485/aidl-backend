@@ -1654,7 +1654,7 @@ class SlackOnboardingTests(TestCase):
 
 
 class AdminProgressViewTests(TestCase):
-    """Admin progress view: Home summary, Team progress popup, coverage columns."""
+    """Admin progress: the Home summary (step 6), the Remove people popup, coverage columns."""
 
     def setUp(self):
         from .models import Acknowledgement
@@ -1689,13 +1689,38 @@ class AdminProgressViewTests(TestCase):
         t = team_progress(self.org)                       # admin not counted
         self.assertEqual((t["members"], t["highway_code"], t["traffic_light"], t["licensed"]), (3, 2, 1, 2))
 
-    def test_team_progress_popup_lists_every_member(self):
-        from .slack_modals import team_progress_view
+    def _step_six(self):
+        from .admin_setup import update
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
 
-        text = json.dumps(team_progress_view(self.org), ensure_ascii=False)
-        for label in ("Anshul", "Yash", "Jordan", "LICENSED (BEFORE ACKNOWLEDGEMENT RULE)*  (1)",
-                      "IN PROGRESS*  (1)", "AIDL-L-0001-0001", "old *Add User* flow", "*2/3* · 67%"):
-            self.assertIn(label, text)
+        update(self.org, flow_started="2026-10-09")        # step 6 shows once the programme has started
+        return json.dumps(admin_card_blocks(build_admin_cards_context(self.admin), "home"), ensure_ascii=False)
+
+    def test_step_six_shows_team_totals_without_a_progress_popup(self):
+        from .licensing import acknowledge
+
+        home = self._step_six()
+        for part in ("Licences issued *2/3*", "AUP acknowledgement *1/3*", "Highway Code accepted *2/3*",
+                     "Traffic Light Check accepted *1/3*", "aidl_open_home", "aidl_ack_alerts"):
+            self.assertIn(part, home)
+        self.assertNotIn("aidl_team_progress", home)
+        self.assertNotIn("View team progress", home)
+        for name in ("Anshul", "Yash", "Jordan", "AIDL-L-0001-0001"):  # no one's own details on the page
+            self.assertNotIn(name, home)
+        acknowledge(self.half, "traffic_light")                # the totals follow what people do
+        self.assertIn("Traffic Light Check accepted *2/3*", self._step_six())
+
+    def test_remove_people_popup_has_names_and_remove_buttons_only(self):
+        from .slack_modals import team_remove_view
+
+        text = json.dumps(team_remove_view(self.org), ensure_ascii=False)
+        for name in ("Anshul", "Yash", "Jordan"):
+            self.assertIn(name, text)
+        self.assertEqual(text.count("aidl_member_remove"), 3)  # one per person, admins not listed
+        self.assertNotIn("Priya", text)
+        for detail in ("Highway Code", "Traffic Light", "AUP", "AIDL-L-0001-0001", "LICENSED"):
+            self.assertNotIn(detail, text)
 
     def test_coverage_csv_has_journey_columns(self):
         from .slack_cards import coverage_csv, coverage_data
@@ -2016,11 +2041,11 @@ class RemovePeopleTests(TestCase):
         self.assertIn(("conversations.kick", {"channel": "C42", "user": "U3"}), self.calls)
         self.assertIn("seat is free again", self._popup_text())
 
-    def test_progress_popup_has_remove_buttons(self):
-        from .slack_modals import team_progress_view
+    def test_remove_people_popup_has_remove_buttons(self):
+        from .slack_modals import team_remove_view
 
         self._event("U3")
-        self.assertIn("aidl_member_remove", json.dumps(team_progress_view(self.org)))
+        self.assertIn("aidl_member_remove", json.dumps(team_remove_view(self.org)))
 
 
 class OrganizationOwnerTests(TestCase):
@@ -2105,6 +2130,8 @@ class SetupStepsTests(TestCase):
         self._event("U5")                                         # someone joins
         home = self._home()
         self.assertIn("✅  *3 · Team*\\n1 member", home)
+        self.assertIn("aidl_team_manage", home)                   # Remove people, not a progress popup
+        self.assertNotIn("aidl_team_progress", home)
         self.assertIn("*4 · Card approval*\\nNothing reaches your team", home)
         self.assertEqual(home.count("aidl_send_item"), 0)         # can't start before the cards are approved
         _approve_all(self.org)
@@ -3918,7 +3945,7 @@ class CardAckTests(TestCase):
             self.assertTrue(card_ack.remind_person(self.org, self.master, str(self.member.pk)))
         self.assertIn("Priya Master", json.dumps(self.calls))                    # "asked you to take a look"
 
-    def test_admin_center_team_progress_and_review_show_acknowledgements(self):
+    def test_admin_center_and_review_show_acknowledgements(self):
         from django.utils import timezone
 
         from .card_review_slack import review_view
@@ -3934,9 +3961,6 @@ class CardAckTests(TestCase):
         for part in ("Cards acknowledged this month", "Last week", "Today: 6 acknowledged", "Most acknowledged",
                      "aidl_ack_alerts"):
             self.assertIn(part, home)
-        team = json.dumps(__import__("api.slack_modals", fromlist=["x"]).team_progress_view(self.org), ensure_ascii=False)
-        self.assertIn("6 of 12", team)
-        self.assertIn("Awareness cards acknowledged", team)
         review = json.dumps(review_view(self.org, 1), ensure_ascii=False)
         self.assertIn("How topics are landing", review)
         self.assertIn("% acknowledged", review)

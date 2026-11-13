@@ -452,94 +452,33 @@ def add_app_view(kind: str, meta: dict) -> dict:
     ], submit="＋ Add", meta=dict(meta, kind=kind))
 
 
-def _bar(done: int, total: int) -> str:
-    pct = round(done / total * 100) if total else 0
-    filled = round(pct / 10)
-    return f"`{'▰' * filled}{'▱' * (10 - filled)}`  *{done}/{total}* · {pct}%"
+def team_remove_view(org: Organization, notice: str = "") -> dict:
+    """Remove people: each team member's name and a Remove button, nothing else. How far everyone has got
+    is in the Admin Center summary (step 6) and the Export coverage file."""
+    from .licensing import learners
 
-
-def _ack_line(stat) -> str:
-    if not stat or not stat[1]:
-        return ""
-    a, r, late = stat
-    return f"\n📘 *{a} of {r}* cards acknowledged  ·  " + (f"⏰ *{late} overdue*" if late else "✅ caught up")
-
-
-def team_progress_view(org: Organization, notice: str = "") -> dict:
-    """Admin progress view: every team member's journey to the Learner
-    licence, grouped by where they are (admins aren't part of the team)."""
-    from .licensing import team_progress
-    from .plans import usage
-
-    t = team_progress(org)
-    u = usage(org)
-    n = t["members"]
-    step = lambda when: f"✅ {when.strftime('%d %b')}" if when else "⬜ not yet"  # noqa: E731
+    members = list(learners(org).order_by("full_name"))
     blocks = [
         *([{"type": "section", "text": _md(notice)}] if notice else []),
-        {"type": "context", "elements": [_md(f"*{org.name}*  ·  {n} team member{'s' if n != 1 else ''}  ·  admins not counted")]},
-        {"type": "context", "elements": [_md(
-            f"*{u['label']} plan*  ·  {u['used']} of {u['limit']} users  ·  {u['package_label']} ({u['cards']} cards)")]},
-        {"type": "section", "text": _md(
-            f"🪪  *Licensed*\n{_bar(t['licensed'], n)}\n\n"
-            f"📖  *Highway Code accepted*\n{_bar(t['highway_code'], n)}\n\n"
-            f"🚦  *Traffic Light accepted*\n{_bar(t['traffic_light'], n)}\n\n"
-            f"📄  *AUP — all 14 points accepted*{'' if t['aup_version'] else ' (not created)'}\n{_bar(t['aup'], n)}")},
+        {"type": "context", "elements": [_md("Taking someone out removes them from the AIDL channel and stops their "
+                                              "cards. Admins aren't listed.")]},
     ]
-    from .card_ack import member_stats
-
-    acks = member_stats(org)
-    a_all, r_all = sum(v[0] for v in acks.values()), sum(v[1] for v in acks.values())
-    if r_all:
-        pct = round(a_all / r_all * 100)
-        blocks.append({"type": "section", "text": _md(f"📘  *Awareness cards acknowledged*\n"
-                                                      f"{'▰' * round(pct / 10)}{'▱' * (10 - round(pct / 10))}  "
-                                                      f"*{a_all}/{r_all}* · {pct}%")})
-    if t["legacy"]:
+    for m in members[:90]:  # Slack allows 100 blocks in a popup
+        name = m.full_name or m.email
+        blocks.append({"type": "section", "text": _md(f"*{name}*" + (f"\n{m.email}" if m.full_name and m.email else "")),
+                       "accessory": {
+            "type": "button", "text": _text("Remove"), "action_id": "aidl_member_remove", "value": str(m.pk),
+            "confirm": _confirm("Remove from AIDL?", f"*{name}* will be taken out of the AIDL channel and "
+                                "their cards stop." + (" Their license is suspended and still counts toward "
+                                "your plan." if m.licence_issued else " Their seat becomes free."), "Remove"),
+        }})
+    if len(members) > 90:
         blocks.append({"type": "context", "elements": [_md(
-            f"{t['legacy']} license(s) came from the old *Add User* flow, before the acknowledgement rule.")]})
-
-    groups = (
-        ("licensed", "🪪  LICENSED"), ("legacy", "🪪  LICENSED (BEFORE ACKNOWLEDGEMENT RULE)"),
-        ("waiting_seat", "⏳  WAITING FOR A SEAT"), ("in_progress", "🟡  IN PROGRESS"),
-        ("not_started", "⬜  NOT STARTED"),
-    )
-    shown = 0
-    for status, title in groups:
-        rows = [r for r in t["rows"] if r["status"] == status]
-        if not rows:
-            continue
-        blocks += [{"type": "divider"}, {"type": "section", "text": _md(f"*{title}*  ({len(rows)})")}]
-        for r in rows:
-            if shown >= 35:  # Slack allows 100 blocks per view; the CSV has everyone
-                break
-            m = r["member"]
-            who = f"*{r['name']}*\n{m.email or r['role'].title()}"
-            if m.licence_issued and m.licence_number:
-                who += f"\n`{m.licence_number}`"
-            blocks.append({"type": "section", "fields": [
-                _md(who),
-                _md(f"📄 AUP  {'✅' if r['aup_at'] else '⬜'} {r['aup_points']}/14 points\n📖 Highway Code  {step(r['highway_code_at'])}\n"
-                    f"🚦 Traffic Light  {step(r['traffic_light_at'])}" + _ack_line(acks.get(str(m.pk)))),
-            ], "accessory": {
-                "type": "button", "text": _text("Remove"), "action_id": "aidl_member_remove", "value": str(m.pk),
-                "confirm": _confirm("Remove from AIDL?", f"*{r['name']}* will be taken out of the AIDL channel and "
-                                    "their cards stop." + (" Their license is suspended and still counts toward "
-                                    "your plan." if m.licence_issued else " Their seat becomes free."), "Remove"),
-            }})
-            shown += 1
-    if t["removed"]:
-        lines = [f"• *{r['name']}*  ·  removed {r['left_at'].strftime('%d %b')}"
-                 + ("  ·  license suspended, seat still counted" if r["licensed"] else "  ·  seat freed")
-                 for r in t["removed"][:15]]
-        blocks += [{"type": "divider"}, {"type": "section", "text": _md(
-            f"*🚪  REMOVED FROM CHANNEL*  ({len(t['removed'])})\n" + "\n".join(lines))}]
-    if len(t["rows"]) > shown:
-        blocks.append({"type": "context", "elements": [_md(f"…and {len(t['rows']) - shown} more in the Coverage CSV.")]})
-    if not t["rows"]:
-        blocks += [{"type": "divider"}, {"type": "section", "text": _md(
-            "No one has joined yet — add people to the AIDL channel and AIDL onboards them automatically.")}]
-    return _modal("aidl_team_progress", "Team progress", blocks, close="Close")
+            f"…and {len(members) - 90} more. Take them out of the AIDL channel in Slack.")]})
+    if not members:
+        blocks.append({"type": "section", "text": _md(
+            "No one has joined yet — add people to the AIDL channel and AIDL onboards them automatically.")})
+    return _modal("aidl_team_manage", "Remove people", blocks, close="Close")
 
 
 def coverage_view(org: Organization, download_url: str = "", note: str = "") -> dict:
