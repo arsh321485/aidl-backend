@@ -272,6 +272,22 @@ def _step_send(d: dict, st: dict) -> list:
 
 
 
+def _policy_progress(t: dict) -> str:
+    """Policy cards are sent a topic at a time, so what people agreed to is shown against the cards sent
+    so far, never against the whole policy: "3 of 4 agreed" after 4 of 14 cards, not "0/1 acknowledged"."""
+    sent, total = t.get("policy_sent", 0), t.get("policy_total", 14)
+    line = f"📄 AI policy cards: *{sent} of {total}* sent"
+    possible = t.get("policy_possible", 0)
+    if not possible:
+        return line
+    line += f"{SEP}*{t.get('policy_agreed', 0)} of {possible}* agreed"
+    if sent < total:
+        people = t.get("members", 0)
+        line += (f"\n_Agreed is counted against the cards sent so far ({people} {'person' if people == 1 else 'people'}"
+                 f" × {sent} card{'s' if sent != 1 else ''}). It grows as people agree and as you send more cards._")
+    return line
+
+
 def _step_licences(d: dict, st: dict) -> list:
     if not st["cards_done"]:
         return [_locked(6, "Licences & awareness cards", "step 5")]
@@ -283,9 +299,9 @@ def _step_licences(d: dict, st: dict) -> list:
                "sent automatically after each licence") if p else ""
     blocks = [_section(f"*6 · Licences & awareness cards*\n"
                        f"🪪 Licences issued *{t.get('licensed', 0)}/{total}*{waiting}{SEP}"
-                       f"📄 AUP acknowledgement *{t.get('aup', 0)}/{total}*\n"
                        f"📖 Highway Code accepted *{t.get('highway_code', 0)}/{total}*{SEP}"
-                       f"🚦 Traffic Light Check accepted *{t.get('traffic_light', 0)}/{total}*"
+                       f"🚦 Traffic Light Check accepted *{t.get('traffic_light', 0)}/{total}*\n"
+                       f"{_policy_progress(t)}"
                        + (f"\n\n{package}" if package else ""))]
     a = d.get("acks")
     if a and a["sent"]:
