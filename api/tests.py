@@ -1653,6 +1653,80 @@ class SlackOnboardingTests(TestCase):
         self.assertNotIn("aidl_tabs", text)
 
 
+class PolicyProgressLineTests(TestCase):
+    """Policy cards are sent a topic at a time. Step 6 must say how many were sent and how many of those
+    people agreed to, not show "0/1" because the whole policy isn't out yet."""
+
+    def setUp(self):
+        from . import aup_store, policy_cards
+
+        self.org = make_org(name="Secureitlab", seats_purchased=10)
+        self.admin = make_user(self.org, full_name="Priya Raman")
+        self.member = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Anshul")
+        _answer_policy(self.org)                                   # 14 cards approved...
+        self.later = (timezone.localdate() + timedelta(days=5)).isoformat()
+        a = {"answers": aup_store.answers(self.org, with_tools=False), "fills": dict(AUP_FILLS), "tools": []}
+        for n in range(5, 15):                                     # ...but only 1 to 4 are due so far
+            policy_cards.approve(self.org, None, n, a, self.later, deliver=False)
+        self.a = a
+
+    def _step_six(self):
+        from .admin_setup import update
+        from .slack_blocks import admin_card_blocks
+        from .slack_cards import build_admin_cards_context
+
+        update(self.org, flow_started="2026-10-09")
+        return json.dumps(admin_card_blocks(build_admin_cards_context(self.admin), "home"), ensure_ascii=False)
+
+    def _agree(self, *points):
+        from . import aup_store
+        from .licensing import acknowledge
+
+        self.org.refresh_from_db()
+        for n in points:
+            acknowledge(self.member, aup_store.point_item(n), aup_store.card_version(self.org, n))
+
+    def test_partial_policy_reads_as_progress_not_as_a_failure(self):
+        self._agree(1, 2, 3)
+        home = self._step_six()
+        self.assertIn("AI policy cards: *4 of 14* sent", home)
+        self.assertIn("*3 of 4* agreed", home)
+        self.assertIn("1 person × 4 cards", home)                  # the note says what the number is counted against
+        self.assertNotIn("policy cards: *0/1*", home)
+        self.assertNotIn("AUP acknowledgement", home)
+
+    def test_the_numbers_move_when_people_agree_and_when_more_cards_go_out(self):
+        from . import policy_cards
+
+        self._agree(1, 2, 3)
+        self._agree(4)
+        self.assertIn("*4 of 4* agreed", self._step_six())
+        policy_cards.approve(self.org, None, 5, self.a, "", deliver=False)   # card 5 goes out
+        home = self._step_six()
+        self.assertIn("*5 of 14* sent", home)
+        self.assertIn("*4 of 5* agreed", home)
+
+    def test_more_people_count_every_agreement(self):
+        other = make_user(self.org, role=AIDLUser.Role.LEARNER, full_name="Yash")
+        self._agree(1, 2)
+        from . import aup_store
+        from .licensing import acknowledge
+
+        acknowledge(other, aup_store.point_item(1), aup_store.card_version(self.org, 1))
+        home = self._step_six()
+        self.assertIn("*3 of 8* agreed", home)                    # 2 people x 4 cards, 3 agreements
+        self.assertIn("2 people × 4 cards", home)
+
+    def test_no_cards_sent_yet_is_not_shown_as_zero_of_zero(self):
+        from . import policy_cards
+
+        for n in range(1, 5):
+            policy_cards.approve(self.org, None, n, self.a, self.later, deliver=False)
+        home = self._step_six()
+        self.assertIn("AI policy cards: *0 of 14* sent", home)
+        self.assertNotIn("0 of 0", home)
+
+
 class AdminProgressViewTests(TestCase):
     """Admin progress: the Home summary (step 6), the Remove people popup, coverage columns."""
 
@@ -1701,9 +1775,12 @@ class AdminProgressViewTests(TestCase):
         from .licensing import acknowledge
 
         home = self._step_six()
-        for part in ("Licences issued *2/3*", "AUP acknowledgement *1/3*", "Highway Code accepted *2/3*",
-                     "Traffic Light Check accepted *1/3*", "aidl_open_home", "aidl_ack_alerts"):
+        for part in ("Licences issued *2/3*", "AI policy cards: *14 of 14* sent", "*14 of 42* agreed",
+                     "Highway Code accepted *2/3*", "Traffic Light Check accepted *1/3*", "aidl_open_home",
+                     "aidl_ack_alerts"):
             self.assertIn(part, home)
+        self.assertNotIn("AUP acknowledgement", home)         # it read as "someone hasn't accepted the policy"
+        self.assertNotIn("is counted against the cards sent so far", home)   # all 14 sent: nothing to explain
         self.assertNotIn("aidl_team_progress", home)
         self.assertNotIn("View team progress", home)
         for name in ("Anshul", "Yash", "Jordan", "AIDL-L-0001-0001"):  # no one's own details on the page

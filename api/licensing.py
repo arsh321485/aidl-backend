@@ -182,7 +182,7 @@ def team_progress(org: Organization) -> dict:
     """Each team member's journey: joined → Highway Code → Traffic Light →
     licence. Admins are not part of the team."""
     members = list(learners(org).order_by("full_name"))
-    from .aup_store import is_point_item, required_points, version
+    from .aup_store import POINTS, is_point_item, required_points, version
 
     aup_version = version(org)
     req = required_points(org)  # {card: version} sent so far
@@ -217,6 +217,12 @@ def team_progress(org: Organization) -> dict:
     return {
         "rows": rows,
         "members": len(rows),
+        # Policy cards go out one topic at a time, so "agreed" is counted against the cards sent so far:
+        # every person x every card sent is one agreement they could give.
+        "policy_sent": len(req),
+        "policy_total": POINTS,
+        "policy_agreed": sum(points.get(str(m.pk), 0) for m in members),
+        "policy_possible": len(members) * len(req),
         "highway_code": count(lambda r: r["highway_code_at"]),
         "traffic_light": count(lambda r: r["traffic_light_at"]),
         "aup": count(lambda r: r["aup_at"]),
