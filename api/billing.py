@@ -6,7 +6,8 @@ covers all topics) and — for Enterprise — the delivery days and time,
 previews the first cards (blurred) and goes to checkout.
 
 Checkout:
-- internal testing access (PromoCode, entered in Slack: slack_promo.py) is not
+- internal testing access (PromoCode, entered in Slack: slack_promo.py, or in the plans page's
+  "Have a promo code?" box: billing_views.promo_view; both call redeem) is not
   checkout. It never involves Stripe, and an organization that has it is never
   sent to payment (see checkout)
 - admins listed in BILLING_UNLIMITED_ADMIN_EMAILS upgrade without paying
