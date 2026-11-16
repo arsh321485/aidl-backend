@@ -6,8 +6,8 @@ covers all topics) and — for Enterprise — the delivery days and time,
 previews the first cards (blurred) and goes to checkout.
 
 Checkout:
-- internal testing access (PromoCode, entered in Slack: slack_promo.py, or in the plans page's
-  "Have a promo code?" box: billing_views.promo_view; both call redeem) is not
+- internal testing access (the one fixed code in settings.INTERNAL_PROMO_CODE, entered only in the plans
+  page's "Have a promo code?" box: billing_views.promo_view → redeem) is not
   checkout. It never involves Stripe, and an organization that has it is never
   sent to payment (see checkout)
 - admins listed in BILLING_UNLIMITED_ADMIN_EMAILS upgrade without paying
@@ -21,13 +21,14 @@ hour}, "pending": {...}, "history": [...]}.
 
 from __future__ import annotations
 
+import hmac
 import json
 
 from django.conf import settings
 from django.utils import timezone
 
 from . import plans
-from .models import AIDLUser, Organization, PromoCode
+from .models import AIDLUser, Organization
 
 
 class UpgradeError(ValueError):
@@ -194,9 +195,10 @@ def unlimited(user: AIDLUser) -> bool:
     return (user.email or "").strip().lower() in settings.BILLING_UNLIMITED_ADMIN_EMAILS
 
 
-# ---------- internal testing access (promo codes, Slack only) ----------
+# ---------- internal testing access (the internal promo code, Slack workspaces of ours only) ----------
 
 PROMO_REFUSED = "This code isn't valid for this workspace."
+PROMO_PLAN = "enterprise"
 _FREE_ACTIVATIONS = {"promo", "complimentary", "test_mode"}
 
 
@@ -222,26 +224,33 @@ def _real_subscription(org: Organization) -> bool:
     return org.plan != "trial" and (not history or history[-1].get("how") not in _FREE_ACTIVATIONS)
 
 
+def promo_enabled() -> bool:
+    """The server-side switch: INTERNAL_PROMO_ENABLED, and a code is set."""
+    return bool(settings.INTERNAL_PROMO_ENABLED and settings.INTERNAL_PROMO_CODE)
+
+
 def promo_available(org: Organization, user: AIDLUser) -> bool:
-    """Whether the Slack Admin Center shows Enter promo code: our workspace, and a code is ON."""
-    if not internal_workspace(org) or org.plan == "enterprise" or _real_subscription(org):
-        return False
-    return PromoCode.objects.filter(is_active=True).exists()
+    """Whether the plans page shows "Have a promo code?": the code is switched on, this is one of our own
+    Slack workspaces, and it is still on Trial. A paid plan or subscription is never touched."""
+    return promo_enabled() and internal_workspace(org) and org.plan == "trial" and not _real_subscription(org)
 
 
 def redeem(org: Organization, by: AIDLUser, code: str) -> None:
-    """Turn on the code's plan. Raises UpgradeError; never reaches Stripe."""
+    """Turn on Enterprise for internal testing. Raises UpgradeError; never reaches Stripe. Everything is judged
+    on the organization the caller's own account belongs to (the caller checks billing permission)."""
     if not org.slack_team_id:
         raise UpgradeError({"promo_code": "Promo codes only work for organizations using Slack."})
-    code = (code or "").strip().upper()
-    row = PromoCode.objects.filter(code=code, is_active=True).first() if code else None
-    if row is None or not internal_workspace(org):
+    entered = (code or "").strip().upper()
+    if not (promo_enabled() and internal_workspace(org)
+            and hmac.compare_digest(entered.encode(), settings.INTERNAL_PROMO_CODE.encode())):
         raise UpgradeError({"promo_code": PROMO_REFUSED})
     if on_promo(org):
         raise UpgradeError({"promo_code": "This organization already has testing access."})
     if _real_subscription(org):
         raise UpgradeError({"promo_code": "This organization has a paid subscription, so a promo code can't be used."})
-    activate(org, row.plan, [], None, None, by, how="promo", promo=row.code, background=True)
+    if org.plan != "trial":
+        raise UpgradeError({"promo_code": "A promo code can only be used on the Trial plan."})
+    activate(org, PROMO_PLAN, [], None, None, by, how="promo", promo=settings.INTERNAL_PROMO_CODE, background=True)
 
 
 def set_internal_plan(org: Organization, plan: str, by_name: str) -> None:

@@ -1,5 +1,3 @@
-import re
-
 from django.db import models
 
 
@@ -557,37 +555,6 @@ class OAuthState(models.Model):
 
     def __str__(self):
         return self.state
-
-
-class PromoCode(models.Model):
-    """The internal testing code (e.g. TESTING_QA): managed in Django Admin, entered in
-    the Slack Admin Center. Only our own Slack workspaces (settings.INTERNAL_SLACK_TEAMS)
-    can use it (billing.redeem); it never involves payment."""
-
-    PLAN_CHOICES = [("enterprise", "Enterprise"), ("basic", "Basic")]
-
-    code = models.CharField(max_length=40, unique=True,
-                            help_text="Letters, digits, _ or -, e.g. TESTING_QA. Capitals don't matter.")
-    is_active = models.BooleanField("ON", default=True)
-    plan = models.CharField(max_length=20, choices=PLAN_CHOICES, default="enterprise")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-
-    def clean(self):
-        from django.core.exceptions import ValidationError
-
-        self.code = (self.code or "").strip().upper()
-        if not re.fullmatch(r"[A-Z0-9_-]{4,40}", self.code):
-            raise ValidationError({"code": "Use 4 to 40 letters, digits, _ or -."})
-
-    def save(self, *args, **kwargs):
-        self.code = (self.code or "").strip().upper()
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.code
 
 
 class InternalTestOrganization(Organization):

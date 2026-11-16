@@ -2,7 +2,7 @@ from django import forms
 from django.conf import settings
 from django.contrib import admin
 
-from .models import AIDLUser, InternalTestOrganization, Item, OAuthState, Organization, PromoCode
+from .models import AIDLUser, InternalTestOrganization, Item, OAuthState, Organization
 
 
 @admin.register(Item)
@@ -32,15 +32,6 @@ class AIDLUserAdmin(admin.ModelAdmin):
 @admin.register(OAuthState)
 class OAuthStateAdmin(admin.ModelAdmin):
     list_display = ("state", "enroll_as", "expires_at", "created_at")
-
-@admin.register(PromoCode)
-class PromoCodeAdmin(admin.ModelAdmin):
-    """The internal testing code: only our own Slack workspaces can use it (billing.redeem)."""
-
-    list_display = ("code", "is_active", "plan")
-    list_editable = ("is_active", "plan")
-    fields = ("code", "is_active", "plan")
-
 
 @admin.register(InternalTestOrganization)
 class InternalTestOrganizationAdmin(admin.ModelAdmin):

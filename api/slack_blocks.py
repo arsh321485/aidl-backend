@@ -342,7 +342,6 @@ def _home(d: dict) -> list:
                  "a few short steps, top to bottom.\n\n" + "🟩" * done + "⬜" * (5 - done)
                  + f"  *{done} of 5 setup steps done*"),
         *_plan_line(d),
-        *_promo_line(d),
         {"type": "divider"},
     ]
     if d.get("policy_only"):  # asked to create the AUP only
@@ -351,14 +350,6 @@ def _home(d: dict) -> list:
         blocks += step(d, st)
         blocks.append({"type": "divider"})
     return blocks[:-1]
-
-
-def _promo_line(d: dict) -> list:
-    """Only for our own workspaces while a code is ON (billing.promo_available)."""
-    if not d.get("promo_open") or d.get("policy_only"):
-        return []
-    return [_section("🧪 *Internal testing:* enter your code to turn on Enterprise. No payment is involved.",
-                     accessory=_button("🎟 Enter promo code", "aidl_promo_open", value="promo"))]
 
 
 def _plan_line(d: dict) -> list:

@@ -1,13 +1,11 @@
-"""Internal testing access in Slack (billing.py has the rules): the popup where
-an admin enters a promo code, and the popup that changes the delivery schedule
-without going near the website's payment page."""
+"""Internal testing access in Slack (billing.py has the rules). Codes are redeemed only on the website's plans
+page; this is the popup that changes the delivery schedule afterwards, without going near the payment page."""
 
 from __future__ import annotations
 
 from . import billing, plans
 from .models import AIDLUser, Organization
 
-CODE = "aidl_promo"
 SCHEDULE = "aidl_promo_schedule"
 HOURS = range(6, 21)
 
@@ -26,14 +24,6 @@ def _message(title: str, text: str) -> dict:
 
 def closed_view() -> dict:
     return _message("Promo code", "Internal testing access isn't available for this workspace right now.")
-
-
-def code_view() -> dict:
-    return {"type": "modal", "callback_id": CODE, "title": _t("Enter promo code"), "submit": _t("Apply"),
-            "close": _t("Cancel"), "blocks": [
-        {"type": "input", "block_id": "code", "label": _t("Code"),
-         "element": {"type": "plain_text_input", "action_id": "v", "max_length": 100}},
-    ]}
 
 
 def schedule_view(org: Organization) -> dict:
@@ -55,16 +45,6 @@ def schedule_view(org: Organization) -> dict:
 
 def _state(view: dict, block: str) -> dict:
     return ((view.get("state") or {}).get("values") or {}).get(block, {}).get("v") or {}
-
-
-def submit_code(admin: AIDLUser, org: Organization, view: dict) -> dict:
-    try:
-        billing.redeem(org, admin, _state(view, "code").get("value") or "")
-    except billing.UpgradeError as exc:
-        return {"response_action": "errors", "errors": {"code": exc.errors["promo_code"]}}
-    return {"response_action": "update", "view": _message(
-        "Enterprise is on", "✅ *Enterprise is active* for internal testing. No payment was taken. "
-                            "The Admin Center updates in a moment.")}
 
 
 def submit_schedule(admin: AIDLUser, org: Organization, view: dict) -> dict:
