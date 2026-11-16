@@ -5,6 +5,9 @@ from the Slack "Upgrade plan" link.
     POST /api/billing/preview/    {plan, topics} → {cards: first 12 it adds (titles only), total}
     POST /api/billing/checkout/   {plan, topics, schedule?, seats?} →
                                   {status: redirect|activated|pending, url?, message}
+    POST /api/billing/promo/      {code} → {status: activated, message}. Internal testing only: the
+                                  organization comes from the token, never from the request
+                                  (billing.redeem; the plans data has promo_available only for those testers)
 """
 
 from __future__ import annotations
@@ -58,6 +61,8 @@ def plans_view(request):
 
     data = billing.catalog(org)
     data["can_upgrade"] = has(org, request.user, "billing")
+    if data["can_upgrade"] and billing.promo_available(org, request.user):
+        data["promo_available"] = True  # only ever present for our own workspace; customers' data is unchanged
     return Response(data)
 
 
@@ -87,8 +92,8 @@ def checkout_view(request):
     if not has(org, request.user, "billing"):
         return Response({"detail": "Only the master admin, or admins allowed to manage the plan, can upgrade."},
                         status=status.HTTP_403_FORBIDDEN)
-    if request.data.get("promo_code"):  # an old copy of the page: don't carry on to payment
-        return Response({"promo_code": ["Promo codes are entered in the Slack Admin Center."]},
+    if request.data.get("promo_code"):  # codes have their own box and endpoint; never carry one on to payment
+        return Response({"promo_code": ["Enter promo codes in the “Have a promo code?” box on the plans page."]},
                         status=status.HTTP_400_BAD_REQUEST)
     seats = request.data.get("seats")
     try:
@@ -108,6 +113,33 @@ def checkout_view(request):
             raise
         return Response({"detail": f"Payment could not be started: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
     return Response(result)
+
+
+@extend_schema(summary="Internal testing: turn on a plan with a promo code (no payment)", request=OpenApiTypes.OBJECT,
+               responses={200: OpenApiResponse(OpenApiTypes.OBJECT), 400: OpenApiResponse(OpenApiTypes.OBJECT)})
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def promo_view(request):
+    """The same redemption as the Slack Admin Center: billing.redeem decides who may, from the
+    organization the token belongs to. Ordinary customers get the same refusal as a wrong code."""
+    org, error = _org_for_admin(request)
+    if error:
+        return error
+    from .admin_perms import has
+
+    if not has(org, request.user, "billing"):
+        return Response({"detail": "Only the master admin, or admins allowed to manage the plan, can use a code."},
+                        status=status.HTTP_403_FORBIDDEN)
+    try:
+        billing.redeem(org, request.user, str(request.data.get("code") or ""))  # refreshes the Admin Center too
+    except billing.UpgradeError as exc:
+        return Response({"code": [exc.errors["promo_code"]]}, status=status.HTTP_400_BAD_REQUEST)
+    from .plans import PLANS
+
+    return Response({"status": "activated",
+                     "message": f"{PLANS[org.plan]['label']} is on for internal testing. No payment was taken, and "
+                                "your Slack Admin Center is being updated."})
 
 
 @csrf_exempt
