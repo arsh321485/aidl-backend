@@ -1626,7 +1626,8 @@ class SlackOnboardingTests(TestCase):
         user.refresh_from_db()
         self.assertTrue(user.licence_issued)
         self.assertTrue(user.licence_number.startswith("AIDL-L-"))
-        update = [b for m, b in self.calls if m == "chat.update"][-1]
+        # The learner's own message (the channel's Admin Center is redrawn too, after the licence).
+        update = [b for m, b in self.calls if m == "chat.update" and b["channel"] != self.org.slack_channel_id][-1]
         self.assertIn("Your Learner", json.dumps(update["blocks"], ensure_ascii=False))
         self.assertTrue(any(m == "chat.postMessage" and "Learner's Permit is ready" in b["text"] for m, b in self.calls))
 
@@ -3368,7 +3369,9 @@ class EmployeeFlowTests(TestCase):
         self.assertIn("One more step for your licence", json.dumps(self._posted()[-1]))
         for n, ver in aup_store.required_points(self.org).items():
             self._press("aidl_flow_aup", f"aup_{n}|{ver}")
-        self.assertIn("Agreed", json.dumps([b for m, b in self.calls if m == "chat.update"][-1]))
+        # The employee's card (the channel's Admin Center is redrawn too once the licence is issued).
+        self.assertIn("Agreed", json.dumps([b for m, b in self.calls if m == "chat.update"
+                                            and b["channel"] != self.org.slack_channel_id][-1]))
         self.member.refresh_from_db()
         self.assertTrue(self.member.licence_issued)
         self.assertEqual((self.member.licence_expires_at - self.member.licence_issued_at).days, 365)

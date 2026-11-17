@@ -311,6 +311,13 @@ def downgrade_to_trial(org: Organization, how: str) -> None:
     from .package_delivery import sync_organization
 
     sync_organization(org)
+    if org.slack_channel_id:
+        try:
+            from .admin_home import refresh
+
+            refresh(org)  # the plan, seats and cards shown in Slack (nothing else redraws after a cancellation)
+        except Exception:  # noqa: BLE001 — the downgrade itself already succeeded
+            pass
 
 
 def checkout(org: Organization, by: AIDLUser, plan: str, topics: list[str], schedule: dict | None,
