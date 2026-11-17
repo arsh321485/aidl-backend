@@ -1,0 +1,121 @@
+{% extends "teams_app/base.html" %}
+{% block title %}My AI Driving Licence · AIDL{% endblock %}
+{% block body %}
+{% if welcome %}
+<section class="box">
+  <h1>👋 Hi {{ first }}, welcome to your AI Driving Licence</h1>
+  <p class="muted" style="margin-top:6px">{{ org.name }}{% if course %} · {{ course }}{% endif %} · AI Driving Licence programme</p>
+  <p>AIDL helps you use AI safely and confidently, one short card at a time.</p>
+  <div class="grid2" style="margin:12px 0">
+    <div><b>Takes</b><br>About 10 min</div>
+    <div><b>You get</b><br>AI Driving Licence</div>
+    <div><b>After that</b><br>{{ cadence }}</div>
+  </div>
+  <h3>Your route today</h3>
+  <div class="list">
+    {% if policy_count %}<div>📜 <b>{{ org.name }} policy</b> · {{ policy_count }} short card{{ policy_count|pluralize }} to agree to</div>{% endif %}
+    <div>🚦 <b>Traffic Light Check</b> · what's safe to paste</div>
+    <div>📖 <b>The Highway Code</b> · 5 everyday rules</div>
+  </div>
+  <form method="post" action="{% url 'moodle-action' %}" class="row" style="margin-top:14px">
+    {% csrf_token %}<input type="hidden" name="action" value="start">
+    <button class="btn go">Let's go →</button>
+    {% if not person.avatar_data %}<a class="btn" href="{{ avatar_url }}" target="_blank" rel="noopener">🎨 Create my avatar</a>{% endif %}
+  </form>
+  <p class="muted" style="margin-top:12px">🔒 Your progress is private to you and your AIDL admin.</p>
+</section>
+{% else %}
+
+{% if licence %}
+<section class="box done">
+  <h1>🎉 You're road-ready, {{ first }}!</h1>
+  <p class="muted" style="margin-top:6px">Traffic Light, Highway Code and every policy card agreed.</p>
+  <p>Here's your AI Driving Licence{% if person.licence_expires_at %}, valid till <b>{{ person.licence_expires_at|date:"j F Y" }}</b>{% endif %}.</p>
+  <img class="lic" src="{{ licence.image }}" alt="AI Driving Licence {{ person.licence_number }}">
+  <div class="row" style="margin-top:14px">
+    <a class="btn go" href="{{ licence.download }}">📥 Download licence</a>
+    <a class="btn" href="{{ licence.share }}" target="_blank" rel="noopener">🔗 Share on LinkedIn</a>
+    <details class="pop">
+      <summary class="btn">📤 Share</summary>
+      <div class="list">
+        <div><b>Copy your link</b><br>{{ licence.link }}</div>
+        <div class="row">
+          <a class="btn" href="{{ licence.share_x }}" target="_blank" rel="noopener">𝕏 Post on X</a>
+          <a class="btn" href="{{ licence.share_facebook }}" target="_blank" rel="noopener">Facebook</a>
+          <a class="btn" href="{{ licence.share_whatsapp }}" target="_blank" rel="noopener">WhatsApp</a>
+        </div>
+      </div>
+    </details>
+    {% if can_change_avatar %}<a class="btn" href="{{ avatar_url }}" target="_blank" rel="noopener">🎨 Change avatar (once)</a>{% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% for c in policy %}
+<section class="box">
+  <p class="muted"><b>Policy card · {{ c.icon }} {{ c.title }}</b> · {{ org.name }} AI policy</p>
+  <img class="card" src="{{ c.image }}" alt="Policy card: {{ c.title }}">
+  <form method="post" action="{% url 'moodle-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="agree"><input type="hidden" name="n" value="{{ c.n }}"><input type="hidden" name="version" value="{{ c.version }}">
+    <button class="btn ok">✅ I agree</button>
+  </form>
+  <p class="muted" style="margin-top:8px">Your agreement is time-stamped and saved to your AIDL record.</p>
+</section>
+{% endfor %}
+
+{% if waiting %}
+<section class="box">
+  <h2>⏳ Your next card is on its way</h2>
+  <p>Your AIDL admin is approving it for {{ org.name }}. Open AIDL from your course again once it's approved.</p>
+</section>
+{% elif traffic %}
+<section class="box">
+  <p class="muted"><b>🚦 Traffic Light Check</b> · Before you paste anything</p>
+  <img class="card" src="{{ traffic }}" alt="Traffic Light Check">
+  <form method="post" action="{% url 'moodle-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="traffic_light">
+    <button class="btn ok">Got it. Next: The Highway Code →</button>
+  </form>
+</section>
+{% elif highway %}
+<section class="box">
+  <p class="muted"><b>📖 The Highway Code</b> · Section A · Learner Rules</p>
+  <img class="card" src="{{ highway }}" alt="The Highway Code">
+  <form method="post" action="{% url 'moodle-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="highway_code">
+    <button class="btn ok">Got it. Get my licence →</button>
+  </form>
+</section>
+{% elif stage == "policy" %}
+<section class="box">
+  <h2>📜 One more step for your licence</h2>
+  <p>Agree to the policy card{{ policy|length|pluralize }} above and your AI Driving Licence is issued.</p>
+</section>
+{% elif stage == "licence" and not person.licence_issued %}
+<section class="box">
+  <h2>⏳ Almost there</h2>
+  <p>You've finished every card. All licence seats on {{ org.name }}'s plan are in use, so your licence will be issued as soon as one is free. Please tell your teacher.</p>
+</section>
+{% elif stage == "licence" and not person.avatar_data %}
+<section class="box">
+  <h2>🎨 One last step: your licence avatar</h2>
+  <p>You've earned your AI Driving Licence, {{ first }}! Create the avatar that goes on it, then come back to this tab and reload.</p>
+  <div class="row">
+    <a class="btn go" href="{{ avatar_url }}" target="_blank" rel="noopener">🎨 Create my avatar</a>
+    <a class="btn" href="{% url 'moodle-home' %}">↻ I've made it</a>
+  </div>
+</section>
+{% endif %}
+
+{% for c in awareness %}
+<section class="box">
+  <p class="muted"><b>AI awareness · {{ c.icon }} {{ c.title }}</b></p>
+  <img class="card" src="{{ c.image }}" alt="{{ c.title }}">
+  <form method="post" action="{% url 'moodle-action' %}" style="margin-top:12px">
+    {% csrf_token %}<input type="hidden" name="action" value="paw"><input type="hidden" name="id" value="{{ c.id }}">
+    <button class="btn ok">✅ Got it</button>
+  </form>
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

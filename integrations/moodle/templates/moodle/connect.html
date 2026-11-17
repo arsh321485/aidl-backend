@@ -1,0 +1,42 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Add AIDL to Moodle{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>Add AIDL to your Moodle</h1>
+  <p class="muted" style="margin-top:8px">For your Moodle site administrator. Takes about 5 minutes. After this, teachers and learners open AIDL from a course, with no separate AIDL login.</p>
+</section>
+
+<section class="box">
+  <h2>1. Add AIDL as an external tool</h2>
+  <p>In Moodle: <b>Site administration → Plugins → Activity modules → External tool → Manage tools → configure a tool manually</b>, then fill in:</p>
+  <div class="scroll">
+  <table>
+    <tr><th>Tool name</th><td>AIDL</td></tr>
+    <tr><th>Tool URL</th><td><code>{{ launch_url }}</code></td></tr>
+    <tr><th>LTI version</th><td>LTI 1.3</td></tr>
+    <tr><th>Public key type</th><td>Keyset URL</td></tr>
+    <tr><th>Public keyset</th><td><code>{{ jwks_url }}</code></td></tr>
+    <tr><th>Initiate login URL</th><td><code>{{ login_url }}</code></td></tr>
+    <tr><th>Redirection URI(s)</th><td><code>{{ launch_url }}</code></td></tr>
+    <tr><th>Tool configuration usage</th><td>Show in activity chooser and as a preconfigured tool</td></tr>
+    <tr><th>Default launch container</th><td><b>New window</b></td></tr>
+    <tr><th>Privacy → share name / email</th><td>Always</td></tr>
+  </table>
+  </div>
+</section>
+
+<section class="box">
+  <h2>2. Send us your tool details</h2>
+  <p>Save the tool, then click its <b>"View configuration details"</b> icon. Send these three values to the AIDL team, who will switch your site on:</p>
+  <div class="list">
+    <div><b>Platform ID</b> <span class="muted">(your Moodle address)</span></div>
+    <div><b>Client ID</b></div>
+    <div><b>Deployment ID</b></div>
+  </div>
+</section>
+
+<section class="box">
+  <h2>3. Open AIDL from a course</h2>
+  <p>In any course: <b>Add an activity or resource → AIDL</b>. Open it as a <b>teacher first</b>: that sets up your school in AIDL and makes you its admin. Approve the two starter cards, press <b>Start</b>, and learners can begin.</p>
+</section>
+{% endblock %}

@@ -281,6 +281,10 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "api",
+    "google_chat",
+    "integrations.lti_core",
+    "integrations.moodle",
+    "integrations.google_classroom",
 ]
 
 MIGRATION_MODULES = {
@@ -425,3 +429,23 @@ AUP_UPLOAD_MAX_CHARS = int(os.getenv("AUP_UPLOAD_MAX_CHARS", "120000"))
 # Regulator card (regulators.py): show regulator entries that haven't been through AIDL's compliance review yet,
 # marked DRAFT. For AIDL's own test workspaces only — leave off for customers.
 REGULATORS_PREVIEW = os.getenv("REGULATORS_PREVIEW", "False").lower() in ("1", "true", "yes")
+
+# Google Chat organization install. Individual sign-in uses openid, email and profile only.
+GOOGLE_CHAT_CLIENT_ID = os.getenv("GOOGLE_CHAT_CLIENT_ID", "")
+GOOGLE_CHAT_CLIENT_SECRET = os.getenv("GOOGLE_CHAT_CLIENT_SECRET", "")
+GOOGLE_CHAT_REDIRECT_URI = os.getenv(
+    "GOOGLE_CHAT_REDIRECT_URI",
+    "https://aidl-backend.onrender.com/api/google-chat/auth/callback/",
+)
+GOOGLE_CHAT_SCOPES = os.getenv(
+    "GOOGLE_CHAT_SCOPES",
+    "openid email profile "
+    "https://www.googleapis.com/auth/chat.spaces.readonly "
+    "https://www.googleapis.com/auth/chat.spaces.create "
+    "https://www.googleapis.com/auth/chat.messages.create",
+)
+GOOGLE_CHAT_SPACE_NAME = os.getenv("GOOGLE_CHAT_SPACE_NAME", "AIDL").strip() or "AIDL"
+# Optional. When set, the Admin Center card is posted as the Chat app; otherwise as the admin.
+GOOGLE_CHAT_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_CHAT_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_CHAT_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_CHAT_SERVICE_ACCOUNT_FILE", "")
+GOOGLE_CHAT_BOT_USER = os.getenv("GOOGLE_CHAT_BOT_USER", "")
