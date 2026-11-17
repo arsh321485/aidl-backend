@@ -12,6 +12,8 @@ BASE_DIR = Path(settings.BASE_DIR)
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("api.urls")),
+    path("api/lti/", include("integrations.lti_core.urls")),
+    path("api/moodle/", include("integrations.moodle.urls")),
     path(
         "teams/manifest.json",
         serve,

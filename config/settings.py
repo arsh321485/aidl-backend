@@ -281,6 +281,8 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "api",
+    "integrations.lti_core",
+    "integrations.moodle",
 ]
 
 MIGRATION_MODULES = {
