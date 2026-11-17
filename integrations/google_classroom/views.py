@@ -21,6 +21,12 @@ POST /api/google-classroom/classes/signout/
 GET  /api/google-classroom/api/classes/       same data as JSON (Authorization: Bearer <AIDL access token>)
 POST /api/google-classroom/api/classes/sync/  fetch again, JSON
 POST /api/google-classroom/api/classes/choose/  {"course_id": "...", "in_programme": true|false}, JSON
+POST /api/google-classroom/classes/setup/     step 4: approve the 2 starter cards / start the programme
+
+Step 4 (learners)
+GET  /api/google-classroom/learn/             the link a teacher shares in Google Classroom: sign in with
+                                              Google, then the learner flow (cards -> licence)
+POST /api/google-classroom/learn/action/      a learner's button
 """
 
 from __future__ import annotations
@@ -42,6 +48,10 @@ from api.auth_jwt import create_access_token, create_refresh_token
 from api.auth_views import JWTAuthentication
 from api.microsoft_auth import consume_oauth_state_with_payload, create_oauth_state
 from api.models import AIDLUser
+from api.org_service import get_organization_for_user
+# The learner flow (cards -> licence) is the same for every LMS. It only calls
+# api/; it lives in the Moodle folder because Moodle had it first.
+from integrations.moodle import flow
 
 from . import classes, google_oauth, session
 from .accounts import find_user, sign_in
@@ -51,6 +61,7 @@ logger = logging.getLogger(__name__)
 
 MODE = "google_classroom"
 CLASSES = "google_classroom:classes"  # the OAuth state payload of a step-2 connect
+LEARN = "google_classroom:learn"  # ... of a step-4 learner sign-in (the shared link)
 
 
 def _enroll_as(value: str | None) -> str:
@@ -76,17 +87,17 @@ def login(request):
 
 @require_GET
 def callback(request):
-    """Google's one redirect URI, for both sign-in and connecting classes."""
+    """Google's one redirect URI: website sign-in, connecting classes, learner sign-in."""
     enroll_as, payload, state_error = consume_oauth_state_with_payload(request.GET.get("state", ""))
     for_classes = payload == CLASSES
-    fail = _classes_error if for_classes else _error
+    fail = _classes_error if for_classes else _learn_error if payload == LEARN else _error
 
     if request.GET.get("error"):
         return fail(request, request.GET["error"], "Google sign-in was cancelled.")
     code = request.GET.get("code")
     if not code:
         return fail(request, "code_missing", "Google did not return a sign-in code.")
-    if state_error or payload not in (MODE, CLASSES):  # unknown, expired, reused, or another platform's state
+    if state_error or payload not in (MODE, CLASSES, LEARN):  # unknown, expired, reused, or another platform's state
         return fail(request, state_error or "invalid_state", "Your sign-in session expired. Please try again.")
     if not google_oauth.configured():
         return fail(request, "google_not_configured", "Google Classroom sign-in isn't set up on the server yet.")
@@ -94,6 +105,8 @@ def callback(request):
     try:
         if for_classes:
             return _connect_classes(request, code)
+        if payload == LEARN:
+            return _learner_signed_in(request, code)
         profile = google_oauth.verify_id_token(google_oauth.exchange_code(code))
         user, _org = sign_in(profile, _enroll_as(enroll_as))
     except GoogleError as exc:
@@ -152,10 +165,10 @@ def _classes_error(request, code: str, description: str):
     return _message(request, "Can't connect Google Classroom", description, 400)
 
 
-def _message(request, title: str, text: str, status: int = 200):
+def _message(request, title: str, text: str, status: int = 200, retry_url: str = ""):
     return render(request, "google_classroom/message.html", {
         "title": title, "text": text, "user": None, "org": None,
-        "connect_url": reverse("google-classroom-classes-connect"),
+        "connect_url": retry_url or reverse("google-classroom-classes-connect"),
     }, status=status)
 
 
@@ -175,9 +188,12 @@ def classes_page(request):
     refusal = _teacher_refusal(user)
     if refusal:
         return session.clear_session(_message(request, "Google Classroom", refusal, 403))
+    org = get_organization_for_user(user)
     return render(request, "google_classroom/classes.html", {
         "user": None, "org": None, "person": user, "notice": notice, "data": classes.for_teacher(user),
-        "connect_url": reverse("google-classroom-classes-connect")})
+        "connect_url": reverse("google-classroom-classes-connect"),
+        "learn_url": request.build_absolute_uri(reverse("google-classroom-learn")),
+        **(flow.teacher_context(org) if org else {})})
 
 
 @require_GET
@@ -217,6 +233,19 @@ def classes_choose(request):
         return _back(str(exc))
     return _back(f"Class added to AIDL: {classes.summary(counts)}." if on
                  else "Class taken out of AIDL. Its students keep their AIDL accounts.")
+
+
+@require_POST
+def classes_setup(request):
+    """Step 4: approve the Traffic Light Check / Highway Code, start the programme."""
+    user = session.signed_in(request)
+    refusal = _teacher_refusal(user)
+    if refusal:
+        return _message(request, "Google Classroom", refusal, 403)
+    org = get_organization_for_user(user)
+    if org is None:
+        return _message(request, "Google Classroom", "Your AIDL organization is switched off.", 403)
+    return _back(flow.teacher_action(user, org, request.POST) or "Nothing changed.")
 
 
 @require_POST
@@ -268,3 +297,65 @@ def api_classes_choose(request):
     data["result"] = counts
     data["message"] = classes.summary(counts) if on else "Class taken out of AIDL."
     return Response(data)
+
+
+# --- step 4: learners (the link the teacher shares in Google Classroom) ---
+
+def _learn_back(notice: str = ""):
+    url = reverse("google-classroom-learn")
+    return redirect(f"{url}?{urlencode({'notice': notice[:300]})}" if notice else url)
+
+
+def _learn_error(request, code: str, description: str):
+    logger.info("google classroom learner sign-in failed: %s", code)
+    return _message(request, "Can't open AIDL", description, 400, retry_url=reverse("google-classroom-learn"))
+
+
+def _learner_signed_in(request, code: str):
+    profile = google_oauth.verify_id_token(google_oauth.exchange_code(code))
+    user = find_user(profile)
+    retry = reverse("google-classroom-learn")
+    if user is None or not user.organization_id:
+        return _message(request, "You're not in AIDL yet",
+                        "Your teacher hasn't added your Google Classroom class to AIDL yet, or you signed in with "
+                        "a different Google account than the one you use in Classroom.", 403, retry_url=retry)
+    if not user.is_active:
+        return _message(request, "Can't open AIDL", "Your AIDL account is switched off. Ask your teacher.", 403,
+                        retry_url=retry)
+    target = reverse("google-classroom-classes") if user.role == AIDLUser.Role.ADMIN else retry
+    return session.set_session(request, redirect(target), user)
+
+
+@never_cache
+@require_GET
+def learn(request):
+    """Signed in -> the learner flow (admins -> their classes page). Not signed in -> Google."""
+    user = session.signed_in(request)
+    if user is None:
+        if not google_oauth.configured():
+            return _message(request, "Can't open AIDL", "Google sign-in isn't set up on the server yet.", 503,
+                            retry_url=reverse("google-classroom-learn"))
+        state = create_oauth_state("organization", payload=LEARN)
+        return HttpResponseRedirect(google_oauth.auth_url(state))
+    if user.role == AIDLUser.Role.ADMIN:
+        return redirect("google-classroom-classes")
+    org = get_organization_for_user(user)
+    if org is None:
+        return session.clear_session(_message(request, "You're not in the AIDL programme",
+                                              "Ask your teacher to add your class to AIDL.", 403))
+    ctx = flow.learner_context(user, org)
+    if "blocked" in ctx:
+        return _message(request, *ctx["blocked"], retry_url=reverse("google-classroom-learn"))
+    return render(request, "google_classroom/learner.html", {
+        **ctx, "person": user, "org": org, "user": None, "course": "",
+        "notice": request.GET.get("notice", "")[:300]})
+
+
+@never_cache
+@require_POST
+def learn_action(request):
+    user = session.signed_in(request)
+    org = get_organization_for_user(user) if user else None
+    if user is None or org is None:
+        return _learn_back()
+    return _learn_back(flow.learner_action(user, org, request.POST))

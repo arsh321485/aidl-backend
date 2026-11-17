@@ -121,8 +121,9 @@ def _after_save(member: AIDLUser) -> None:
 
 
 def _return_url(member: AIDLUser) -> str:
-    """Teams people go back to their AIDL page; Slack people just close the tab."""
-    if member.microsoft_id.startswith("slack:") or member.microsoft_id.startswith("local:"):
+    """Teams people go back to their AIDL page; Slack, Google Classroom and Moodle
+    people just close the tab (their AIDL page is still open in the other one)."""
+    if member.microsoft_id.startswith(("slack:", "local:", "google:", "moodle:")):
         return ""
     return f"{settings.BACKEND_URL}/api/teams/app/me/"
 

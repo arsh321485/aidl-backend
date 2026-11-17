@@ -409,3 +409,97 @@ class GoogleClassroomProgramme(GoogleClassroomClasses):
 
 for _name in [n for n in dir(GoogleClassroomClasses) if n.startswith("test_")]:
     setattr(GoogleClassroomProgramme, _name, None)
+
+
+# --- step 4: the learner flow from the shared link ---
+
+@mock.patch("api.card_image.warm")  # don't draw card images in the background
+class GoogleClassroomLearners(GoogleClassroomProgramme):
+    def _class_in_aidl(self):
+        """Teacher signs up, connects Classroom, adds class c1 (students s1, s2)."""
+        teacher = self._teacher_with_classes()
+        self._choose("c1")
+        return teacher
+
+    def _start_programme(self):
+        for item in ("traffic_light", "highway_code"):
+            self.client.post("/api/google-classroom/classes/setup/", {"action": "approve", "item": item})
+        return self.client.post("/api/google-classroom/classes/setup/", {"action": "start"}, follow=True)
+
+    def _open_link(self, **token_args):
+        """A student clicks the shared link and signs in with Google."""
+        self.client.cookies.clear()
+        resp = self.client.get("/api/google-classroom/learn/")
+        self.assertEqual(resp.status_code, 302)
+        q = {k: v[0] for k, v in parse_qs(urlparse(resp["Location"]).query).items()}
+        self.assertEqual(q["scope"], "openid email profile")  # learners never get the Classroom scopes
+        with mock.patch("integrations.google_classroom.google_oauth.exchange_code",
+                        return_value=self._id_token(**token_args)):
+            return self.client.get("/api/google-classroom/callback/", {"code": "abc", "state": q["state"]},
+                                   follow=True)
+
+    def test_teacher_page_shows_setup_and_share_link(self, _warm):
+        self._class_in_aidl()
+        page = self.client.get("/api/google-classroom/classes/")
+        self.assertContains(page, "Get your learners started")
+        self.assertContains(page, "/api/google-classroom/learn/")
+
+    def test_start_needs_both_cards_approved(self, _warm):
+        self._class_in_aidl()
+        resp = self.client.post("/api/google-classroom/classes/setup/", {"action": "start"}, follow=True)
+        self.assertContains(resp, "Approve the Traffic Light Check and the Highway Code first")
+
+    def test_learner_waits_until_teacher_starts(self, _warm):
+        self._class_in_aidl()
+        resp = self._open_link(sub="s1", email="ravi@school.edu")
+        self.assertContains(resp, "Nothing to do yet")
+
+    def test_full_flow_to_licence(self, _warm):
+        self._class_in_aidl()
+        self.assertContains(self._start_programme(), "The programme has started")
+        resp = self._open_link(sub="s1", email="ravi@school.edu")
+        self.assertContains(resp, "Let's go")
+
+        self.client.post("/api/google-classroom/learn/action/", {"action": "start"})
+        self.assertContains(self.client.get("/api/google-classroom/learn/"), "Traffic Light Check")
+        self.client.post("/api/google-classroom/learn/action/", {"action": "traffic_light"})
+        self.assertContains(self.client.get("/api/google-classroom/learn/"), "Get my licence")
+        self.client.post("/api/google-classroom/learn/action/", {"action": "highway_code"})
+
+        student = AIDLUser.objects.get(microsoft_id="google:s1")
+        self.assertTrue(student.licence_issued)
+        self.assertContains(self.client.get("/api/google-classroom/learn/"), "Create my avatar")
+        student.avatar_data = "iVBORw0KGgo="
+        student.save(update_fields=["avatar_data"])
+        self.assertContains(self.client.get("/api/google-classroom/learn/"), student.licence_number)
+
+    def test_cards_must_be_done_in_order(self, _warm):
+        self._class_in_aidl()
+        self._start_programme()
+        self._open_link(sub="s1", email="ravi@school.edu")
+        self.client.post("/api/google-classroom/learn/action/", {"action": "start"})
+        self.client.post("/api/google-classroom/learn/action/", {"action": "highway_code"})  # skipping is ignored
+        self.client.post("/api/google-classroom/learn/action/", {"action": "traffic_light"})
+        self.assertFalse(AIDLUser.objects.get(microsoft_id="google:s1").licence_issued)
+
+    def test_student_of_a_class_not_in_aidl_is_turned_away(self, _warm):
+        self._class_in_aidl()
+        self._start_programme()
+        resp = self._open_link(sub="s9", email="nobody@school.edu")
+        self.assertContains(resp, "added your Google Classroom class to AIDL yet", status_code=403)
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:s9").exists())
+
+    def test_student_cant_use_teacher_buttons(self, _warm):
+        self._class_in_aidl()
+        self._open_link(sub="s1", email="ravi@school.edu")
+        resp = self.client.post("/api/google-classroom/classes/setup/", {"action": "start"})
+        self.assertContains(resp, "Only AIDL admins", status_code=403)
+
+    def test_teacher_opening_the_link_goes_to_classes(self, _warm):
+        self._class_in_aidl()
+        resp = self._open_link()  # sub 111 = the teacher
+        self.assertContains(resp, "Get your learners started")
+
+
+for _name in [n for n in dir(GoogleClassroomProgramme) if n.startswith("test_")]:
+    setattr(GoogleClassroomLearners, _name, None)
