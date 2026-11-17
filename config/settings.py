@@ -282,6 +282,9 @@ INSTALLED_APPS = [
     "corsheaders",
     "api",
     "google_chat",
+    "integrations.lti_core",
+    "integrations.moodle",
+    "integrations.google_classroom",
 ]
 
 MIGRATION_MODULES = {
