@@ -256,7 +256,9 @@ def avatar_card(member: AIDLUser, org: Organization, notice: str = "") -> dict:
 
 
 def _verify_url(number: str) -> str:
-    return f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={number}"
+    from . import licence_image
+
+    return licence_image.share_url(number)
 
 
 def licence(member: AIDLUser, org: Organization) -> dict:

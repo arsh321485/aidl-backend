@@ -72,7 +72,7 @@ def learner_context(user: AIDLUser, org: Organization) -> dict:
 
 def _licence(user: AIDLUser, org: Organization) -> dict:
     version = licence_image.url_version(user, org)
-    verify = f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={user.licence_number}"
+    verify = licence_image.share_url(user.licence_number)
     text, link = quote(f"I just earned my AI Driving Licence from {org.name}!"), quote(verify, safe="")
     return {
         "link": verify,

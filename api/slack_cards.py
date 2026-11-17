@@ -224,8 +224,11 @@ def org_initials(name: str) -> str:
 
 
 def _verify_url(licence_number: str) -> str:
-    base = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
-    return f"{base}/home#verify?lic={licence_number}"
+    from . import licence_image
+
+    if not licence_number or licence_number == "Pending":
+        return (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+    return licence_image.share_url(licence_number)
 
 
 def _app_row(name, category, data_allowed, status, owner="") -> dict:

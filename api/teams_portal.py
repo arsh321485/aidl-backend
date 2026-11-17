@@ -233,7 +233,7 @@ def me(request, user, org):
             ctx[kind] = card_image.image_url(item, org)
     if now == "licence" and user.licence_issued and user.avatar_data:
         version = licence_image.url_version(user, org)
-        verify = f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={user.licence_number}"
+        verify = licence_image.share_url(user.licence_number)
         text = quote(f"I just earned my AI Driving Licence from {org.name}!")
         link = quote(verify, safe="")
         ctx["licence"] = {

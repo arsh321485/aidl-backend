@@ -54,6 +54,12 @@ class AIDLUserSerializer(serializers.ModelSerializer):
     # Guide 4.7 — has this user's organization answered the 8 policy questions?
     policy_completed = serializers.SerializerMethodField()
     licence_status = serializers.SerializerMethodField()
+    licence_share_url = serializers.SerializerMethodField()
+
+    def get_licence_share_url(self, user) -> str:
+        from .licence_image import share_url
+
+        return share_url(user.licence_number) if user.licence_issued and user.licence_number else ""
 
     def get_licence_status(self, user) -> str:
         from .licensing import licence_status
@@ -93,6 +99,7 @@ class AIDLUserSerializer(serializers.ModelSerializer):
             "licence_issued_at",
             "licence_expires_at",
             "licence_status",
+            "licence_share_url",
             "aup_signed",
             "aup_signed_at",
             "teams_team_id",

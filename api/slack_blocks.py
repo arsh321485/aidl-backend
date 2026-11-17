@@ -603,8 +603,9 @@ def user_license_blocks(member, org) -> list:
 
     issued = member.licence_issued_at.strftime("%m/%d/%Y") if member.licence_issued_at else "—"
     expires = member.licence_expires_at.strftime("%m/%d/%Y") if member.licence_expires_at else "—"
-    frontend = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
-    verify = f"{frontend}/home#verify?lic={member.licence_number}"
+    from .licence_image import share_url
+
+    verify = share_url(member.licence_number)
     note = policy_effects(get_answers(org))["training_note"]
     card = {
         "type": "section",

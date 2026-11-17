@@ -3998,7 +3998,8 @@ class CardAckTests(TestCase):
         self._post("U5", {"type": "block_actions", "actions": [{"action_id": "aidl_licence_share", "value": "share"}]})
         opened = next(b for m, b in self.calls if m == "views.open")
         text = json.dumps(opened)
-        self.assertIn("/home#verify?lic=AIDL-L-1-2", text)
+        self.assertIn("/api/licenses/AIDL-L-1-2/?s=", text)  # the public licence page (licence_views.licence_page)
+        self.assertNotIn("#verify", text)
         for part in ("twitter.com", "facebook.com", "wa.me"):
             self.assertIn(part, text)
 

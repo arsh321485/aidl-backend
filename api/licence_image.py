@@ -53,6 +53,13 @@ def image_url(number: str, *, download: bool = False, version: str = "") -> str:
     return url + (f"&v={version}" if version else "") + ("&download=1" if download else "")
 
 
+def share_url(number: str) -> str:
+    """The link a holder shares (X, LinkedIn, Facebook, WhatsApp, copy): the public licence page
+    (licence_views.licence_page). The signature is the owner's pass to show the licence picture and full
+    name; without it the page only confirms the licence, with the name shortened."""
+    return f"{settings.BACKEND_URL}/api/licenses/{number}/?s={signature(number)}"
+
+
 LICENCE_DESIGN = "7"  # bump when the licence's look changes (new image links → Slack refetches)
 
 

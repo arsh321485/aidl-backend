@@ -57,6 +57,8 @@ urlpatterns = [
     path("auth/refresh/", auth_views.refresh, name="auth-refresh"),
     path("auth/logout/", auth_views.logout, name="auth-logout"),
     # Signup form dropdowns — Country -> State -> City
+    path("licenses/verify/", licence_views.licence_verify, name="licence-verify"),
+    path("licenses/<str:number>/", licence_views.licence_page, name="licence-page"),
     path("licenses/<str:number>.png", licence_views.licence_png, name="licence-png"),
     path("cards/<str:kind>/<str:org_id>.png", licence_views.card_png, name="card-png"),
     path("avatar/start/", avatar.avatar_start, name="avatar-start"),
