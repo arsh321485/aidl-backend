@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import admin_views, views
 
 urlpatterns = [
     # step 1: sign up / sign in
@@ -19,4 +19,13 @@ urlpatterns = [
     # step 4: learners
     path("learn/", views.learn, name="google-classroom-learn"),
     path("learn/action/", views.learn_action, name="google-classroom-learn-action"),
+    # step 5: Admin Center
+    path("admin/", admin_views.home, name="google-classroom-admin"),
+    path("admin/action/", admin_views.action, name="google-classroom-admin-action"),
+    path("admin/team/", admin_views.team, name="google-classroom-admin-team"),
+    path("admin/team/action/", admin_views.team_action, name="google-classroom-admin-team-action"),
+    path("admin/admins/", admin_views.admins, name="google-classroom-admin-admins"),
+    path("admin/admins/action/", admin_views.admins_action, name="google-classroom-admin-admins-action"),
+    path("admin/plans/", admin_views.plans, name="google-classroom-admin-plans"),
+    path("admin/coverage.csv", admin_views.coverage, name="google-classroom-admin-coverage"),
 ]
