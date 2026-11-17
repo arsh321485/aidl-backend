@@ -120,7 +120,10 @@ def steps(d: dict) -> list[dict]:
     nxt = next((n for n in range(1, 6) if not done[n] and unlocked[n]), 0)
     can = {1: d.get("can_policy"), 2: d.get("can_admins"), 3: d.get("can_team"), 4: d.get("can_approve_cards"),
            5: d.get("can_send")}
-    after = {2: "step 1", 3: "steps 1 and 2", 4: "step 1", 5: "steps 3 and 4"}
+    missing = [text for ok, text in ((done[3], "adding your team"), (done[4], "approving the Traffic Light Check "
+                                                                            "and the Highway Code")) if not ok]
+    after = {2: "step 1", 3: "steps 1 and 2", 4: "step 1",
+             5: " and ".join(missing) if missing else "steps 3 and 4"}
     out = []
     for n in range(1, 6):
         if done[n]:
@@ -159,7 +162,9 @@ def _detail(n: int, status: str, d: dict, st: dict, p: dict) -> str:
         a = st["approvals"]
         if status == "done":
             return f"Onboarding cards approved · {a['approved']} of {a['total']} awareness cards approved"
-        return "Nothing reaches your team until you approve it. Preview every card first."
+        cards = "  ·  ".join(f"{'✅' if r['status'] == 'approved' else '⏳'} {r['label']}" for r in st["onboarding"])
+        return (f"Nothing reaches your team until you approve it. To start the programme, approve both onboarding "
+                f"cards:\n{cards}\nThe awareness cards can be approved later.")
     if status == "done":
         return f"Running · {st.get('licensed', 0)} of {members} licensed"
     return "Everyone gets a welcome card, then the policy cards and two short checks. Licences are issued at the end."

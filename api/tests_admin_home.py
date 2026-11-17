@@ -202,6 +202,30 @@ class AdminHomeTests(TestCase):
         self.assertNotIn("*Your next step*", text)
         self.assertIn("Welcome back, Priya", text)
 
+    def test_half_approved_onboarding_says_what_is_missing_and_start_stays_locked(self):
+        from . import admin_setup, card_approval
+
+        _answer_policy(self.org)
+        admin_setup.update(Organization.objects.get(pk=self.org.pk), admins_step="skipped")
+        make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U2", full_name="Jordan Ellis")
+        card_approval.approve_onboarding(self.org, "traffic_light", None)  # the Highway Code is still waiting
+        self._open_home()
+        blocks = self._published()[-1]
+        text = json.dumps(blocks, ensure_ascii=False)
+        self.assertIn("✅ 🚦 Traffic Light Check", text)
+        self.assertIn("⏳ 📖 The Highway Code", text)
+        self.assertIn("opens after approving the Traffic Light Check and the Highway Code", text)
+        self.assertNotIn("aidl_send_item", self._action_ids(blocks))
+        card_approval.approve_onboarding(self.org, "highway_code", None)  # now Start is the next step
+        self.calls.clear()
+        from . import admin_home
+
+        admin_home._OPENED.clear()
+        self._open_home()
+        blocks = self._published()[-1]
+        self.assertIn("aidl_send_item", self._action_ids(blocks))
+        self.assertIn("*Your next step*\\n*5. Start the programme*", json.dumps(blocks))
+
     def test_reset_keeps_the_home_tab_switch(self):
         from . import admin_setup
 
