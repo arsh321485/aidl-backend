@@ -77,6 +77,10 @@ def remove_admin(org: Organization, by: AIDLUser, user_id: str) -> tuple[bool, s
                 "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": f"🔒 {notice}"}}]})
         else:
             _dm(token, org, slack_id, f"🔒 {notice}")
+    from .admin_home import home_confirmed, publish_for
+
+    if home_confirmed(org):  # their Home tab stops showing the Admin Center at once
+        publish_for(org, target)
 
     # Still in the channel → they're now a team member and need a seat.
     if target.slack_left_at is None and seat_holders(org).count() > user_limit(org):
