@@ -666,3 +666,99 @@ class GoogleClassroomAdminCenter(GoogleClassroomLearners):
 
 for _name in [n for n in dir(GoogleClassroomLearners) if n.startswith("test_")]:
     setattr(GoogleClassroomAdminCenter, _name, None)
+
+
+# --- step 6: Admin Center, AI policy ---
+
+class GoogleClassroomPolicy(GoogleClassroomAdminCenter):
+    def _company(self):
+        from api import regulators
+        return self.client.post("/api/google-classroom/admin/policy/",
+                                {"countries": [regulators.COUNTRIES[0]], "industry": regulators.INDUSTRIES[0]},
+                                follow=True)
+
+    def test_policy_asks_for_company_first(self):
+        self._school()
+        page = self.client.get("/api/google-classroom/admin/policy/")
+        self.assertContains(page, "Where do you operate?")
+        self.assertContains(page, "from Google")
+
+    def test_company_then_topics_and_regulators(self):
+        self._school()
+        resp = self._company()
+        self.assertContains(resp, "Add a policy card")
+        self.assertContains(resp, "0 of 14 approved")
+        self.assertEqual(self.client.get("/api/google-classroom/admin/regulators/").status_code, 200)
+
+    def test_policy_card_page_and_incomplete_answers(self):
+        from api import policy_cards as pc
+        self._school()
+        self._company()
+        n = pc.TOPICS[0]
+        page = self.client.get(f"/api/google-classroom/admin/policy/{n}/")
+        self.assertContains(page, pc.SHORT[n])
+        resp = self.client.post(f"/api/google-classroom/admin/policy/{n}/", {"action": "approve", "when": "today"})
+        self.assertContains(resp, "Please check")
+
+    def test_approved_card_reaches_the_learner_flow(self):
+        from api import policy_cards as pc
+        from api import aup_store
+        teacher, _r, _m = self._school()
+        self._start_programme()
+        org = Organization.objects.get(pk=teacher.organization_id)
+        pc.approve(org, teacher, 1, {}, card_lines=["Use only the AI tools on the school's list."])
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "1 of 14 policy cards approved")
+
+        self._open_link(sub="s1", email="ravi@school.edu")
+        self.client.post("/api/google-classroom/learn/action/", {"action": "start"})
+        page = self.client.get("/api/google-classroom/learn/")
+        self.assertContains(page, pc.SHORT[1])
+        version = aup_store.required_points(org)[1]
+        self.client.post("/api/google-classroom/learn/action/", {"action": "agree", "n": "1", "version": version})
+        ravi = AIDLUser.objects.get(microsoft_id="google:s1")
+        self.assertEqual(aup_store.pending_points(ravi, org), [])
+
+    def test_upload_and_logo_are_paid_features(self):
+        self._school()
+        self.assertContains(self.client.get("/api/google-classroom/admin/upload/"), "A paid feature")
+        self.assertContains(self.client.get("/api/google-classroom/admin/logo/"), "A paid feature")
+
+    def test_logo_on_a_paid_plan(self):
+        import io
+        from PIL import Image
+        teacher, _r, _m = self._school()
+        Organization.objects.filter(pk=teacher.organization_id).update(plan="basic")
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 40), "red").save(buf, format="PNG")
+        buf.seek(0)
+        buf.name = "logo.png"
+        resp = self.client.post("/api/google-classroom/admin/logo/", {"file": buf}, follow=True)
+        self.assertContains(resp, "Your logo is saved")
+        self.assertTrue(Organization.objects.get(pk=teacher.organization_id).logo_data)
+
+    def test_add_an_ai_app(self):
+        from api.slack_cards import AI_CATEGORIES, DATA_ALLOWED
+        self._school()
+        resp = self.client.post("/api/google-classroom/admin/apps/", {
+            "kind": "ai", "name": "Gemini for Education", "category": AI_CATEGORIES[0],
+            "data": DATA_ALLOWED[0][0], "status": "Approved"}, follow=True)
+        self.assertContains(resp, "Gemini for Education")
+
+    def test_admin_without_policy_permission_is_refused(self):
+        _t, ravi, _m = self._school()
+        self.client.post("/api/google-classroom/admin/admins/action/", {"action": "add", "user_id": ravi.pk})
+        self._as("s1", "ravi@school.edu")
+        self.assertContains(self.client.get("/api/google-classroom/admin/policy/"),
+                            "permissions don", status_code=403)
+        self.assertContains(self.client.get("/api/google-classroom/admin/apps/"), "permissions don", status_code=403)
+
+    def test_admin_with_apps_permission_can_open_policy(self):
+        _t, ravi, _m = self._school()
+        self.client.post("/api/google-classroom/admin/admins/action/",
+                         {"action": "add", "user_id": ravi.pk, "perm": ["approve_apps"]})
+        self._as("s1", "ravi@school.edu")
+        self.assertEqual(self.client.get("/api/google-classroom/admin/policy/").status_code, 200)
+
+
+for _name in [n for n in dir(GoogleClassroomAdminCenter) if n.startswith("test_")]:
+    setattr(GoogleClassroomPolicy, _name, None)

@@ -1,0 +1,25 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Apps · AIDL{% endblock %}
+{% block body %}
+{% include "google_classroom/_nav.html" %}
+<section class="box">
+  <h1>{% if kind == "ai" %}🤖 AI applications{% else %}💻 IT applications{% endif %}</h1>
+  <p class="muted" style="margin-top:6px">{% if kind == "ai" %}The AI tools your learners are allowed to use.{% else %}The IT systems your learners are allowed to use alongside AI.{% endif %}</p>
+  <div class="row" style="margin-bottom:8px"><a class="btn sm" href="?kind=ai">🤖 AI</a> <a class="btn sm" href="?kind=it">💻 IT</a> <a class="btn sm" href="{% url 'google-classroom-admin' %}">← Admin Center</a></div>
+  <div class="list">
+    {% for a in apps %}<div><b>{{ a.name }}</b> <span class="pill">{{ a.get_status_display }}</span><br><span class="muted">{{ a.category }}{% if a.data_allowed %} · {{ a.get_data_allowed_display }}{% endif %}</span></div>
+    {% empty %}<div class="muted">No applications yet.</div>{% endfor %}
+  </div>
+</section>
+<section class="box">
+  <h2>＋ Add {% if kind == "ai" %}an AI{% else %}an IT{% endif %} application</h2>
+  <form method="post" style="margin-top:8px">
+    {% csrf_token %}<input type="hidden" name="kind" value="{{ kind }}">
+    <div class="field"><label for="name">Application name</label><input id="name" type="text" name="name" required placeholder="e.g. Claude Enterprise"></div>
+    <div class="field"><label for="category">Category</label><select id="category" name="category" required>{% for c in categories %}<option>{{ c }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="data">Data allowed</label><select id="data" name="data">{% for d in data %}<option>{{ d }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="status">Status</label><select id="status" name="status"><option>Approved</option><option>Prohibited</option></select></div>
+    <button class="btn go">＋ Add</button>
+  </form>
+</section>
+{% endblock %}

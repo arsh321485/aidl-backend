@@ -58,7 +58,15 @@ def home(org: Organization, user: AIDLUser) -> dict:
         "started": admin_setup.started(org),
     }
     done = sum(steps.values())
+    from api import aup_store, aup_upload
+    from api import policy_cards as pc
+    from api.slack_cards import light_admin_context
+
+    perms = light_admin_context(user)
     return {
+        "policy_approved": len(pc.statuses(org)), "upload_allowed": aup_upload.can_upload(org),
+        "company_set": bool(aup_store.company(org)), "logo_allowed": org.plan in ("basic", "enterprise"),
+        "can_policy": perms["can_policy"], "can_apps": perms["can_apps"],
         "steps": steps, "done_count": done, "bar": range(done), "rest": range(5 - done),
         "onboarding": card_approval.onboarding(org),
         "members": members, "licensed": licensed, "admins_count": admins,

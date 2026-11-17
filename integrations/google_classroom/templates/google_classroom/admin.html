@@ -12,6 +12,7 @@
     <div class="row" style="flex:0 0 auto">
       <span class="pill">{{ plan.label }} plan · {{ plan.used }} / {{ plan.limit }} seats</span>
       {% if can.billing and plan.can_upgrade %}<a class="btn sm go" href="{% url 'google-classroom-admin-plans' %}">⬆️ Upgrade plan</a>{% endif %}
+      {% if can.admins %}{% if logo_allowed %}<a class="btn sm" href="{% url 'google-classroom-admin-logo' %}">🖼 {% if org.logo_data %}Change{% else %}Add{% endif %} logo</a>{% else %}<span class="muted">Your logo on cards is a paid feature.</span>{% endif %}{% endif %}
     </div>
   </div>
   <p class="steps" aria-label="{{ done_count }} of 5 steps done" style="margin-top:10px">{% for _ in bar %}🟩{% endfor %}{% for _ in rest %}⬜{% endfor %} <span class="muted">{{ done_count }} of 5 done</span></p>
@@ -20,8 +21,15 @@
 
 <section class="box flat{% if steps.policy %} done{% endif %}">
   <h2>{% if steps.policy %}✅ {% endif %}1 · Your AI policy</h2>
-  <p class="muted">The policy cards learners agree to. Adding policy cards from Google Classroom comes in the next part of the Admin Center.
-    Until then, learners start with the Traffic Light Check and the Highway Code.</p>
+  <p class="muted">{{ policy_approved }} of 14 policy cards approved. Each is one short card your learners agree to before their licence.</p>
+  {% if can_policy %}
+  <div class="row">
+    <a class="btn{% if not steps.policy %} go{% endif %}" href="{% url 'google-classroom-admin-policy' %}">📌 Add a policy card</a>
+    {% if upload_allowed %}<a class="btn" href="{% url 'google-classroom-admin-upload' %}">📤 Upload your own AUP</a>{% endif %}
+    {% if company_set %}<a class="btn" href="{% url 'google-classroom-admin-regulators' %}">🏛 Your regulators</a>{% endif %}
+    {% if can_apps %}<a class="btn" href="{% url 'google-classroom-admin-apps' %}">🤖 AI apps</a> <a class="btn" href="{% url 'google-classroom-admin-apps' %}?kind=it">💻 IT apps</a>{% endif %}
+  </div>
+  {% else %}<p class="muted">Your admin permissions don't include the policy.</p>{% endif %}
 </section>
 
 <section class="box flat{% if steps.admins %} done{% endif %}">
