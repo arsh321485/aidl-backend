@@ -111,10 +111,13 @@ def callback(request):
         user, _org = sign_in(profile, _enroll_as(enroll_as))
     except GoogleError as exc:
         return fail(request, exc.code, str(exc))
-    return _redirect(user)
+    return _redirect(request, user)
 
 
-def _redirect(user: AIDLUser):
+def _redirect(request, user: AIDLUser):
+    """Back to the website with AIDL tokens. Also signs the person in to our
+    own pages (the cookie), so an admin's "Open Admin Center" on the website
+    needs no second Google sign-in."""
     query = {
         "access_token": create_access_token(user),
         "refresh_token": create_refresh_token(user),
@@ -124,7 +127,11 @@ def _redirect(user: AIDLUser):
         "full_name": user.full_name,
         "role": user.role,
     }
-    return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
+    if user.role == AIDLUser.Role.ADMIN and user.organization_id:
+        query["admin_center_url"] = f"{settings.BACKEND_URL.rstrip('/')}{reverse('google-classroom-admin')}"
+        query["open_admin_center"] = "1"
+    response = HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
+    return session.set_session(request, response, user) if user.organization_id else response
 
 
 def _error(request, code: str, description: str):
