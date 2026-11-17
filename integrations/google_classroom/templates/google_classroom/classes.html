@@ -11,6 +11,7 @@
   <p style="margin-top:14px"><a class="btn go" href="{{ connect_url }}">Connect Google Classroom</a></p>
 </section>
 {% else %}
+{% include "google_classroom/_nav.html" %}
 <section class="box">
   <div class="spread">
     <div>
@@ -23,7 +24,6 @@
       {% else %}
       <a class="btn go sm" href="{{ connect_url }}">Connect Google Classroom</a>
       {% endif %}
-      <form method="post" action="{% url 'google-classroom-classes-signout' %}">{% csrf_token %}<button class="btn sm">Sign out</button></form>
     </div>
   </div>
 </section>
@@ -53,7 +53,7 @@
     <div class="scroll"><table>
       <thead><tr><th>Name</th><th>Email</th><th>AIDL</th></tr></thead>
       <tbody>{% for s in c.students %}<tr><td>{{ s.name|default:"—" }}</td><td>{{ s.email|default:"—" }}</td>
-        <td>{% if s.aidl_status == "added" %}✅ Learner{% elif s.aidl_status == "no_seat" %}⚠️ No free seat{% elif s.aidl_status == "other_org" %}In another AIDL organization{% elif s.aidl_status == "inactive" %}Switched off{% elif c.in_programme %}—{% else %}<span class="muted">Not added</span>{% endif %}</td></tr>{% endfor %}</tbody>
+        <td>{% if s.aidl_status == "added" %}✅ Learner{% elif s.aidl_status == "no_seat" %}⚠️ No free seat{% elif s.aidl_status == "other_org" %}In another AIDL organization{% elif s.aidl_status == "removed" %}Removed by an admin{% elif s.aidl_status == "inactive" %}Switched off{% elif c.in_programme %}—{% else %}<span class="muted">Not added</span>{% endif %}</td></tr>{% endfor %}</tbody>
     </table></div>
   </details>
   {% else %}

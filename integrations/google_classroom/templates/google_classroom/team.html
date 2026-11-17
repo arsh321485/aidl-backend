@@ -1,0 +1,58 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Team · AIDL{% endblock %}
+{% block body %}
+{% with tab="team" %}{% include "google_classroom/_nav.html" %}{% endwith %}
+
+<section class="box">
+  <h1>Team progress</h1>
+  <p class="muted" style="margin-top:8px">{{ members }} learner{{ members|pluralize }} · {{ licensed }} licensed ·
+    {{ traffic_light }} did the Traffic Light Check · {{ highway_code }} did the Highway Code · {{ not_started }} not started
+    · {{ plan.used }} / {{ plan.limit }} seats</p>
+  {% if waiting_seat %}<div class="error" role="alert" style="margin-top:8px">{{ waiting_seat }} learner{{ waiting_seat|pluralize }} finished every card but your plan has no free licence. {% if plan.can_upgrade %}<a href="{% url 'google-classroom-admin-plans' %}">Upgrade your plan</a>.{% endif %}</div>{% endif %}
+</section>
+
+<section class="box flat">
+  {% if rows %}
+  <div class="scroll"><table>
+    <thead><tr><th>Learner</th><th>Class</th><th>Status</th><th>🚦</th><th>📖</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><b>{{ r.name }}</b>{% if r.email %}<br><span class="muted">{{ r.email }}</span>{% endif %}</td>
+      <td>{{ r.classes|join:", "|default:"—" }}</td>
+      <td>{{ r.status_label }}{% if r.member.licence_number %}<br><span class="muted">{{ r.member.licence_number }}</span>{% endif %}</td>
+      <td>{% if r.traffic_light_at %}✅{% else %}—{% endif %}</td>
+      <td>{% if r.highway_code_at %}✅{% else %}—{% endif %}</td>
+      <td>
+        <form method="post" action="{% url 'google-classroom-admin-team-action' %}">{% csrf_token %}
+          <input type="hidden" name="action" value="remove"><input type="hidden" name="user_id" value="{{ r.member.pk }}">
+          <button class="btn no sm" title="Take {{ r.name }} out of the programme">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p>No learners yet. <a href="{% url 'google-classroom-classes' %}">Add a class</a> and its students join.</p>
+  {% endif %}
+</section>
+
+{% if removed_people %}
+<section class="box flat">
+  <h2>Removed from the programme</h2>
+  <p class="muted">Their licence is suspended. A licence they earned still counts toward your plan.</p>
+  <div class="list">
+    {% for p in removed_people %}
+    <div class="spread">
+      <div><b>{{ p.full_name|default:p.email }}</b>{% if p.licence_number %} <span class="muted">· {{ p.licence_number }}</span>{% endif %}</div>
+      <form method="post" action="{% url 'google-classroom-admin-team-action' %}">{% csrf_token %}
+        <input type="hidden" name="action" value="restore"><input type="hidden" name="user_id" value="{{ p.pk }}">
+        <button class="btn sm">Add back</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -96,7 +96,9 @@ Everything is in `integrations/google_classroom/`.
 | 1 | Sign up / sign in with Google ("Add to Google Classroom") | ✅ done |
 | 2 | Read the teacher's classes and students (Classroom API) | ✅ done |
 | 3 | Teacher chooses classes → their students become AIDL learners | ✅ done |
-| 4 | Learner flow for Google students (cards → licence) | next |
+| 4 | Learner flow for Google students (cards → licence) from a shared link | ✅ done |
+| 5 | Admin Center, core: setup steps, team, admins, plan, coverage | ✅ done |
+| 6 | Admin Center, policy: policy cards, own AUP, regulators, apps, logo | ✅ done |
 
 ## Sign-up / sign-in rules
 
@@ -120,6 +122,15 @@ Everything is in `integrations/google_classroom/`.
 | `POST /api/google-classroom/api/classes/sync/` | fetch from Google again, JSON |
 | `POST /api/google-classroom/classes/choose/` | step 3: `course_id`, `on=1` add the class to AIDL / `on=0` take it out |
 | `POST /api/google-classroom/api/classes/choose/` | same, JSON `{"course_id": "...", "in_programme": true}` |
+| `POST /api/google-classroom/classes/setup/` | step 4: approve the 2 starter cards / start the programme |
+| `GET /api/google-classroom/learn/` | step 4: the link teachers post in Classroom → Google sign-in → learner flow |
+| `POST /api/google-classroom/learn/action/` | a learner's button |
+| `GET /api/google-classroom/admin/` | step 5: Admin Center home (plan, 5 setup steps, student link) |
+| `GET /api/google-classroom/admin/team/` | learners' progress per class; remove / add back |
+| `GET /api/google-classroom/admin/admins/` | add / remove admins and their permissions |
+| `GET /api/google-classroom/admin/plans/` · `admin/coverage.csv` | upgrade (website plans page) · coverage export |
+| `GET /api/google-classroom/admin/policy/` · `policy/<n>/` | step 6: company → the 14 policy cards; one card's questions + approve |
+| `GET /api/google-classroom/admin/regulators/` · `upload/` · `logo/` · `apps/` | regulators · own AUP (paid) · logo (paid) · AI / IT apps |
 
 Step 2 is for AIDL admins (teachers) only. They allow three read-only
 permissions once: classes, class rosters, students' emails. The refresh token
@@ -135,6 +146,29 @@ the school. Students in another AIDL organization stay there; with no free
 seats they are listed as "No free seat". Refresh adds new students of chosen
 classes. **Remove from AIDL** only stops adding students; nobody's account or
 progress is deleted.
+
+Step 4: on the classes page the teacher approves the Traffic Light Check and
+the Highway Code, presses **Start**, and posts the **link for your students**
+(`<BACKEND>/api/google-classroom/learn/`) in their class. A student opens it,
+signs in with Google (identity only, no Classroom permissions) and gets the
+same flow as Moodle (policy cards → Traffic Light → Highway Code → licence,
+`integrations/moodle/flow.py`). Google accounts that aren't in a chosen class
+are turned away.
+
+Step 5 (Admin Center, core): `admin_center.py` + `admin_views.py`, same rules as
+Slack / Teams through `api/` (`admin_perms`, `licensing`, `plans`). Admins who
+open the student link land here. The team is counted with
+`licensing.learners()`, because `admin_setup.summary()` only counts Slack people.
+Removing a learner sets the shared `slack_left_at` field (licence suspended;
+Refresh won't add them back); "Add back" clears it if there's a seat.
+
+Step 6 (Admin Center, AI policy): `policy_views.py`, the same `api/` modules
+and form helpers as the Teams Admin Center (`policy_cards`, `aup_store`,
+`aup_upload`, `regulators`, `teams_portal._policy_context` / `_read_policy`),
+with our own copies of its pages. An approved card reaches Google learners in
+their flow the next time they open the link (the shared delivery only posts
+to Slack / Teams people, so nothing is posted). App *requests* come from
+Slack / Teams cards only, so the apps page here is the list + add.
 
 ## Set up Google (once)
 
