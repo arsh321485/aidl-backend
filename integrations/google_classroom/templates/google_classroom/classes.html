@@ -28,6 +28,40 @@
   </div>
 </section>
 
+<section class="box{% if started %} done{% endif %}">
+  <h2>Get your learners started</h2>
+  <p class="muted">Learners can't start until both cards are approved and you start the programme.</p>
+  <div class="list">
+    {% for c in onboarding %}
+    <div class="spread">
+      <div><b>{{ c.label }}</b><br><span class="muted">{% if c.status == "approved" %}✅ Approved{% if c.by %} by {{ c.by }}{% endif %}{% else %}Waiting for approval{% endif %}</span></div>
+      {% if c.status != "approved" %}
+      <form method="post" action="{% url 'google-classroom-classes-setup' %}">{% csrf_token %}
+        <input type="hidden" name="action" value="approve"><input type="hidden" name="item" value="{{ c.item }}">
+        <button class="btn ok sm">Approve</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="spread">
+      <div><b>🚀 Start the programme</b><br><span class="muted">{% if started %}✅ Started{% elif ready %}Ready to start{% else %}Approve both cards first{% endif %}</span></div>
+      {% if not started %}
+      <form method="post" action="{% url 'google-classroom-classes-setup' %}">{% csrf_token %}
+        <input type="hidden" name="action" value="start">
+        <button class="btn go sm"{% if not ready %} disabled{% endif %}>Start</button>
+      </form>
+      {% endif %}
+    </div>
+    <div>
+      <b>🔗 Link for your students</b>
+      <p class="muted" style="margin:4px 0 6px">Post it in your Google Classroom class (Classwork → Create → Material → Link).
+        Students sign in with Google and get their cards and licence.</p>
+      <input type="text" readonly value="{{ learn_url }}" onclick="this.select()" aria-label="Link for your students">
+    </div>
+    <p class="muted"><b>{{ licensed_count }}</b> of <b>{{ learner_count }}</b> learner{{ learner_count|pluralize }} licensed.</p>
+  </div>
+</section>
+
 {% for c in data.classes %}
 <section class="box flat{% if c.in_programme %} done{% endif %}">
   <div class="spread">

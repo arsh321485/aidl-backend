@@ -96,7 +96,8 @@ Everything is in `integrations/google_classroom/`.
 | 1 | Sign up / sign in with Google ("Add to Google Classroom") | ✅ done |
 | 2 | Read the teacher's classes and students (Classroom API) | ✅ done |
 | 3 | Teacher chooses classes → their students become AIDL learners | ✅ done |
-| 4 | Learner flow for Google students (cards → licence) | next |
+| 4 | Learner flow for Google students (cards → licence) from a shared link | ✅ done |
+| 5 | Admin Center for Google Classroom admins | next |
 
 ## Sign-up / sign-in rules
 
@@ -120,6 +121,9 @@ Everything is in `integrations/google_classroom/`.
 | `POST /api/google-classroom/api/classes/sync/` | fetch from Google again, JSON |
 | `POST /api/google-classroom/classes/choose/` | step 3: `course_id`, `on=1` add the class to AIDL / `on=0` take it out |
 | `POST /api/google-classroom/api/classes/choose/` | same, JSON `{"course_id": "...", "in_programme": true}` |
+| `POST /api/google-classroom/classes/setup/` | step 4: approve the 2 starter cards / start the programme |
+| `GET /api/google-classroom/learn/` | step 4: the link teachers post in Classroom → Google sign-in → learner flow |
+| `POST /api/google-classroom/learn/action/` | a learner's button |
 
 Step 2 is for AIDL admins (teachers) only. They allow three read-only
 permissions once: classes, class rosters, students' emails. The refresh token
@@ -135,6 +139,14 @@ the school. Students in another AIDL organization stay there; with no free
 seats they are listed as "No free seat". Refresh adds new students of chosen
 classes. **Remove from AIDL** only stops adding students; nobody's account or
 progress is deleted.
+
+Step 4: on the classes page the teacher approves the Traffic Light Check and
+the Highway Code, presses **Start**, and posts the **link for your students**
+(`<BACKEND>/api/google-classroom/learn/`) in their class. A student opens it,
+signs in with Google (identity only, no Classroom permissions) and gets the
+same flow as Moodle (policy cards → Traffic Light → Highway Code → licence,
+`integrations/moodle/flow.py`). Google accounts that aren't in a chosen class
+are turned away.
 
 ## Set up Google (once)
 
