@@ -547,17 +547,13 @@ def admin_card_text(d: dict) -> str:
 
 
 def publish_admin_center(org, user) -> bool:
-    """Post (or refresh) the Admin Center Home card in the org's channel —
-    after login, and again whenever the policy answers change."""
-    from . import slack_client
-    from .slack_cards import build_admin_cards_context
+    """Something an admin did changed the Admin Center: refresh the shared #aidl message now and every
+    admin's Home tab in the background (admin_home.py)."""
+    from .admin_home import post_channel, refresh_homes
 
-    from .slack_onboarding import primary_admin
-
-    # The shared channel card greets the admin who signed the organization up.
-    primary = primary_admin(org) or user
-    data = build_admin_cards_context(primary)
-    return slack_client.post_admin_center(org, admin_card_blocks(data, "home"), admin_card_text(data))
+    ok = post_channel(org, fallback=user)
+    refresh_homes(org)
+    return ok
 
 
 # ---------- User cards (guide 10.1, 10.2) — sent by DM ----------

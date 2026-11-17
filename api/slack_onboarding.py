@@ -228,10 +228,30 @@ def slack_events(request):
 
     event = payload.get("event") or {}
     kind = event.get("type")
+    if payload.get("type") == "event_callback" and kind == "app_home_opened" and event.get("tab", "home") == "home":
+        from .admin_home import on_home_opened
+
+        in_background(on_home_opened, payload.get("team_id") or event.get("team", ""), event.get("user", ""),
+                      payload.get("api_app_id", ""))
     if payload.get("type") == "event_callback" and kind in ("member_joined_channel", "member_left_channel"):
         team_id = payload.get("team_id") or event.get("team", "")
         org = Organization.objects.filter(slack_team_id=team_id, is_active=True).first()
         if org is not None and event.get("channel") == org.slack_channel_id:
             handler = onboard_member if kind == "member_joined_channel" else offboard_member
-            in_background(handler, org, event.get("user", ""))
+            in_background(_team_changed, handler, org, event.get("user", ""))
     return HttpResponse(status=200)
+
+
+# What a join / leave can change on the Admin Center (team size, seats, a refused join when the plan is full).
+_REDRAW_AFTER = {"onboarded", "rejoined", "removed", "plan_full"}
+
+
+def _team_changed(handler, org: Organization, slack_user_id: str) -> str:
+    """Run the join / leave handler, then redraw the Admin Center: it used to keep the old team size until an
+    admin happened to press something."""
+    result = handler(org, slack_user_id)
+    if result in _REDRAW_AFTER:
+        from .admin_home import refresh
+
+        refresh(org)
+    return result

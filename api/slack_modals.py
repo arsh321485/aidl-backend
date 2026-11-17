@@ -634,14 +634,21 @@ def submit_add_admin(caller: AIDLUser, org: Organization, team_id: str, view: di
 def _onboard_admin(token: str, org: Organization, caller: AIDLUser, admin: AIDLUser, slack_user_id: str) -> None:
     """Guide 8.2: add the new admin to the channel and send them the Admin
     cards, showing only the tabs their permissions allow."""
+    from .admin_home import home_confirmed, publish_for
     from .slack_blocks import admin_card_blocks
 
     _welcome_to_channel(token, org, slack_user_id)
+    intro = [{"type": "section", "text": _md(f"*{caller.full_name}* has added you as an AIDL admin for *{org.name}*.")}]
+    if home_confirmed(org):  # their own Admin Center, kept up to date, instead of a copy that goes stale
+        publish_for(org, admin)
+        blocks = intro + [{"type": "context", "elements": [_md(
+            "Your Admin Center is on this app's *Home* tab, showing what your permissions let you do.")]}]
+    else:
+        blocks = intro + admin_card_blocks(build_admin_cards_context(admin), "home")
     result = slack_client.send_dm(
         token, org, slack_user_id,
         text=f"{caller.full_name} has added you as an AIDL admin for {org.name}",
-        blocks=[{"type": "section", "text": _md(f"*{caller.full_name}* has added you as an AIDL admin for *{org.name}*.")}]
-        + admin_card_blocks(build_admin_cards_context(admin), "home"),
+        blocks=blocks,
     )
     _warn_if_dm_failed(token, org, caller, admin, [result])
 

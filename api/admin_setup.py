@@ -212,7 +212,9 @@ def reset(org: Organization, *, answers: bool = True, fresh: bool = False) -> di
         PackageDelivery.objects.filter(organization_id=str(org.pk)).delete()
         result["licences_removed"] = licensed.update(licence_issued=False, licence_number="", licence_issued_at=None,
                                                      licence_expires_at=None)
-    org.setup_state = ""
+    # Not setup progress: whether the Slack app's Home tab is in use here, and the app's id (admin_home.py).
+    keep = {k: v for k, v in state(org).items() if k in ("app_home_at", "slack_app_id", "home_users")}
+    org.setup_state = json.dumps(keep) if keep else ""
     fields = ["setup_state", "updated_at"]
     if answers:
         org.policy_answers = ""

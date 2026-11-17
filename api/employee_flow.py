@@ -459,6 +459,10 @@ def advance(org: Organization, member: AIDLUser, action_id: str, value: str, cha
         send_to(org, member)  # approved awareness cards from the AI policy
     if result == "no_seats":
         _tell_admin_no_seat(org, member)
+    if result in ("issued", "no_seats"):
+        from .admin_home import refresh
+
+        refresh(org)  # licences issued / waiting for a seat, on the Home tab and the channel post
 
 
 def _tell_admin_no_seat(org: Organization, member: AIDLUser) -> None:

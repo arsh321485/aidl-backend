@@ -24,7 +24,7 @@ from django.views.decorators.http import require_POST
 from .auth_jwt import create_access_token
 from .models import AIDLUser
 from . import billing, slack_promo
-from . import (admin_setup, app_requests, aup_slack, aup_store, aup_upload, aup_upload_slack, card_ack, card_approval,
+from . import (admin_home, admin_setup, app_requests, aup_slack, aup_store, aup_upload, aup_upload_slack, card_ack, card_approval,
                card_review_slack, employee_flow, policy_cards_slack, slack_client, slack_modals)
 from .org_service import get_organization_for_user
 from .slack_blocks import admin_card_blocks, admin_card_text, highway_code_full_view, publish_admin_center, rating_blocks
@@ -46,9 +46,35 @@ def verify_slack_signature(request) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+def _from_home(payload: dict) -> dict:
+    """A click on AIDL's Home tab. It has no channel and no response_url, and its "view" is the Home page,
+    not a popup. Without that view the handlers open popups with views.open (not views.push), and replies
+    that would have been private messages in the channel go to the admin by direct message instead."""
+    team = (payload.get("team") or {}).get("id") or (payload.get("user") or {}).get("team_id", "")
+    user = (payload.get("user") or {}).get("id", "")
+    out = {k: v for k, v in payload.items() if k != "view"}
+    out["channel"] = {"id": admin_home.HOME_CHANNEL}
+    out["response_url"] = f"{admin_home.DM_REPLY}{team}|{user}"
+    return out
+
+
+def _dm_reply(target: str, body: dict) -> None:
+    from .models import Organization
+
+    team, _, user = target[len(admin_home.DM_REPLY):].partition("|")
+    org = Organization.objects.filter(slack_team_id=team, is_active=True).first() if team else None
+    if org is None or not user:
+        return
+    blocks = body.get("blocks") or [{"type": "section", "text": {"type": "mrkdwn", "text": body.get("text", "")}}]
+    slack_client.send_dm(slack_client.bot_token(org), org, user, text=body.get("text", "AIDL"), blocks=blocks)
+
+
 def _post_reply(response_url: str, body: dict) -> None:
     from .slack_blocks import has_images, text_fallback
 
+    if response_url.startswith(admin_home.DM_REPLY):
+        _dm_reply(response_url, body)
+        return
     try:
         resp = requests.post(response_url, json=body, timeout=10)
         failed = resp.status_code != 200 or '"ok":false' in resp.text.replace(" ", "")
@@ -158,7 +184,11 @@ def _notify(org, channel_id: str, slack_user: str, text: str, admin: AIDLUser) -
     """After a modal is submitted: a private confirmation in the channel and a
     refreshed Home card (the numbers changed)."""
     token = slack_client.bot_token(org)
-    if channel_id:
+    if channel_id == admin_home.HOME_CHANNEL:  # opened from the Home tab, which redraws itself
+        if text:
+            slack_client.send_dm(token, org, slack_user, text=text,
+                                 blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": text}}])
+    elif channel_id:
         slack_client.slack_api("chat.postEphemeral", token, json={"channel": channel_id, "user": slack_user, "text": text})
     publish_admin_center(org, admin)
 
@@ -448,6 +478,10 @@ def _acknowledge(org, member, payload: dict, item: str) -> None:
                 {"type": "section", "text": {"type": "mrkdwn", "text":
                     f"⏳ *{member.full_name or member.email}* accepted the AUP, the Highway Code and the Traffic Light Check, "
                     f"but all {user_limit(org)} licenses on your plan are used. Their license is waiting for a free seat."}}])
+    if result in ("issued", "no_seats"):
+        from .admin_home import refresh
+
+        refresh(org)
 
 
 def _remove_person(org, admin, action_id: str, user_id: str, view_id: str, meta: str) -> None:
@@ -534,8 +568,16 @@ def slack_interactions(request):
         return JsonResponse({"options": slack_modals.people_options(org, payload.get("value", "")) if org else []})
     if payload.get("type") != "block_actions":
         return HttpResponse(status=200)
+    if (payload.get("view") or {}).get("type") == "home":
+        payload = _from_home(payload)
 
     action = (payload.get("actions") or [{}])[0]
+    if action.get("action_id") == admin_home.MORE:  # the Home tab's "More" menu stands for one of the buttons
+        target, _, value = ((action.get("selected_option") or {}).get("value") or "").partition("|")
+        if not target.startswith("aidl_"):
+            return HttpResponse(status=200)
+        action = {"action_id": target, "value": value}
+        payload = {**payload, "actions": [action]}
     action_id = action.get("action_id", "")
     if action_id.startswith("aidl_link_"):
         return HttpResponse(status=200)  # plain link button — Slack opened the URL
@@ -1011,9 +1053,12 @@ def _admin_action_body(request, payload: dict, action: dict, action_id: str, tab
         # Center never update, so point to the live message instead (and
         # replace a stale copy if the click came from one).
         publish_admin_center(org, user)
+        if org is not None and admin_home.home_confirmed(org):
+            where = "on the AIDL app's *Home* tab (AIDL in your Slack sidebar → Home)"
+        else:
+            where = "the *AIDL Admin Center* message from AIDL in this channel"
         _reply(response_url, replace=is_ephemeral,
-               text="👆 Your Admin Center is the *AIDL Admin Center* message from AIDL in this channel — "
-                    "it's kept up to date as you complete each step.")
+               text=f"👆 Your Admin Center is {where} — it's kept up to date as you complete each step.")
         return HttpResponse(status=200)
     blocks = admin_card_blocks(d, tab, open_url=_private_link(request, user, tab))
     _reply(response_url, text=admin_card_text(d), blocks=blocks, replace=is_ephemeral)
