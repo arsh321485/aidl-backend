@@ -76,6 +76,22 @@ class GoogleClassroomSignIn(TestCase):
         self.assertEqual((org.name, org.owner_user_id), ("school.edu", str(user.pk)))
         self.assertEqual(GoogleWorkspace.objects.get(key="domain:school.edu").organization_id, str(org.pk))
 
+    def test_admin_gets_the_admin_center_link_and_is_signed_in_to_it(self):
+        r = self._sign_in()
+        self.assertEqual(r["admin_center_url"], "https://backend.test/api/google-classroom/admin/")
+        self.assertEqual(r["open_admin_center"], "1")
+        # The same browser opens the Admin Center without signing in again.
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "Admin Center")
+
+    def test_learner_gets_no_admin_center_link(self):
+        self._sign_in()
+        r = self._sign_in(sub="222", email="ravi@school.edu")
+        self.assertNotIn("admin_center_url", r)
+
+    def test_individual_gets_no_admin_center_link(self):
+        r = self._sign_in(enroll_as="individual")
+        self.assertNotIn("admin_center_url", r)
+
     def test_same_domain_joins_the_same_school_as_learner(self):
         self._sign_in()
         r = self._sign_in(sub="222", email="ravi@school.edu")
