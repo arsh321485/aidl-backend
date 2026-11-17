@@ -1,0 +1,235 @@
+"""Google Classroom sign-up / sign-in (step 1) and classes + students (step 2).
+
+Step 1
+GET /api/google-classroom/login/?enroll_as=organization|individual
+    → {"auth_url": ..., "mode": "google_classroom"}   (frontend sends the browser there)
+    Add &redirect=1 to be sent straight to Google (handy for testing in a browser).
+GET /api/google-classroom/callback/
+    Google sends the browser back here. We sign the person in and redirect to
+    the frontend's AUTH_SUCCESS_REDIRECT (/auth/callback) with the same token
+    params as Slack / Teams (access_token, refresh_token, ..., mode=google_classroom),
+    or with ?error=&error_description=.
+    One button does both sign-up and sign-in: a new Google account is created,
+    a known one just signs in.
+
+Step 2 (AIDL admins = teachers)
+GET  /api/google-classroom/classes/           page: the teacher's classes and students
+GET  /api/google-classroom/classes/connect/   → Google, asking for the Classroom permissions
+POST /api/google-classroom/classes/sync/      fetch again (page button)
+POST /api/google-classroom/classes/signout/
+GET  /api/google-classroom/api/classes/       same data as JSON (Authorization: Bearer <AIDL access token>)
+POST /api/google-classroom/api/classes/sync/  fetch again, JSON
+"""
+
+from __future__ import annotations
+
+import logging
+from urllib.parse import urlencode
+
+from django.conf import settings
+from django.http import HttpResponseRedirect, JsonResponse
+from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET, require_POST
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from api.auth_jwt import create_access_token, create_refresh_token
+from api.auth_views import JWTAuthentication
+from api.microsoft_auth import consume_oauth_state_with_payload, create_oauth_state
+from api.models import AIDLUser
+
+from . import classes, google_oauth, session
+from .accounts import find_user, sign_in
+from .google_oauth import GoogleError
+
+logger = logging.getLogger(__name__)
+
+MODE = "google_classroom"
+CLASSES = "google_classroom:classes"  # the OAuth state payload of a step-2 connect
+
+
+def _enroll_as(value: str | None) -> str:
+    value = (value or "").strip().lower()
+    return value if value in {"individual", "organization"} else "organization"
+
+
+# --- step 1: sign up / sign in ---
+
+@require_GET
+def login(request):
+    if not google_oauth.configured():
+        return JsonResponse({"error": "google_not_configured",
+                             "message": "Google Classroom sign-in isn't set up on the server yet "
+                                        "(GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)."}, status=503)
+    enroll_as = _enroll_as(request.GET.get("enroll_as"))
+    state = create_oauth_state(enroll_as, payload=MODE)
+    url = google_oauth.auth_url(state)
+    if request.GET.get("redirect") == "1":
+        return HttpResponseRedirect(url)
+    return JsonResponse({"auth_url": url, "state": state, "enroll_as": enroll_as, "mode": MODE})
+
+
+@require_GET
+def callback(request):
+    """Google's one redirect URI, for both sign-in and connecting classes."""
+    enroll_as, payload, state_error = consume_oauth_state_with_payload(request.GET.get("state", ""))
+    for_classes = payload == CLASSES
+    fail = _classes_error if for_classes else _error
+
+    if request.GET.get("error"):
+        return fail(request, request.GET["error"], "Google sign-in was cancelled.")
+    code = request.GET.get("code")
+    if not code:
+        return fail(request, "code_missing", "Google did not return a sign-in code.")
+    if state_error or payload not in (MODE, CLASSES):  # unknown, expired, reused, or another platform's state
+        return fail(request, state_error or "invalid_state", "Your sign-in session expired. Please try again.")
+    if not google_oauth.configured():
+        return fail(request, "google_not_configured", "Google Classroom sign-in isn't set up on the server yet.")
+
+    try:
+        if for_classes:
+            return _connect_classes(request, code)
+        profile = google_oauth.verify_id_token(google_oauth.exchange_code(code))
+        user, _org = sign_in(profile, _enroll_as(enroll_as))
+    except GoogleError as exc:
+        return fail(request, exc.code, str(exc))
+    return _redirect(user)
+
+
+def _redirect(user: AIDLUser):
+    query = {
+        "access_token": create_access_token(user),
+        "refresh_token": create_refresh_token(user),
+        "mode": MODE,
+        "enroll_as": user.enroll_as,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+    }
+    return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
+
+
+def _error(request, code: str, description: str):
+    logger.info("google classroom sign-in failed: %s", code)
+    query = {"mode": MODE, "error": code, "error_description": description}
+    return HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
+
+
+# --- step 2: classes + students ---
+
+def _teacher_refusal(user: AIDLUser | None) -> str:
+    """"" when this person may connect / see Google classes, else why not."""
+    if user is None:
+        return ("You don't have an AIDL account yet. Sign up first with “Add to Google Classroom” "
+                "on the AIDL website, then come back here.")
+    if not user.is_active:
+        return "Your AIDL account is switched off. Ask your AIDL admin."
+    if user.role != AIDLUser.Role.ADMIN or not user.organization_id:
+        return "Only AIDL admins (teachers) can connect Google Classroom classes."
+    return ""
+
+
+def _connect_classes(request, code: str):
+    tokens = google_oauth.exchange_tokens(code)
+    profile = google_oauth.verify_id_token(tokens["id_token"])
+    user = find_user(profile)
+    refusal = _teacher_refusal(user)
+    if refusal:
+        return _message(request, "Can't connect Google Classroom", refusal, 403)
+    count = classes.connect(user, profile, tokens)
+    logger.info("google classroom connected: user %s, %s classes", user.pk, count)
+    response = _back(f"Google Classroom connected. Found {count} class{'es' if count != 1 else ''}.")
+    return session.set_session(request, response, user)
+
+
+def _classes_error(request, code: str, description: str):
+    logger.info("google classroom connect failed: %s", code)
+    return _message(request, "Can't connect Google Classroom", description, 400)
+
+
+def _message(request, title: str, text: str, status: int = 200):
+    return render(request, "google_classroom/message.html", {
+        "title": title, "text": text, "user": None, "org": None,
+        "connect_url": reverse("google-classroom-classes-connect"),
+    }, status=status)
+
+
+def _back(notice: str):
+    return redirect(f"{reverse('google-classroom-classes')}?{urlencode({'notice': notice})}")
+
+
+@never_cache
+@require_GET
+def classes_page(request):
+    user = session.signed_in(request)
+    notice = request.GET.get("notice", "")[:300]
+    if user is None:
+        return render(request, "google_classroom/classes.html", {
+            "user": None, "org": None, "person": None, "notice": notice,
+            "connect_url": reverse("google-classroom-classes-connect")})
+    refusal = _teacher_refusal(user)
+    if refusal:
+        return session.clear_session(_message(request, "Google Classroom", refusal, 403))
+    return render(request, "google_classroom/classes.html", {
+        "user": None, "org": None, "person": user, "notice": notice, "data": classes.for_teacher(user),
+        "connect_url": reverse("google-classroom-classes-connect")})
+
+
+@require_GET
+def classes_connect(request):
+    if not google_oauth.configured():
+        return _message(request, "Can't connect Google Classroom",
+                        "Google Classroom isn't set up on the server yet (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).",
+                        503)
+    state = create_oauth_state("organization", payload=CLASSES)
+    user = session.signed_in(request)
+    return HttpResponseRedirect(google_oauth.auth_url(state, classroom=True, login_hint=user.email if user else ""))
+
+
+@require_POST
+def classes_sync(request):
+    user = session.signed_in(request)
+    refusal = _teacher_refusal(user)
+    if refusal:
+        return _message(request, "Google Classroom", refusal, 403)
+    try:
+        count = classes.sync(user)
+    except GoogleError as exc:
+        return _back(str(exc))
+    return _back(f"Up to date. {count} class{'es' if count != 1 else ''}.")
+
+
+@require_POST
+def classes_signout(request):
+    return session.clear_session(redirect("google-classroom-classes"))
+
+
+# --- step 2, JSON for the frontend (AIDL access token from sign-in) ---
+
+@api_view(["GET"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def api_classes(request):
+    refusal = _teacher_refusal(request.user)
+    if refusal:
+        return Response({"error": "not_allowed", "message": refusal}, status=403)
+    data = classes.for_teacher(request.user)
+    data["connect_url"] = request.build_absolute_uri(reverse("google-classroom-classes-connect"))
+    return Response(data)
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def api_classes_sync(request):
+    refusal = _teacher_refusal(request.user)
+    if refusal:
+        return Response({"error": "not_allowed", "message": refusal}, status=403)
+    try:
+        classes.sync(request.user)
+    except GoogleError as exc:
+        return Response({"error": exc.code, "message": str(exc)}, status=409 if exc.code == "reconnect" else 502)
+    return Response(classes.for_teacher(request.user))

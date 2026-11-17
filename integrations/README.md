@@ -83,3 +83,72 @@ sign-in; the gradebook step will need it.
 ```powershell
 python manage.py test integrations.moodle
 ```
+
+---
+
+# Google Classroom (Google Workspace for Education)
+
+Not LTI: Google Classroom uses **Sign in with Google** (OAuth 2.0 / OpenID Connect).
+Everything is in `integrations/google_classroom/`.
+
+| Step | What | Status |
+|---|---|---|
+| 1 | Sign up / sign in with Google ("Add to Google Classroom") | ✅ done |
+| 2 | Read the teacher's classes and students (Classroom API) | ✅ done |
+| 3 | Turn class students into AIDL learners (seats, cards, licence) | next |
+
+## Sign-up / sign-in rules
+
+- One button does both: a new Google account signs up, a known one signs in.
+- One school = one AIDL organization, found by the Google Workspace domain
+  (`hd`, verified by Google). The first person from `school.edu` creates it and
+  becomes owner admin; everyone else from `school.edu` joins as a learner.
+- A personal Gmail account (no domain) gets its own one-person organization.
+- `enroll_as=individual` makes a personal AIDL account with no organization.
+- An existing AIDL account with the same **verified** email is reused.
+
+## Endpoints
+
+| | |
+|---|---|
+| `GET /api/google-classroom/login/?enroll_as=organization` | `{auth_url}`; add `&redirect=1` to go straight to Google |
+| `GET /api/google-classroom/callback/` | Google returns here → frontend `/auth/callback?access_token=…&mode=google_classroom` (or `?error=…`) |
+| `GET /api/google-classroom/classes/` | Step 2 page: an admin's classes + students (Connect / Refresh buttons) |
+| `GET /api/google-classroom/classes/connect/` | → Google, asking for the read-only Classroom permissions (offline) |
+| `GET /api/google-classroom/api/classes/` | same as JSON, `Authorization: Bearer <AIDL access token>` |
+| `POST /api/google-classroom/api/classes/sync/` | fetch from Google again, JSON |
+
+Step 2 is for AIDL admins (teachers) only. They allow three read-only
+permissions once: classes, class rosters, students' emails. The refresh token
+is stored encrypted (`GoogleCredential`), so **Refresh** works without Google
+asking again. Classes and students are copied into `GoogleCourse` /
+`GoogleStudent`; they are not AIDL users yet.
+
+## Set up Google (once)
+
+1. https://console.cloud.google.com → new project (e.g. "AIDL").
+2. **APIs & Services → OAuth consent screen**: User type *External*, app name AIDL,
+   scopes `openid`, `email`, `profile`. While in *Testing*, add your test Google
+   accounts under *Test users*.
+3. **Credentials → Create credentials → OAuth client ID → Web application**.
+   Authorized redirect URI: `<BACKEND>/api/google-classroom/callback/`
+   (local: `http://localhost:8000/api/google-classroom/callback/`).
+4. Put in `.env`:
+
+   ```
+   GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   # optional, default <BACKEND_URL>/api/google-classroom/callback/
+   GOOGLE_CLASSROOM_REDIRECT_URI=http://localhost:8000/api/google-classroom/callback/
+   ```
+
+5. Step 2: **APIs & Services → Library → Google Classroom API → Enable**, and in
+   **Google Auth Platform → Data access → Add or remove scopes** add
+   `classroom.courses.readonly`, `classroom.rosters.readonly`, `classroom.profile.emails`.
+6. `python manage.py migrate google_classroom`
+
+## Tests
+
+```powershell
+python manage.py test integrations.google_classroom
+```

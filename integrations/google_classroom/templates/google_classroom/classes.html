@@ -1,0 +1,62 @@
+{% extends "teams_app/base.html" %}
+{% block title %}AIDL · Google Classroom{% endblock %}
+{% block body %}
+{% if not person %}
+<section class="box">
+  <h1>Your Google Classroom classes</h1>
+  <p class="muted" style="margin-top:8px">For AIDL admins (teachers). Sign up on the AIDL website with
+    “Add to Google Classroom” first.</p>
+  <p>Connect your Google account so AIDL can read the classes you teach and their students.
+    AIDL only reads; it never changes anything in Google Classroom.</p>
+  <p style="margin-top:14px"><a class="btn go" href="{{ connect_url }}">Connect Google Classroom</a></p>
+</section>
+{% else %}
+<section class="box">
+  <div class="spread">
+    <div>
+      <h1>{{ person.first_name|default:person.full_name|default:"Your" }}{% if person.first_name or person.full_name %}'s{% endif %} classes</h1>
+      <p class="muted" style="margin-top:8px">{{ person.organization_name }}{% if data.google_email %} · Google: {{ data.google_email }}{% endif %}{% if data.synced_at %} · Updated {{ data.synced_at|date:"j M Y, H:i" }}{% endif %}</p>
+    </div>
+    <div class="row" style="flex:0 0 auto">
+      {% if data.connected %}
+      <form method="post" action="{% url 'google-classroom-classes-sync' %}">{% csrf_token %}<button class="btn go sm">↻ Refresh</button></form>
+      {% else %}
+      <a class="btn go sm" href="{{ connect_url }}">Connect Google Classroom</a>
+      {% endif %}
+      <form method="post" action="{% url 'google-classroom-classes-signout' %}">{% csrf_token %}<button class="btn sm">Sign out</button></form>
+    </div>
+  </div>
+</section>
+
+{% for c in data.classes %}
+<section class="box flat">
+  <div class="spread">
+    <div>
+      <h2>{{ c.name }}</h2>
+      <p class="muted">{% if c.section %}{{ c.section }} · {% endif %}{% if c.room %}Room {{ c.room }} · {% endif %}{{ c.student_count }} student{{ c.student_count|pluralize }}</p>
+    </div>
+    {% if c.link %}<a class="btn sm" href="{{ c.link }}" target="_blank" rel="noopener">Open in Classroom ↗</a>{% endif %}
+  </div>
+  {% if c.students %}
+  <details style="margin-top:8px"{% if forloop.first %} open{% endif %}>
+    <summary>Students</summary>
+    <div class="scroll"><table>
+      <thead><tr><th>Name</th><th>Email</th></tr></thead>
+      <tbody>{% for s in c.students %}<tr><td>{{ s.name|default:"—" }}</td><td>{{ s.email|default:"—" }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  {% else %}
+  <p class="muted" style="margin-top:8px">No students in this class yet.</p>
+  {% endif %}
+</section>
+{% empty %}
+<section class="box flat">
+  <h2>No classes found</h2>
+  <p class="muted">AIDL shows the active classes where you are a teacher. Create a class at
+    <a href="https://classroom.google.com" target="_blank" rel="noopener">classroom.google.com</a>, then press Refresh.</p>
+</section>
+{% endfor %}
+
+<p class="muted">Students are listed from Google Classroom only. Adding them to the AIDL programme is the next step.</p>
+{% endif %}
+{% endblock %}
