@@ -12,6 +12,7 @@ BASE_DIR = Path(settings.BASE_DIR)
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("api.urls")),
+    path("api/google-chat/", include("google_chat.urls")),
     path(
         "teams/manifest.json",
         serve,
