@@ -97,7 +97,8 @@ Everything is in `integrations/google_classroom/`.
 | 2 | Read the teacher's classes and students (Classroom API) | ✅ done |
 | 3 | Teacher chooses classes → their students become AIDL learners | ✅ done |
 | 4 | Learner flow for Google students (cards → licence) from a shared link | ✅ done |
-| 5 | Admin Center for Google Classroom admins | next |
+| 5 | Admin Center, core: setup steps, team, admins, plan, coverage | ✅ done |
+| 6 | Admin Center, policy: policy cards, own AUP, regulators, apps, logo | next |
 
 ## Sign-up / sign-in rules
 
@@ -124,6 +125,10 @@ Everything is in `integrations/google_classroom/`.
 | `POST /api/google-classroom/classes/setup/` | step 4: approve the 2 starter cards / start the programme |
 | `GET /api/google-classroom/learn/` | step 4: the link teachers post in Classroom → Google sign-in → learner flow |
 | `POST /api/google-classroom/learn/action/` | a learner's button |
+| `GET /api/google-classroom/admin/` | step 5: Admin Center home (plan, 5 setup steps, student link) |
+| `GET /api/google-classroom/admin/team/` | learners' progress per class; remove / add back |
+| `GET /api/google-classroom/admin/admins/` | add / remove admins and their permissions |
+| `GET /api/google-classroom/admin/plans/` · `admin/coverage.csv` | upgrade (website plans page) · coverage export |
 
 Step 2 is for AIDL admins (teachers) only. They allow three read-only
 permissions once: classes, class rosters, students' emails. The refresh token
@@ -147,6 +152,13 @@ signs in with Google (identity only, no Classroom permissions) and gets the
 same flow as Moodle (policy cards → Traffic Light → Highway Code → licence,
 `integrations/moodle/flow.py`). Google accounts that aren't in a chosen class
 are turned away.
+
+Step 5 (Admin Center, core): `admin_center.py` + `admin_views.py`, same rules as
+Slack / Teams through `api/` (`admin_perms`, `licensing`, `plans`). Admins who
+open the student link land here. The team is counted with
+`licensing.learners()`, because `admin_setup.summary()` only counts Slack people.
+Removing a learner sets the shared `slack_left_at` field (licence suspended;
+Refresh won't add them back); "Add back" clears it if there's a seat.
 
 ## Set up Google (once)
 

@@ -11,6 +11,7 @@
   <p style="margin-top:14px"><a class="btn go" href="{{ connect_url }}">Connect Google Classroom</a></p>
 </section>
 {% else %}
+{% include "google_classroom/_nav.html" %}
 <section class="box">
   <div class="spread">
     <div>
@@ -23,42 +24,7 @@
       {% else %}
       <a class="btn go sm" href="{{ connect_url }}">Connect Google Classroom</a>
       {% endif %}
-      <form method="post" action="{% url 'google-classroom-classes-signout' %}">{% csrf_token %}<button class="btn sm">Sign out</button></form>
     </div>
-  </div>
-</section>
-
-<section class="box{% if started %} done{% endif %}">
-  <h2>Get your learners started</h2>
-  <p class="muted">Learners can't start until both cards are approved and you start the programme.</p>
-  <div class="list">
-    {% for c in onboarding %}
-    <div class="spread">
-      <div><b>{{ c.label }}</b><br><span class="muted">{% if c.status == "approved" %}✅ Approved{% if c.by %} by {{ c.by }}{% endif %}{% else %}Waiting for approval{% endif %}</span></div>
-      {% if c.status != "approved" %}
-      <form method="post" action="{% url 'google-classroom-classes-setup' %}">{% csrf_token %}
-        <input type="hidden" name="action" value="approve"><input type="hidden" name="item" value="{{ c.item }}">
-        <button class="btn ok sm">Approve</button>
-      </form>
-      {% endif %}
-    </div>
-    {% endfor %}
-    <div class="spread">
-      <div><b>🚀 Start the programme</b><br><span class="muted">{% if started %}✅ Started{% elif ready %}Ready to start{% else %}Approve both cards first{% endif %}</span></div>
-      {% if not started %}
-      <form method="post" action="{% url 'google-classroom-classes-setup' %}">{% csrf_token %}
-        <input type="hidden" name="action" value="start">
-        <button class="btn go sm"{% if not ready %} disabled{% endif %}>Start</button>
-      </form>
-      {% endif %}
-    </div>
-    <div>
-      <b>🔗 Link for your students</b>
-      <p class="muted" style="margin:4px 0 6px">Post it in your Google Classroom class (Classwork → Create → Material → Link).
-        Students sign in with Google and get their cards and licence.</p>
-      <input type="text" readonly value="{{ learn_url }}" onclick="this.select()" aria-label="Link for your students">
-    </div>
-    <p class="muted"><b>{{ licensed_count }}</b> of <b>{{ learner_count }}</b> learner{{ learner_count|pluralize }} licensed.</p>
   </div>
 </section>
 
@@ -87,7 +53,7 @@
     <div class="scroll"><table>
       <thead><tr><th>Name</th><th>Email</th><th>AIDL</th></tr></thead>
       <tbody>{% for s in c.students %}<tr><td>{{ s.name|default:"—" }}</td><td>{{ s.email|default:"—" }}</td>
-        <td>{% if s.aidl_status == "added" %}✅ Learner{% elif s.aidl_status == "no_seat" %}⚠️ No free seat{% elif s.aidl_status == "other_org" %}In another AIDL organization{% elif s.aidl_status == "inactive" %}Switched off{% elif c.in_programme %}—{% else %}<span class="muted">Not added</span>{% endif %}</td></tr>{% endfor %}</tbody>
+        <td>{% if s.aidl_status == "added" %}✅ Learner{% elif s.aidl_status == "no_seat" %}⚠️ No free seat{% elif s.aidl_status == "other_org" %}In another AIDL organization{% elif s.aidl_status == "removed" %}Removed by an admin{% elif s.aidl_status == "inactive" %}Switched off{% elif c.in_programme %}—{% else %}<span class="muted">Not added</span>{% endif %}</td></tr>{% endfor %}</tbody>
     </table></div>
   </details>
   {% else %}

@@ -188,12 +188,9 @@ def classes_page(request):
     refusal = _teacher_refusal(user)
     if refusal:
         return session.clear_session(_message(request, "Google Classroom", refusal, 403))
-    org = get_organization_for_user(user)
     return render(request, "google_classroom/classes.html", {
-        "user": None, "org": None, "person": user, "notice": notice, "data": classes.for_teacher(user),
-        "connect_url": reverse("google-classroom-classes-connect"),
-        "learn_url": request.build_absolute_uri(reverse("google-classroom-learn")),
-        **(flow.teacher_context(org) if org else {})})
+        "user": None, "org": get_organization_for_user(user), "person": user, "notice": notice,
+        "data": classes.for_teacher(user), "connect_url": reverse("google-classroom-classes-connect"), "tab": "classes"})
 
 
 @require_GET
@@ -245,6 +242,9 @@ def classes_setup(request):
     org = get_organization_for_user(user)
     if org is None:
         return _message(request, "Google Classroom", "Your AIDL organization is switched off.", 403)
+    from .admin_center import can
+    if not can(org, user)["cards"]:
+        return _back("Your admin permissions don't include approving cards.")
     return _back(flow.teacher_action(user, org, request.POST) or "Nothing changed.")
 
 
@@ -322,7 +322,7 @@ def _learner_signed_in(request, code: str):
     if not user.is_active:
         return _message(request, "Can't open AIDL", "Your AIDL account is switched off. Ask your teacher.", 403,
                         retry_url=retry)
-    target = reverse("google-classroom-classes") if user.role == AIDLUser.Role.ADMIN else retry
+    target = reverse("google-classroom-admin") if user.role == AIDLUser.Role.ADMIN else retry
     return session.set_session(request, redirect(target), user)
 
 
@@ -338,7 +338,7 @@ def learn(request):
         state = create_oauth_state("organization", payload=LEARN)
         return HttpResponseRedirect(google_oauth.auth_url(state))
     if user.role == AIDLUser.Role.ADMIN:
-        return redirect("google-classroom-classes")
+        return redirect("google-classroom-admin")
     org = get_organization_for_user(user)
     if org is None:
         return session.clear_session(_message(request, "You're not in the AIDL programme",

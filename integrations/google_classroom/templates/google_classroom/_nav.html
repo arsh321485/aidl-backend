@@ -1,0 +1,7 @@
+<nav class="row" aria-label="Admin Center" style="font-size:14px">
+  <a class="btn sm{% if tab == 'home' %} go{% endif %}" href="{% url 'google-classroom-admin' %}">🏠 Admin Center</a>
+  <a class="btn sm{% if tab == 'classes' %} go{% endif %}" href="{% url 'google-classroom-classes' %}">🏫 Classes</a>
+  <a class="btn sm{% if tab == 'team' %} go{% endif %}" href="{% url 'google-classroom-admin-team' %}">👥 Team</a>
+  <a class="btn sm{% if tab == 'admins' %} go{% endif %}" href="{% url 'google-classroom-admin-admins' %}">🧑‍💼 Admins</a>
+  <form method="post" action="{% url 'google-classroom-classes-signout' %}" style="margin-left:auto">{% csrf_token %}<button class="btn sm">Sign out</button></form>
+</nav>

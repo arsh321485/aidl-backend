@@ -37,6 +37,7 @@ ADDED = "added"
 NO_SEAT = "no_seat"
 OTHER_ORG = "other_org"
 INACTIVE = "inactive"
+REMOVED = "removed"  # an admin took them out of the programme (Admin Center)
 
 
 def connect(user: AIDLUser, profile: GoogleProfile, tokens: dict) -> int:
@@ -155,7 +156,7 @@ def _enrol(org: Organization, student: GoogleStudent) -> tuple[str, AIDLUser | N
         if not user.is_active:
             return INACTIVE, user
         if user.organization_id == str(org.pk):
-            return ADDED, user
+            return (REMOVED if user.slack_left_at else ADDED), user
         if user.organization_id:
             return OTHER_ORG, user
         if not can_join(org, user):
@@ -193,6 +194,8 @@ def summary(counts: dict) -> str:
         parts.append(f"{counts[NO_SEAT]} not added: no free seats on your plan")
     if counts.get(OTHER_ORG):
         parts.append(f"{counts[OTHER_ORG]} already in another AIDL organization")
+    if counts.get(REMOVED):
+        parts.append(f"{counts[REMOVED]} removed from the programme by an admin")
     if counts.get(INACTIVE):
         parts.append(f"{counts[INACTIVE]} switched off in AIDL")
     return ", ".join(parts) or "No students in this class yet"

@@ -1,0 +1,67 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Admins · AIDL{% endblock %}
+{% block body %}
+{% with tab="admins" %}{% include "google_classroom/_nav.html" %}{% endwith %}
+
+<section class="box">
+  <h1>Admins</h1>
+  <p class="muted" style="margin-top:8px">{{ rows|length }} of {{ seat_limit }} admins. The master admin set AIDL up and always has every permission.
+    You can only give permissions you have yourself.</p>
+</section>
+
+{% for a in rows %}
+<section class="box flat">
+  <div class="spread">
+    <div>
+      <h2>{{ a.person.full_name|default:a.person.email }}{% if a.me %} <span class="muted">(you)</span>{% endif %}</h2>
+      <p class="muted">{{ a.person.email }}{% if a.labels %} · {{ a.labels|join:" · " }}{% elif not a.master %} · No extra permissions{% endif %}</p>
+    </div>
+    {% if can.admins and not a.master and not a.me %}
+    <form method="post" action="{% url 'google-classroom-admin-admins-action' %}">{% csrf_token %}
+      <input type="hidden" name="action" value="remove"><input type="hidden" name="user_id" value="{{ a.person.pk }}">
+      <button class="btn no sm">Remove admin</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if can.admins and not a.master %}
+  <details style="margin-top:8px"><summary>Permissions</summary>
+    <form method="post" action="{% url 'google-classroom-admin-admins-action' %}" style="margin-top:8px">{% csrf_token %}
+      <input type="hidden" name="action" value="perms"><input type="hidden" name="user_id" value="{{ a.person.pk }}">
+      {% for p in perms %}
+      <label class="check"><input type="checkbox" name="perm" value="{{ p.key }}"{% for k, v in a.perms.items %}{% if k == p.key and v %} checked{% endif %}{% endfor %}{% if not p.allowed %} disabled{% endif %}>
+        <span><b>{{ p.label }}</b> · <span class="muted">{{ p.desc }}</span></span></label>
+      {% endfor %}
+      <button class="btn sm">Save permissions</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+{% endfor %}
+
+<section class="box flat">
+  <h2>Add an admin</h2>
+  {% if not can.admins %}
+  <p class="muted">Only the master admin, or admins allowed to manage admins, can add admins.</p>
+  {% elif full %}
+  <p class="muted">You have {{ seat_limit }} admins, the most your plan allows. Remove an admin first.</p>
+  {% elif not candidates %}
+  <p class="muted">Admins are picked from the people in your programme. Another teacher joins when they sign in with Google from your school, or add a class first.</p>
+  {% else %}
+  <form method="post" action="{% url 'google-classroom-admin-admins-action' %}">{% csrf_token %}
+    <input type="hidden" name="action" value="add">
+    <div class="field">
+      <label for="new-admin">Person</label>
+      <select id="new-admin" name="user_id" required>
+        <option value="">Choose someone…</option>
+        {% for c in candidates %}<option value="{{ c.pk }}">{{ c.full_name|default:c.email }}{% if c.email %} · {{ c.email }}{% endif %}</option>{% endfor %}
+      </select>
+    </div>
+    {% for p in perms %}
+    <label class="check"><input type="checkbox" name="perm" value="{{ p.key }}"{% if not p.allowed %} disabled{% endif %}>
+      <span><b>{{ p.label }}</b> · <span class="muted">{{ p.desc }}</span></span></label>
+    {% endfor %}
+    <button class="btn go">Make admin</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

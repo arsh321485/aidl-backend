@@ -438,10 +438,10 @@ class GoogleClassroomLearners(GoogleClassroomProgramme):
             return self.client.get("/api/google-classroom/callback/", {"code": "abc", "state": q["state"]},
                                    follow=True)
 
-    def test_teacher_page_shows_setup_and_share_link(self, _warm):
+    def test_admin_center_shows_setup_and_share_link(self, _warm):
         self._class_in_aidl()
-        page = self.client.get("/api/google-classroom/classes/")
-        self.assertContains(page, "Get your learners started")
+        page = self.client.get("/api/google-classroom/admin/")
+        self.assertContains(page, "4 · Card approval")
         self.assertContains(page, "/api/google-classroom/learn/")
 
     def test_start_needs_both_cards_approved(self, _warm):
@@ -495,11 +495,174 @@ class GoogleClassroomLearners(GoogleClassroomProgramme):
         resp = self.client.post("/api/google-classroom/classes/setup/", {"action": "start"})
         self.assertContains(resp, "Only AIDL admins", status_code=403)
 
-    def test_teacher_opening_the_link_goes_to_classes(self, _warm):
+    def test_teacher_opening_the_link_goes_to_the_admin_center(self, _warm):
         self._class_in_aidl()
         resp = self._open_link()  # sub 111 = the teacher
-        self.assertContains(resp, "Get your learners started")
+        self.assertContains(resp, "Admin Center")
+        self.assertContains(resp, "5 · Start the programme")
 
 
 for _name in [n for n in dir(GoogleClassroomProgramme) if n.startswith("test_")]:
     setattr(GoogleClassroomLearners, _name, None)
+
+
+# --- step 5: Admin Center (core) ---
+
+class GoogleClassroomAdminCenter(GoogleClassroomLearners):
+    def setUp(self):
+        super().setUp()
+        warm = mock.patch("api.card_image.warm")  # in setUp: a class decorator would patch the inherited tests twice
+        warm.start()
+        self.addCleanup(warm.stop)
+        from django.conf import settings
+        settings.PRIMARY_ADMIN_CACHE = False  # admins change within one test
+        self.addCleanup(setattr, settings, "PRIMARY_ADMIN_CACHE", True)
+
+    def _school(self):
+        """Teacher (master admin) with class c1 in AIDL: learners Ravi (s1) and Meera (s2)."""
+        self._class_in_aidl()
+        return (AIDLUser.objects.get(microsoft_id="google:111"), AIDLUser.objects.get(microsoft_id="google:s1"),
+                AIDLUser.objects.get(microsoft_id="google:s2"))
+
+    def _as(self, sub, email):
+        """Sign in to the Admin Center as this Google account (through the student link)."""
+        return self._open_link(sub=sub, email=email)
+
+    def test_home_shows_steps_plan_and_team(self):
+        self._school()
+        page = self.client.get("/api/google-classroom/admin/")
+        self.assertContains(page, "👑 Master admin")
+        self.assertContains(page, "2 learners from 1 class in AIDL")
+        self.assertContains(page, "✅ 3 · Your team")
+        self.assertContains(page, "seats")
+
+    def test_start_from_the_admin_center(self):
+        self._school()
+        for item in ("traffic_light", "highway_code"):
+            self.client.post("/api/google-classroom/admin/action/", {"action": "approve", "item": item})
+        resp = self.client.post("/api/google-classroom/admin/action/", {"action": "start"}, follow=True)
+        self.assertContains(resp, "The programme has started")
+        self.assertContains(resp, "✅ 5 · Programme started")
+
+    def test_learner_cannot_open_the_admin_center(self):
+        self._school()
+        self._as("s1", "ravi@school.edu")
+        resp = self.client.get("/api/google-classroom/admin/")
+        self.assertContains(resp, "Admins only", status_code=403)
+
+    def test_not_signed_in_goes_to_google(self):
+        resp = self.client.get("/api/google-classroom/admin/team/")
+        self.assertRedirects(resp, "/api/google-classroom/learn/", fetch_redirect_response=False)
+
+    def test_team_page_lists_learners_with_their_class(self):
+        self._school()
+        page = self.client.get("/api/google-classroom/admin/team/")
+        self.assertContains(page, "Ravi Kumar")
+        self.assertContains(page, "AI Basics")
+        self.assertContains(page, "Not started")
+
+    def test_remove_and_add_back_a_learner(self):
+        _t, ravi, _m = self._school()
+        resp = self.client.post("/api/google-classroom/admin/team/action/",
+                                {"action": "remove", "user_id": ravi.pk}, follow=True)
+        self.assertContains(resp, "Ravi Kumar was removed")
+        ravi.refresh_from_db()
+        self.assertIsNotNone(ravi.slack_left_at)
+        self.assertContains(self.client.get("/api/google-classroom/classes/"), "Removed by an admin")
+        # Refresh doesn't quietly put them back.
+        with mock.patch("integrations.google_classroom.google_oauth.refresh_access_token", return_value="a2"):
+            self.client.post("/api/google-classroom/classes/sync/")
+        ravi.refresh_from_db()
+        self.assertIsNotNone(ravi.slack_left_at)
+
+        resp = self.client.post("/api/google-classroom/admin/team/action/",
+                                {"action": "restore", "user_id": ravi.pk}, follow=True)
+        self.assertContains(resp, "back in the programme")
+        ravi.refresh_from_db()
+        self.assertIsNone(ravi.slack_left_at)
+
+    def test_removed_learner_is_blocked_in_the_flow(self):
+        _t, ravi, _m = self._school()
+        self.client.post("/api/google-classroom/admin/team/action/", {"action": "remove", "user_id": ravi.pk})
+        resp = self._as("s1", "ravi@school.edu")
+        self.assertContains(resp, "no longer in the programme")
+
+    def test_make_admin_with_permissions_then_remove(self):
+        _t, ravi, _m = self._school()
+        resp = self.client.post("/api/google-classroom/admin/admins/action/",
+                                {"action": "add", "user_id": ravi.pk, "perm": ["approve_cards"]}, follow=True)
+        self.assertContains(resp, "is now an AIDL admin")
+        ravi.refresh_from_db()
+        self.assertEqual(ravi.role, "admin")
+        self.assertTrue(ravi.perm_approve_cards)
+        self.assertFalse(ravi.perm_manage_admins)
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "✅ 2 · Admins")
+
+        resp = self.client.post("/api/google-classroom/admin/admins/action/",
+                                {"action": "remove", "user_id": ravi.pk}, follow=True)
+        self.assertContains(resp, "is no longer an admin")
+        ravi.refresh_from_db()
+        self.assertEqual(ravi.role, "learner")
+        self.assertFalse(ravi.perm_approve_cards)
+
+    def test_master_admin_cannot_be_removed(self):
+        teacher, ravi, _m = self._school()
+        self.client.post("/api/google-classroom/admin/admins/action/",
+                         {"action": "add", "user_id": ravi.pk, "perm": ["manage_admins"]})
+        self._as("s1", "ravi@school.edu")  # Ravi is an admin now
+        resp = self.client.post("/api/google-classroom/admin/admins/action/",
+                                {"action": "remove", "user_id": teacher.pk}, follow=True)
+        self.assertContains(resp, "The master admin can")
+        teacher.refresh_from_db()
+        self.assertEqual(teacher.role, "admin")
+
+    def test_admin_cannot_give_permissions_they_lack(self):
+        _t, ravi, meera = self._school()
+        self.client.post("/api/google-classroom/admin/admins/action/",
+                         {"action": "add", "user_id": ravi.pk, "perm": ["manage_admins"]})
+        self._as("s1", "ravi@school.edu")
+        self.client.post("/api/google-classroom/admin/admins/action/",
+                         {"action": "add", "user_id": meera.pk, "perm": ["manage_admins", "billing"]})
+        meera.refresh_from_db()
+        self.assertEqual(meera.role, "admin")
+        self.assertTrue(meera.perm_manage_admins)
+        self.assertFalse(meera.perm_billing)  # Ravi doesn't have billing
+
+    def test_admin_without_manage_admins_cannot_add(self):
+        _t, ravi, meera = self._school()
+        self.client.post("/api/google-classroom/admin/admins/action/", {"action": "add", "user_id": ravi.pk})
+        self._as("s1", "ravi@school.edu")
+        resp = self.client.post("/api/google-classroom/admin/admins/action/",
+                                {"action": "add", "user_id": meera.pk}, follow=True)
+        self.assertContains(resp, "Only the master admin")
+        meera.refresh_from_db()
+        self.assertEqual(meera.role, "learner")
+
+    def test_admin_seat_limit(self):
+        _t, ravi, meera = self._school()
+        Organization.objects.filter(pk=ravi.organization_id).update(admin_seat_limit=2)
+        self.client.post("/api/google-classroom/admin/admins/action/", {"action": "add", "user_id": ravi.pk})
+        resp = self.client.post("/api/google-classroom/admin/admins/action/",
+                                {"action": "add", "user_id": meera.pk}, follow=True)
+        self.assertContains(resp, "allows 2 admins")
+
+    def test_admin_without_card_permission_cannot_start(self):
+        _t, ravi, _m = self._school()
+        self.client.post("/api/google-classroom/admin/admins/action/", {"action": "add", "user_id": ravi.pk})
+        self._as("s1", "ravi@school.edu")
+        resp = self.client.post("/api/google-classroom/admin/action/",
+                                {"action": "approve", "item": "traffic_light"}, follow=True)
+        self.assertContains(resp, "don&#x27;t include approving cards")
+
+    def test_plans_link_and_coverage(self):
+        self._school()
+        resp = self.client.get("/api/google-classroom/admin/plans/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/plans?token=", resp["Location"])
+        csv = self.client.get("/api/google-classroom/admin/coverage.csv")
+        self.assertEqual(csv["Content-Type"], "text/csv")
+        self.assertIn("Ravi Kumar", csv.content.decode())
+
+
+for _name in [n for n in dir(GoogleClassroomLearners) if n.startswith("test_")]:
+    setattr(GoogleClassroomAdminCenter, _name, None)
