@@ -6,7 +6,8 @@ GoogleWorkspace   one school (Google Workspace for Education domain) that set up
                   Workspace too) gets a one-person "school" keyed by their Google id.
 GoogleCredential  a teacher's (encrypted) Google refresh token for the Classroom API.
 GoogleCourse      a class the teacher teaches in Google Classroom.
-GoogleStudent     a student of one of those classes (Google's roster, not an AIDL user yet).
+GoogleStudent     a student of one of those classes (Google's roster). When the class is
+                  in the AIDL programme (step 3), aidl_user_id links the AIDL learner.
 """
 
 from django.db import models
@@ -51,6 +52,9 @@ class GoogleCourse(models.Model):
     state = models.CharField(max_length=32, blank=True, default="")
     student_count = models.IntegerField(default=0)
     synced_at = models.DateTimeField()
+    # Step 3: the teacher chose this class for the AIDL programme.
+    in_programme = models.BooleanField(default=False)
+    added_to_programme_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ("organization_id", "course_id")
@@ -67,6 +71,9 @@ class GoogleStudent(models.Model):
     full_name = models.CharField(max_length=255, blank=True, default="")
     email = models.CharField(max_length=255, blank=True, default="")
     synced_at = models.DateTimeField()
+    # Step 3 (classes.enrol_class): "", added, no_seat, other_org, inactive
+    aidl_status = models.CharField(max_length=16, blank=True, default="")
+    aidl_user_id = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         unique_together = ("organization_id", "course_id", "google_user_id")

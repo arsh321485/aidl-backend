@@ -15,7 +15,7 @@
   <div class="spread">
     <div>
       <h1>{{ person.first_name|default:person.full_name|default:"Your" }}{% if person.first_name or person.full_name %}'s{% endif %} classes</h1>
-      <p class="muted" style="margin-top:8px">{{ person.organization_name }}{% if data.google_email %} · Google: {{ data.google_email }}{% endif %}{% if data.synced_at %} · Updated {{ data.synced_at|date:"j M Y, H:i" }}{% endif %}</p>
+      <p class="muted" style="margin-top:8px"><b>{{ data.classes_in_programme }}</b> of {{ data.classes|length }} class{{ data.classes|length|pluralize:"es" }} in the AIDL programme · {{ person.organization_name }}{% if data.google_email %} · Google: {{ data.google_email }}{% endif %}{% if data.synced_at %} · Updated {{ data.synced_at|date:"j M Y, H:i" }}{% endif %}</p>
     </div>
     <div class="row" style="flex:0 0 auto">
       {% if data.connected %}
@@ -29,20 +29,31 @@
 </section>
 
 {% for c in data.classes %}
-<section class="box flat">
+<section class="box flat{% if c.in_programme %} done{% endif %}">
   <div class="spread">
     <div>
-      <h2>{{ c.name }}</h2>
+      <h2>{{ c.name }} {% if c.in_programme %}<span class="pill">✅ In AIDL</span>{% endif %}</h2>
       <p class="muted">{% if c.section %}{{ c.section }} · {% endif %}{% if c.room %}Room {{ c.room }} · {% endif %}{{ c.student_count }} student{{ c.student_count|pluralize }}</p>
     </div>
-    {% if c.link %}<a class="btn sm" href="{{ c.link }}" target="_blank" rel="noopener">Open in Classroom ↗</a>{% endif %}
+    <div class="row" style="flex:0 0 auto">
+      <form method="post" action="{% url 'google-classroom-classes-choose' %}">{% csrf_token %}
+        <input type="hidden" name="course_id" value="{{ c.id }}">
+        {% if c.in_programme %}
+        <input type="hidden" name="on" value="0"><button class="btn no sm">Remove from AIDL</button>
+        {% else %}
+        <input type="hidden" name="on" value="1"><button class="btn ok sm">Add to AIDL</button>
+        {% endif %}
+      </form>
+      {% if c.link %}<a class="btn sm" href="{{ c.link }}" target="_blank" rel="noopener">Open in Classroom ↗</a>{% endif %}
+    </div>
   </div>
   {% if c.students %}
   <details style="margin-top:8px"{% if forloop.first %} open{% endif %}>
     <summary>Students</summary>
     <div class="scroll"><table>
-      <thead><tr><th>Name</th><th>Email</th></tr></thead>
-      <tbody>{% for s in c.students %}<tr><td>{{ s.name|default:"—" }}</td><td>{{ s.email|default:"—" }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>AIDL</th></tr></thead>
+      <tbody>{% for s in c.students %}<tr><td>{{ s.name|default:"—" }}</td><td>{{ s.email|default:"—" }}</td>
+        <td>{% if s.aidl_status == "added" %}✅ Learner{% elif s.aidl_status == "no_seat" %}⚠️ No free seat{% elif s.aidl_status == "other_org" %}In another AIDL organization{% elif s.aidl_status == "inactive" %}Switched off{% elif c.in_programme %}—{% else %}<span class="muted">Not added</span>{% endif %}</td></tr>{% endfor %}</tbody>
     </table></div>
   </details>
   {% else %}
@@ -57,6 +68,8 @@
 </section>
 {% endfor %}
 
-<p class="muted">Students are listed from Google Classroom only. Adding them to the AIDL programme is the next step.</p>
+<p class="muted">“Add to AIDL” makes the class's students AIDL learners (one seat each). They sign in with
+  Google and land in {{ person.organization_name }}. Refresh also adds new students of those classes.
+  Removing a class doesn't delete anyone's account or progress.</p>
 {% endif %}
 {% endblock %}

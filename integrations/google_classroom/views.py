@@ -16,9 +16,11 @@ Step 2 (AIDL admins = teachers)
 GET  /api/google-classroom/classes/           page: the teacher's classes and students
 GET  /api/google-classroom/classes/connect/   → Google, asking for the Classroom permissions
 POST /api/google-classroom/classes/sync/      fetch again (page button)
+POST /api/google-classroom/classes/choose/    step 3: add a class to the AIDL programme (course_id, on=1|0)
 POST /api/google-classroom/classes/signout/
 GET  /api/google-classroom/api/classes/       same data as JSON (Authorization: Bearer <AIDL access token>)
 POST /api/google-classroom/api/classes/sync/  fetch again, JSON
+POST /api/google-classroom/api/classes/choose/  {"course_id": "...", "in_programme": true|false}, JSON
 """
 
 from __future__ import annotations
@@ -203,6 +205,21 @@ def classes_sync(request):
 
 
 @require_POST
+def classes_choose(request):
+    user = session.signed_in(request)
+    refusal = _teacher_refusal(user)
+    if refusal:
+        return _message(request, "Google Classroom", refusal, 403)
+    on = request.POST.get("on") == "1"
+    try:
+        counts = classes.choose(user, request.POST.get("course_id", ""), on)
+    except GoogleError as exc:
+        return _back(str(exc))
+    return _back(f"Class added to AIDL: {classes.summary(counts)}." if on
+                 else "Class taken out of AIDL. Its students keep their AIDL accounts.")
+
+
+@require_POST
 def classes_signout(request):
     return session.clear_session(redirect("google-classroom-classes"))
 
@@ -233,3 +250,21 @@ def api_classes_sync(request):
     except GoogleError as exc:
         return Response({"error": exc.code, "message": str(exc)}, status=409 if exc.code == "reconnect" else 502)
     return Response(classes.for_teacher(request.user))
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def api_classes_choose(request):
+    refusal = _teacher_refusal(request.user)
+    if refusal:
+        return Response({"error": "not_allowed", "message": refusal}, status=403)
+    on = bool(request.data.get("in_programme"))
+    try:
+        counts = classes.choose(request.user, str(request.data.get("course_id", "")), on)
+    except GoogleError as exc:
+        return Response({"error": exc.code, "message": str(exc)}, status=400)
+    data = classes.for_teacher(request.user)
+    data["result"] = counts
+    data["message"] = classes.summary(counts) if on else "Class taken out of AIDL."
+    return Response(data)

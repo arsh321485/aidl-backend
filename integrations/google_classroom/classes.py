@@ -1,12 +1,22 @@
-"""Step 2: a teacher's Google Classroom classes and students, copied into AIDL.
+"""Steps 2 + 3: a teacher's Google Classroom classes and students, in AIDL.
 
-connect()  after the teacher allowed the Classroom permissions: keep the
-           refresh token and fetch everything once.
-sync()     fetch again later with the stored refresh token.
+connect()      after the teacher allowed the Classroom permissions: keep the
+               refresh token and fetch everything once.
+sync()         fetch again later with the stored refresh token.
+choose()       step 3: the teacher adds a class to the AIDL programme (or removes it).
 for_teacher()  what the classes page / JSON endpoint shows.
 
-Students are only Google's roster here; turning them into AIDL learners
-(seats, cards, licences) is a later step.
+Step 3 rules:
+  - Adding a class makes each of its students an AIDL learner of the
+    teacher's organization (one seat each), linked to their Google account
+    ("google:<google user id>", the same id Google sign-in uses). When the
+    student signs in with Google later, they are already in the right school.
+  - A student who already has an AIDL account (same Google account, or the
+    same email) is linked, not duplicated. Someone in another AIDL
+    organization is left there and shown as such.
+  - Refresh also adds new students of chosen classes.
+  - Removing a class only stops adding new students; learners keep their
+    account and progress (an admin can remove people in the Admin Center).
 """
 
 from __future__ import annotations
@@ -14,11 +24,19 @@ from __future__ import annotations
 from django.utils import timezone
 
 from api.microsoft_auth import open_refresh_token, seal_refresh_token
-from api.models import AIDLUser
+from api.models import AIDLUser, Organization
 
 from . import classroom_api, google_oauth
 from .google_oauth import GoogleError, GoogleProfile
 from .models import GoogleCourse, GoogleCredential, GoogleStudent
+
+PROVIDER = "google_classroom"
+
+# GoogleStudent.aidl_status
+ADDED = "added"
+NO_SEAT = "no_seat"
+OTHER_ORG = "other_org"
+INACTIVE = "inactive"
 
 
 def connect(user: AIDLUser, profile: GoogleProfile, tokens: dict) -> int:
@@ -53,7 +71,7 @@ def _fetch(user: AIDLUser, cred: GoogleCredential, access_token: str) -> int:
     seen = []
     for c in courses:
         students = classroom_api.list_students(access_token, c["id"])
-        GoogleCourse.objects.update_or_create(organization_id=org_id, course_id=c["id"], defaults={
+        course, _ = GoogleCourse.objects.update_or_create(organization_id=org_id, course_id=c["id"], defaults={
             "teacher_user_id": str(user.pk),
             "name": (c.get("name") or "Untitled class")[:255],
             "section": (c.get("section") or "")[:255],
@@ -64,6 +82,8 @@ def _fetch(user: AIDLUser, cred: GoogleCredential, access_token: str) -> int:
             "synced_at": now,
         })
         _save_students(org_id, c["id"], students, now)
+        if course.in_programme:
+            enrol_class(course)  # new students of a chosen class join AIDL
         seen.append(c["id"])
 
     # Classes this teacher no longer teaches (archived, removed) drop out.
@@ -88,11 +108,94 @@ def _save_students(org_id: str, course_id: str, students: list[dict], now) -> No
                                                defaults={
                                                    "full_name": ((profile.get("name") or {}).get("fullName")
                                                                  or "")[:255],
-                                                   "email": (profile.get("emailAddress") or "")[:255],
+                                                   "email": (profile.get("emailAddress") or "").lower()[:255],
                                                    "synced_at": now,
                                                })
         keep.append(gid)
     GoogleStudent.objects.filter(organization_id=org_id, course_id=course_id).exclude(google_user_id__in=keep).delete()
+
+
+# --- step 3: classes in the AIDL programme ---
+
+def choose(teacher: AIDLUser, course_id: str, on: bool) -> dict:
+    """Add a class to the AIDL programme (on=True) or take it out. Returns enrol counts."""
+    course = GoogleCourse.objects.filter(organization_id=teacher.organization_id, course_id=course_id,
+                                         teacher_user_id=str(teacher.pk)).first()
+    if course is None:
+        raise GoogleError("unknown_class", "That class isn't in your list. Press Refresh and try again.")
+    course.in_programme = on
+    course.added_to_programme_at = timezone.now() if on else None
+    course.save(update_fields=["in_programme", "added_to_programme_at"])
+    return enrol_class(course) if on else {}
+
+
+def enrol_class(course: GoogleCourse) -> dict:
+    """Make every student of a chosen class an AIDL learner. Returns {status: count}."""
+    org = Organization.objects.filter(pk=course.organization_id, is_active=True).first()
+    if org is None:
+        raise GoogleError("no_organization", "Your AIDL organization is switched off.")
+    counts: dict[str, int] = {}
+    for student in GoogleStudent.objects.filter(organization_id=course.organization_id, course_id=course.course_id):
+        status, user = _enrol(org, student)
+        if (student.aidl_status, student.aidl_user_id) != (status, str(user.pk) if user else ""):
+            student.aidl_status, student.aidl_user_id = status, str(user.pk) if user else ""
+            student.save(update_fields=["aidl_status", "aidl_user_id"])
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _enrol(org: Organization, student: GoogleStudent) -> tuple[str, AIDLUser | None]:
+    from api.plans import can_join
+
+    user = AIDLUser.objects.filter(microsoft_id=f"google:{student.google_user_id}").first()
+    if user is None and student.email:
+        user = AIDLUser.objects.filter(email__iexact=student.email).order_by("created_at").first()
+
+    if user is not None:
+        if not user.is_active:
+            return INACTIVE, user
+        if user.organization_id == str(org.pk):
+            return ADDED, user
+        if user.organization_id:
+            return OTHER_ORG, user
+        if not can_join(org, user):
+            return NO_SEAT, user
+        user.organization_id, user.organization_name = str(org.pk), org.name
+        user.enroll_as = AIDLUser.EnrollAs.ORGANIZATION
+        user.save(update_fields=["organization_id", "organization_name", "enroll_as", "updated_at"])
+        return ADDED, user
+
+    if not can_join(org, None):
+        return NO_SEAT, None
+    first, _, last = (student.full_name or "").partition(" ")
+    user = AIDLUser.objects.create(
+        microsoft_id=f"google:{student.google_user_id}",
+        provider=PROVIDER,
+        email=student.email,
+        first_name=first[:100],
+        last_name=last[:100],
+        full_name=student.full_name[:255],
+        enroll_as=AIDLUser.EnrollAs.ORGANIZATION,
+        role=AIDLUser.Role.LEARNER,
+        organization_id=str(org.pk),
+        organization_name=org.name,
+        is_active=True,
+    )
+    return ADDED, user
+
+
+def summary(counts: dict) -> str:
+    """{status: count} → a short sentence for the page."""
+    parts = []
+    if counts.get(ADDED):
+        parts.append(f"{counts[ADDED]} student{'s' if counts[ADDED] != 1 else ''} in AIDL")
+    if counts.get(NO_SEAT):
+        parts.append(f"{counts[NO_SEAT]} not added: no free seats on your plan")
+    if counts.get(OTHER_ORG):
+        parts.append(f"{counts[OTHER_ORG]} already in another AIDL organization")
+    if counts.get(INACTIVE):
+        parts.append(f"{counts[INACTIVE]} switched off in AIDL")
+    return ", ".join(parts) or "No students in this class yet"
 
 
 def for_teacher(user: AIDLUser) -> dict:
@@ -101,13 +204,17 @@ def for_teacher(user: AIDLUser) -> dict:
     students: dict[str, list] = {}
     for s in GoogleStudent.objects.filter(organization_id=user.organization_id,
                                           course_id__in=[c.course_id for c in courses]):
-        students.setdefault(s.course_id, []).append({"id": s.google_user_id, "name": s.full_name, "email": s.email})
+        students.setdefault(s.course_id, []).append({
+            "id": s.google_user_id, "name": s.full_name, "email": s.email,
+            "aidl_status": s.aidl_status, "aidl_user_id": s.aidl_user_id})
     return {
         "connected": bool(cred and cred.refresh_token),
         "google_email": cred.email if cred else "",
         "synced_at": cred.synced_at if cred else None,  # DRF renders it as ISO text
+        "classes_in_programme": sum(1 for c in courses if c.in_programme),
         "classes": [{
             "id": c.course_id, "name": c.name, "section": c.section, "room": c.room, "link": c.link,
-            "student_count": c.student_count, "students": students.get(c.course_id, []),
+            "student_count": c.student_count, "in_programme": c.in_programme,
+            "students": students.get(c.course_id, []),
         } for c in courses],
     }

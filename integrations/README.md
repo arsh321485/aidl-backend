@@ -95,7 +95,8 @@ Everything is in `integrations/google_classroom/`.
 |---|---|---|
 | 1 | Sign up / sign in with Google ("Add to Google Classroom") | ✅ done |
 | 2 | Read the teacher's classes and students (Classroom API) | ✅ done |
-| 3 | Turn class students into AIDL learners (seats, cards, licence) | next |
+| 3 | Teacher chooses classes → their students become AIDL learners | ✅ done |
+| 4 | Learner flow for Google students (cards → licence) | next |
 
 ## Sign-up / sign-in rules
 
@@ -117,12 +118,23 @@ Everything is in `integrations/google_classroom/`.
 | `GET /api/google-classroom/classes/connect/` | → Google, asking for the read-only Classroom permissions (offline) |
 | `GET /api/google-classroom/api/classes/` | same as JSON, `Authorization: Bearer <AIDL access token>` |
 | `POST /api/google-classroom/api/classes/sync/` | fetch from Google again, JSON |
+| `POST /api/google-classroom/classes/choose/` | step 3: `course_id`, `on=1` add the class to AIDL / `on=0` take it out |
+| `POST /api/google-classroom/api/classes/choose/` | same, JSON `{"course_id": "...", "in_programme": true}` |
 
 Step 2 is for AIDL admins (teachers) only. They allow three read-only
 permissions once: classes, class rosters, students' emails. The refresh token
 is stored encrypted (`GoogleCredential`), so **Refresh** works without Google
 asking again. Classes and students are copied into `GoogleCourse` /
-`GoogleStudent`; they are not AIDL users yet.
+`GoogleStudent`.
+
+Step 3: **Add to AIDL** on a class makes each of its students an AIDL learner
+of the teacher's organization (one seat each, `microsoft_id = google:<id>`, the
+same id Google sign-in uses), or links the AIDL account they already have
+(same Google account or email). When they sign in with Google they land in
+the school. Students in another AIDL organization stay there; with no free
+seats they are listed as "No free seat". Refresh adds new students of chosen
+classes. **Remove from AIDL** only stops adding students; nobody's account or
+progress is deleted.
 
 ## Set up Google (once)
 

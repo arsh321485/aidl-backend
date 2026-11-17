@@ -306,3 +306,106 @@ class GoogleClassroomClasses(GoogleClassroomSignIn):
 # The step-2 class inherits from the sign-in class for its helpers; don't run the sign-in tests twice.
 for _name in [n for n in dir(GoogleClassroomSignIn) if n.startswith("test_")]:
     setattr(GoogleClassroomClasses, _name, None)
+
+
+# --- step 3: classes in the AIDL programme ---
+
+class GoogleClassroomProgramme(GoogleClassroomClasses):
+    def _teacher_with_classes(self):
+        self._sign_in()
+        self._connect()
+        return AIDLUser.objects.get(microsoft_id="google:111")
+
+    def _choose(self, course_id="c1", on=True):
+        return self.client.post("/api/google-classroom/classes/choose/", {"course_id": course_id, "on": "1" if on else "0"})
+
+    def test_adding_a_class_makes_its_students_learners(self):
+        teacher = self._teacher_with_classes()
+        resp = self._choose()
+        self.assertIn("2+students+in+AIDL", resp["Location"])
+        for gid in ("s1", "s2"):
+            s = AIDLUser.objects.get(microsoft_id=f"google:{gid}")
+            self.assertEqual((s.role, s.organization_id, s.provider), ("learner", teacher.organization_id, "google_classroom"))
+        self.assertEqual(AIDLUser.objects.get(microsoft_id="google:s1").full_name, "Ravi Kumar")
+        page = self.client.get("/api/google-classroom/classes/")
+        self.assertContains(page, "✅ In AIDL")
+        self.assertContains(page, "✅ Learner")
+
+    def test_unchosen_class_adds_nobody(self):
+        self._teacher_with_classes()
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id__in=["google:s1", "google:s2"]).exists())
+
+    def test_added_student_signs_in_with_google_into_the_school(self):
+        teacher = self._teacher_with_classes()
+        self._choose()
+        r = self._sign_in(sub="s1", email="ravi@gmail.com", hd="")  # personal Gmail: would otherwise get own org
+        user = AIDLUser.objects.get(pk=decode_token(r["access_token"])["sub"])
+        self.assertEqual(user.microsoft_id, "google:s1")
+        self.assertEqual((user.role, user.organization_id), ("learner", teacher.organization_id))
+        self.assertEqual(AIDLUser.objects.filter(microsoft_id="google:s1").count(), 1)
+
+    def test_existing_account_with_same_email_is_linked(self):
+        teacher = self._teacher_with_classes()
+        existing = AIDLUser.objects.create(microsoft_id="web:ravi", email="ravi@school.edu", provider="website")
+        self._choose()
+        existing.refresh_from_db()
+        self.assertEqual(existing.organization_id, teacher.organization_id)
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:s1").exists())
+
+    def test_student_in_another_organization_is_left_there(self):
+        other = Organization.objects.create(name="Other", slug="other")
+        AIDLUser.objects.create(microsoft_id="google:s1", email="ravi@school.edu", organization_id=str(other.pk))
+        self._teacher_with_classes()
+        resp = self._choose()
+        self.assertIn("already+in+another", resp["Location"])
+        self.assertEqual(AIDLUser.objects.get(microsoft_id="google:s1").organization_id, str(other.pk))
+
+    def test_no_free_seats(self):
+        self._teacher_with_classes()
+        with mock.patch("api.plans.can_join", return_value=False):
+            resp = self._choose()
+        self.assertIn("no+free+seats", resp["Location"])
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:s1").exists())
+        self.assertContains(self.client.get("/api/google-classroom/classes/"), "No free seat")
+
+    def test_refresh_adds_new_students_of_chosen_classes_only(self):
+        self._teacher_with_classes()
+        self._choose("c1")
+        self.fake.students["c1"].append({"userId": "s3", "profile": {"name": {"fullName": "New Kid"}}})
+        self.fake.students["c2"].append({"userId": "s4", "profile": {"name": {"fullName": "Robo Kid"}}})
+        with mock.patch("integrations.google_classroom.google_oauth.refresh_access_token", return_value="a2"):
+            self.client.post("/api/google-classroom/classes/sync/")
+        self.assertTrue(AIDLUser.objects.filter(microsoft_id="google:s3").exists())
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:s4").exists())
+
+    def test_removing_a_class_keeps_learners(self):
+        self._teacher_with_classes()
+        self._choose()
+        resp = self._choose(on=False)
+        self.assertIn("keep+their+AIDL+accounts", resp["Location"])
+        self.assertTrue(AIDLUser.objects.filter(microsoft_id="google:s1", is_active=True).exists())
+        self.assertNotContains(self.client.get("/api/google-classroom/classes/"), "✅ In AIDL")
+
+    def test_cannot_choose_another_teachers_class(self):
+        self._teacher_with_classes()
+        self.client.post("/api/google-classroom/classes/signout/")
+        self._sign_in(sub="333", email="t@other.edu", hd="other.edu")
+        self.fake.courses = []
+        self._connect(sub="333", email="t@other.edu", hd="other.edu")
+        resp = self._choose("c1")
+        self.assertIn("isn%27t+in+your+list", resp["Location"])
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:s1").exists())
+
+    def test_json_choose(self):
+        r = self._sign_in()
+        self._connect()
+        resp = self.client.post("/api/google-classroom/api/classes/choose/", {"course_id": "c1", "in_programme": True},
+                                content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {r['access_token']}")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["result"], {"added": 2})
+        self.assertEqual(data["classes_in_programme"], 1)
+
+
+for _name in [n for n in dir(GoogleClassroomClasses) if n.startswith("test_")]:
+    setattr(GoogleClassroomProgramme, _name, None)
