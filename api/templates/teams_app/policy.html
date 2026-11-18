@@ -3,7 +3,7 @@
 {% block body %}
 <section class="box">
   <h1>📌 Add a policy card</h1>
-  <p class="muted" style="margin-top:6px">{{ done }} of 14 approved. Each topic is one short card your team agrees to. Send as many as you like, in any order.</p>
+  <p class="muted" style="margin-top:6px">{% if on_trial %}{{ done }} of 3 approved. Each topic is one short card your team agrees to. Your Trial includes these 3 — do them in any order.{% else %}{{ done }} of 14 approved. Each topic is one short card your team agrees to. Send as many as you like, in any order.{% endif %}</p>
   {% if on_trial %}<h3 style="margin:14px 0 0">✅ Included in your Trial</h3>{% endif %}
   <div class="list" style="margin-top:4px">
     {% for t in topics %}

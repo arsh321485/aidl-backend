@@ -70,7 +70,7 @@ def _banner(org: Organization, label: str, at: int | None = None) -> dict:
     positions; outlined = the topic on screen (`at` = point number)."""
     done = sorted(aup_store.cards(org))
     return {"type": "image", "alt_text": "AI policy",
-            "image_url": aup_banner.url(label, f"{len(done)} of 14 sent", org.name,
+            "image_url": aup_banner.url(label, f"{len(done)} of {_total(org)} sent", org.name,
                                         (at - 1) if at else 14, 14, done=done)}
 
 
@@ -80,7 +80,9 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
     from .aup_upload import can_upload
 
     blocks = [_banner(org, "Pick one topic · about 1 minute"),
-              _ctx("Each topic is one short card your team agrees to. Send as many as you like, in any order.")]
+              _ctx("Each topic is one short card your team agrees to. Send as many as you like, in any order."
+             if not any(pc.is_locked(org, n) for n in pc.TOPICS) else
+             "Each topic is one short card your team agrees to. Your Trial includes these 3 — send them in any order.")]
     if notice:
         blocks.append(_ctx(notice))
     answers = aup_store.answers(org, with_tools=False)["answers"]  # once, not per topic
@@ -124,6 +126,11 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
                          "action_id": "aidl_aup_upload_open", "value": "upload"})
     blocks += [{"type": "divider"}, {"type": "actions", "block_id": "aidl_pc_more", "elements": extra}]
     return _modal(TOPICS, "Add a policy card", blocks, meta=_keep(meta))
+
+
+def _total(org: Organization) -> int:
+    """Topics this organization can use: 3 on the Trial, 14 on a paid plan."""
+    return len(pc.FREE_TOPICS) if any(pc.is_locked(org, n) for n in pc.TOPICS) else 14
 
 
 def _day(iso: str) -> str:
@@ -402,7 +409,7 @@ def sent_view(org: Organization, n: int, meta: dict, uploaded: bool = False) -> 
     else:
         what = f"✅ *{name}* {'were' if uploaded else 'was'} sent to {people} {'person' if people == 1 else 'people'}."
     blocks = [{"type": "section", "text": _md(what)},
-              _ctx(f"{len(aup_store.cards(org))} of 14 policy cards approved. Send as many as you like."),
+              _ctx(f"{len(aup_store.cards(org))} of {_total(org)} policy cards approved." + ("" if _total(org) == 3 else " Send as many as you like.")),
               {"type": "actions", "block_id": "aidl_pc_sent", "elements": [
                   {"type": "button", "text": _text("📌 Add another card"), "action_id": "aidl_pc_topics",
                    "value": "topics", "style": "primary"}]}]

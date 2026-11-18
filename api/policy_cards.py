@@ -35,7 +35,7 @@ SHORT = {1: "Personal devices (BYOD)", 2: "Monitoring", 3: "Privacy on company d
          5: "Passwords & Sign-in", 6: "Data Classification", 7: "AI tools at work", 8: "Email, Chat & Social Media",
          9: "Reporting a problem", 10: "Working remotely", 11: "Who owns your work", 12: "Leaving the company",
          13: "If rules are broken", 14: "Agreeing & reviews"}
-ICONS = {1: "📱", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🔒", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
+ICONS = {1: "📱", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🏷️", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
          12: "🚪", 13: "⚖️", 14: "✍️"}
 # The Trial includes these three topics only (shown first, in this order); the other eleven come with a paid plan.
 FREE_TOPICS = (5, 8, 6)
