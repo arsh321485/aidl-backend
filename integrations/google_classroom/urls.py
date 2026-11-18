@@ -6,6 +6,7 @@ urlpatterns = [
     # step 1: sign up / sign in
     path("login/", views.login, name="google-classroom-login"),
     path("callback/", views.callback, name="google-classroom-callback"),
+    path("open/", views.open_classroom, name="google-classroom-open"),
     # step 2: classes + students
     path("classes/", views.classes_page, name="google-classroom-classes"),
     path("classes/connect/", views.classes_connect, name="google-classroom-classes-connect"),

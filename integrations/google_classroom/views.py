@@ -128,10 +128,26 @@ def _redirect(request, user: AIDLUser):
         "role": user.role,
     }
     if user.role == AIDLUser.Role.ADMIN and user.organization_id:
-        query["admin_center_url"] = f"{settings.BACKEND_URL.rstrip('/')}{reverse('google-classroom-admin')}"
+        # The website opens this link after sign-in: it goes straight on to
+        # Google Classroom itself (see open_classroom). The Admin Center stays
+        # at /api/google-classroom/admin/.
+        open_url = f"{settings.BACKEND_URL.rstrip('/')}{reverse('google-classroom-open')}"
+        query["admin_center_url"] = f"{open_url}?{urlencode({'email': user.email})}"
         query["open_admin_center"] = "1"
     response = HttpResponseRedirect(f"{settings.AUTH_SUCCESS_REDIRECT}?{urlencode(query)}")
     return session.set_session(request, response, user) if user.organization_id else response
+
+
+GOOGLE_CLASSROOM_URL = "https://classroom.google.com/"
+
+
+@require_GET
+def open_classroom(request):
+    """Sends the browser on to Google Classroom. authuser picks the Google
+    account that just signed in, when the browser has several."""
+    email = request.GET.get("email", "").strip()
+    query = f"?{urlencode({'authuser': email})}" if "@" in email else ""
+    return HttpResponseRedirect(f"{GOOGLE_CLASSROOM_URL}{query}")
 
 
 def _error(request, code: str, description: str):
