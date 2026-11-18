@@ -29,15 +29,7 @@ def password_complexity_errors(password: str) -> list[str]:
             "(!@#$%^&*_- etc.)."
         )
     return errors
-_LICENSE_ALIASES = {
-    "class_l": AIDLUser.LicenseClass.CLASS_L,
-    "class l": AIDLUser.LicenseClass.CLASS_L,
-    "class-l": AIDLUser.LicenseClass.CLASS_L,
-    "l": AIDLUser.LicenseClass.CLASS_L,
-    "learner's permit": AIDLUser.LicenseClass.CLASS_L,
-    "learners permit": AIDLUser.LicenseClass.CLASS_L,
-    "class l · learner's permit": AIDLUser.LicenseClass.CLASS_L,
-}
+
 
 
 class ItemSerializer(serializers.ModelSerializer):
@@ -86,7 +78,6 @@ class AIDLUserSerializer(serializers.ModelSerializer):
             "country",
             "state",
             "city",
-            "license_class",
             "enroll_as",
             "role",
             "organization_id",
@@ -114,15 +105,6 @@ class AIDLUserSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-def _normalize_license_class(value: str) -> str:
-    raw = (value or "").strip().lower()
-    if raw in AIDLUser.LicenseClass.values:
-        return raw
-    if raw in _LICENSE_ALIASES:
-        return _LICENSE_ALIASES[raw]
-    return ""
-
-
 class SignupSerializer(serializers.Serializer):
     """Website registration — matches the Individual / Organization form."""
 
@@ -142,11 +124,6 @@ class SignupSerializer(serializers.Serializer):
     country = serializers.CharField(max_length=100)
     state = serializers.CharField(max_length=100)
     city = serializers.CharField(max_length=100)
-    license_class = serializers.CharField(
-        max_length=64,
-        required=False,
-        default=AIDLUser.LicenseClass.CLASS_L,
-    )
     organization_name = serializers.CharField(
         max_length=255,
         required=False,
@@ -198,14 +175,6 @@ class SignupSerializer(serializers.Serializer):
         if len(value) < 2:
             raise serializers.ValidationError("City is required.")
         return value
-
-    def validate_license_class(self, value: str) -> str:
-        normalized = _normalize_license_class(value)
-        if not normalized:
-            raise serializers.ValidationError(
-                "Invalid license class. Use class_l (Class L · Learner's Permit)."
-            )
-        return normalized
 
     def validate_organization_name(self, value: str) -> str:
         return (value or "").strip()

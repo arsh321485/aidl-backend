@@ -499,7 +499,7 @@ def coverage_view(org: Organization, download_url: str = "", note: str = "") -> 
     ]
     shown = rows[:40]  # Slack allows 100 blocks per view; the CSV has everyone.
     for r in shown:
-        licence = f"L · `{r['license_number']}`" if r["license_class"] else "no license yet"
+        licence = f"`{r['license_number']}`" if r["license_number"] else "no licence yet"
         aup = "✅ AUP signed" if r["aup_signed"] == "yes" else "❌ AUP unsigned"
         blocks.append({"type": "section", "text": _md(
             f"*{r['name'] or r['email']}* · {r['role'].title()}\n{r['email']}\n{licence} · {aup} · {r['cards_received']} cards")})

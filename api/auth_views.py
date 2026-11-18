@@ -271,7 +271,7 @@ def teams_login(request):
         "note": (
             "After callback, ALWAYS window.open(teams_url) when open_teams=1. "
             "Backend auto-creates/finds Microsoft Team 'AIDL' and channel "
-            "'aidl dashboard', installs Home/Learner's Permit/Highway Code/"
+            "'aidl dashboard', installs Home/AI Driving Licence/Highway Code/"
             "Traffic Light Check tabs, then sets teams_url to the Home tab deep link "
             "(landed_on=channel). Falls back to Teams chat/home (landed_on=chat) "
             "if Graph/Team.Create fails. teams_platform_url is always chat/home."
@@ -397,7 +397,7 @@ def teams_callback(request):
 
     is_learner = user.role == AIDLUser.Role.LEARNER
     if is_learner:
-        # Learners get their own 4-tab dashboard (Home / Learner's Permit /
+        # Employees get their own 4-tab dashboard (Home / AI Driving Licence /
         # Highway Code / Traffic Light Check) instead of the shared Admin
         # Center card — the channel's Posts stream is shared by everyone in
         # the org, so only an admin's login should replace what's posted
@@ -819,7 +819,7 @@ def _send_code(user: AIDLUser, purpose: str, ok_status: int) -> Response:
 
 def _finish_signup(user: AIDLUser) -> Response:
     if user.enroll_as == AIDLUser.EnrollAs.INDIVIDUAL:
-        # Individuals get their Learner (L) licence straight away, valid 1 year.
+        # Individuals get their AI Driving Licence straight away (valid a year, no plan involved).
         from .licensing import issue_individual_licence
 
         issue_individual_licence(user)

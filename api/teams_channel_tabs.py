@@ -129,7 +129,7 @@ def _existing_entity_ids(existing_tabs: list) -> set[str]:
 
 def _stale_aidl_tabs(existing_tabs: list, expected_entity_ids: set[str]) -> list[dict]:
     """
-    Tabs from a previous AIDL tab set (e.g. the old Learner's Permit / Highway
+    Tabs from a previous AIDL tab set (e.g. the old licence / Highway
     Code / Traffic Light Check tabs) that are no longer part of the current
     6-pill Admin Center header. Identified by our "aidl-" entity id prefix so
     we never touch tabs a customer added themselves.

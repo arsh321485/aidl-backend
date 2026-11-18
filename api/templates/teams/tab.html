@@ -92,17 +92,6 @@
       border-radius: 10px;
       margin: 18px 0 8px;
     }
-    .level-toggle { display: flex; gap: 10px; margin: 14px 0; }
-    .level-tile {
-      flex: 1;
-      text-align: center;
-      padding: 10px;
-      border-radius: 10px;
-      background: var(--aidl-beige);
-      font-weight: 700;
-      color: var(--aidl-muted);
-    }
-    .level-tile.active { background: var(--aidl-yellow); color: var(--aidl-text); }
     .licence-img { display: block; width: 100%; height: auto; margin: 14px 0; }
     .hc-row { display: flex; gap: 14px; align-items: flex-start; margin: 16px 0; }
     .hc-icon {
@@ -265,13 +254,9 @@
       );
     }
 
-    function learnersPermitHtml(data) {
+    function licenceHtml(data) {
       return (
         '<h2>' + escapeHtml(data.title) + '</h2>' +
-        '<div class="level-toggle">' +
-          '<div class="level-tile active">L · Learner</div>' +
-          '<div class="level-tile">F · Full</div>' +
-        '</div>' +
         '<img class="licence-img" src="' + escapeHtml(data.download_url) + '" alt="AI Driving Licence ' + escapeHtml(data.card_number) + ' for ' + escapeHtml(data.name) + '">' +
         '<p>' + mdBold(data.body) + '</p>' +
         (data.download_url
@@ -320,7 +305,7 @@
 
     const TAB_RENDERERS = {
       "home": homeHtml,
-      "learners-permit": learnersPermitHtml,
+      "licence": licenceHtml,
       "highway-code": highwayCodeHtml,
       "traffic-light-check": trafficLightHtml,
     };

@@ -595,7 +595,6 @@ class WebsiteSignupTests(TestCase):
             "country": "United States",
             "state": "California",
             "city": "San Francisco",
-            "license_class": "class_l",
         }
 
     def test_individual_signup_returns_tokens(self):
@@ -609,7 +608,7 @@ class WebsiteSignupTests(TestCase):
         user = AIDLUser.objects.get(email=self.payload["email"])
         self.assertEqual(user.provider, "website")
         self.assertEqual(user.role, AIDLUser.Role.LEARNER)
-        self.assertEqual(user.license_class, AIDLUser.LicenseClass.CLASS_L)
+        self.assertNotIn("license_class", resp.data.get("user") or {})  # there is no licence class any more
         self.assertTrue(user.check_password(self.payload["password"]))
         self.assertTrue(user.microsoft_id.startswith("local:"))
 
@@ -1625,11 +1624,11 @@ class SlackOnboardingTests(TestCase):
         self._click("U7", "traffic_light")                    # any acceptance re-checks the licence
         user.refresh_from_db()
         self.assertTrue(user.licence_issued)
-        self.assertTrue(user.licence_number.startswith("AIDL-L-"))
+        self.assertRegex(user.licence_number, r"^AIDL-\d{4}-\d{4}$")
         # The learner's own message (the channel's Admin Center is redrawn too, after the licence).
         update = [b for m, b in self.calls if m == "chat.update" and b["channel"] != self.org.slack_channel_id][-1]
-        self.assertIn("Your Learner", json.dumps(update["blocks"], ensure_ascii=False))
-        self.assertTrue(any(m == "chat.postMessage" and "Learner's Permit is ready" in b["text"] for m, b in self.calls))
+        self.assertIn("Your AI Driving Licence", json.dumps(update["blocks"], ensure_ascii=False))
+        self.assertTrue(any(m == "chat.postMessage" and "Your AI Driving Licence is ready" in b["text"] for m, b in self.calls))
 
     def test_no_free_seat_keeps_the_licence_waiting_and_tells_the_admin(self):
         # e.g. the plan was reduced after people joined
@@ -1976,14 +1975,14 @@ class PlanLimitTests(TestCase):
         self.assertNotIn("conversations.kick", [m for m, _ in self.calls])
 
     def test_removed_member_cannot_earn_licence(self):
-        from .licensing import issue_learner_if_ready
+        from .licensing import issue_licence_if_ready
 
         self._event("U2")
         self._event("U2", "member_left_channel")
         self._click("U2", "highway_code")
         self._click("U2", "traffic_light")
         self.assertFalse(self._member("U2").licence_issued)
-        self.assertEqual(issue_learner_if_ready(self._member("U2"), self.org), "left")
+        self.assertEqual(issue_licence_if_ready(self._member("U2"), self.org), "left")
 
     def test_licence_starts_default_package(self):
         from .models import PackageDelivery
@@ -1992,10 +1991,14 @@ class PlanLimitTests(TestCase):
         self.calls.clear()
         u2 = self._licence("U2")
         rows = PackageDelivery.objects.filter(user_id=str(u2.pk))
-        self.assertEqual(rows.count(), 12)
+        self.assertEqual(rows.count(), 3)  # the Trial package: card 1 with the licence, then 2 a week for its 7 days
         self.assertEqual(rows.filter(status="sent").get().card_no, "006")  # card 1 right away
         scheduled = [j for m, j in self.calls if m == "chat.scheduleMessage"]
-        self.assertEqual(len(scheduled), 4)   # Trial: 1 a month; Slack takes 120 days ahead
+        self.assertEqual(len(scheduled), 2)   # Mon + Thu inside the Trial, none after it
+        from . import trial
+
+        ends = trial.ends_at(Organization.objects.get(pk=self.org.pk))
+        self.assertTrue(all(r.post_at <= ends for r in rows.filter(status="scheduled")))
         self.assertEqual(scheduled[0]["text"], "AIDL card: Traffic Light Check")  # sheet's posting order
 
     def test_leaving_cancels_scheduled_cards_and_rejoin_resumes(self):
@@ -2005,11 +2008,11 @@ class PlanLimitTests(TestCase):
         u2 = self._licence("U2")
         self.calls.clear()
         self._event("U2", "member_left_channel")
-        self.assertEqual(len([m for m, _ in self.calls if m == "chat.deleteScheduledMessage"]), 4)
-        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="cancelled").count(), 11)
+        self.assertEqual(len([m for m, _ in self.calls if m == "chat.deleteScheduledMessage"]), 2)
+        self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="cancelled").count(), 2)
         self.calls.clear()
         self._event("U2")
-        self.assertEqual(len([m for m, _ in self.calls if m == "chat.scheduleMessage"]), 4)
+        self.assertEqual(len([m for m, _ in self.calls if m == "chat.scheduleMessage"]), 2)
         self.assertEqual(PackageDelivery.objects.filter(user_id=str(u2.pk), status="sent").count(), 1)
 
     def test_upgrade_to_basic_schedules_remaining_cards(self):
@@ -2692,7 +2695,7 @@ class PolicyCardsSlackTests(TestCase):
 
         from . import aup_store, policy_cards
         from .admin_setup import update
-        from .licensing import acknowledge, issue_learner_if_ready
+        from .licensing import acknowledge, issue_licence_if_ready
 
         _approve_all(self.org)
         update(self.org, flow_started="2026-10-14")
@@ -2709,9 +2712,9 @@ class PolicyCardsSlackTests(TestCase):
         self.assertEqual(set(aup_store.required_points(self.org)), {7})                         # 5 isn't due yet
         acknowledge(member, "traffic_light")
         acknowledge(member, "highway_code")
-        self.assertEqual(issue_learner_if_ready(member, self.org), "not_ready")
+        self.assertEqual(issue_licence_if_ready(member, self.org), "not_ready")
         acknowledge(member, "aup_7", aup_store.card_version(self.org, 7))
-        self.assertEqual(issue_learner_if_ready(member, self.org), "issued")
+        self.assertEqual(issue_licence_if_ready(member, self.org), "issued")
         self.assertIn("goes out", self._home())
         self.assertEqual(policy_cards.check_day("2001-01-01"), "Pick today or a later day.")
 
@@ -2888,7 +2891,7 @@ class SignupWithoutMobileTests(TestCase):
             "email": "shivraj.test@example.com", "password": "Bc99HntU5wKAWgf_", "confirm_password": "Bc99HntU5wKAWgf_",
             "country": "Bahrain", "state": "Southern", "city": "Isa Town"}, content_type="application/json")
         self.assertEqual(resp.status_code, 201, resp.content)
-        self.assertEqual(resp.json()["user"]["license_class"], "class_l")
+        self.assertNotIn("license_class", resp.json()["user"])
 
 
 @override_settings(AUTH_EMAIL_OTP=True, AUTH_CAPTCHA=True,
@@ -2971,7 +2974,7 @@ class OtpCaptchaTests(TestCase):
                               content_type="application/json")
         user = ok.json()["user"]
         self.assertTrue(user["licence_issued"])
-        self.assertTrue(user["licence_number"].startswith("AIDL-L-"))
+        self.assertRegex(user["licence_number"], r"^AIDL-\d{4}-\d{4}$")
         from datetime import datetime
         issued = datetime.fromisoformat(user["licence_issued_at"].replace("Z", "+00:00"))
         expires = datetime.fromisoformat(user["licence_expires_at"].replace("Z", "+00:00"))
@@ -3057,7 +3060,7 @@ class PlanUpgradeTests(TestCase):
     def test_cards_per_plan(self):
         from .plans import cards_for_plan, package_cards
 
-        self.assertEqual(len(package_cards(self.org)), 12)                       # Trial: Default
+        self.assertEqual(len(package_cards(self.org)), 3)                        # Trial: what 7 days carry
         basic = cards_for_plan(self.org, "basic", {"basic": ["C13", "C14"]})
         self.assertEqual(len(basic), 104)                                         # 2 a week × 52 weeks
         self.assertEqual({c["code"] for c in basic[12:]}, {"C13", "C14"})        # the rest from picked topics
@@ -3082,8 +3085,8 @@ class PlanUpgradeTests(TestCase):
         from .plans import schedule_of
 
         start = dt.datetime(2026, 10, 14, 12, 0, tzinfo=dt.timezone.utc)        # a Wednesday
-        monthly = post_times(start, 3, schedule_of(self.org))
-        self.assertEqual([t.strftime("%a %d %b") for t in monthly], ["Mon 02 Nov", "Mon 07 Dec", "Mon 04 Jan"])
+        trial_slots = post_times(start, 3, schedule_of(self.org))               # Trial: Mon + Thu like Basic
+        self.assertEqual([t.strftime("%a %d %b") for t in trial_slots], ["Thu 15 Oct", "Mon 19 Oct", "Thu 22 Oct"])
         self.org.plan = "enterprise"
         self.org.billing = json.dumps({"schedule": {"days": [1, 2, 3, 4], "hour": 9}})
         weekly = post_times(start, 4, schedule_of(self.org))
@@ -3095,7 +3098,7 @@ class PlanUpgradeTests(TestCase):
         self.assertTrue(data["can_upgrade"])
         self.assertEqual([p["key"] for p in data["plans"]], ["trial", "basic", "enterprise"])
         self.assertEqual(len(data["categories"]), 15)
-        self.assertEqual([p["cards"] for p in data["plans"]], [12, 104, 208])
+        self.assertEqual([p["cards"] for p in data["plans"]], [3, 104, 208])
         prev = self.client.post("/api/billing/preview/", {"plan": "basic", "topics": ["C10"]}, format="json").json()
         self.assertEqual((len(prev["cards"]), prev["total"]), (12, 92))
         self.assertNotIn("message", prev["cards"][0])                             # card text stays on the server
@@ -3141,8 +3144,9 @@ class PlanUpgradeTests(TestCase):
 
         home = json.dumps(admin_card_blocks(build_admin_cards_context(self.owner), "home"), ensure_ascii=False)
         self.assertIn("aidl_upgrade", home)
-        self.assertIn("Trial plan", home)
-        self.assertIn("1 card a month", home)
+        self.assertIn("Trial · 7 days", home)
+        self.assertIn("2 cards a week", home)
+        self.assertNotIn("a month", home)
 
 
 @override_settings(STRIPE_SECRET_KEY="sk_test_x", STRIPE_WEBHOOK_SECRET="whsec_test", BILLING_PROVIDER="stripe",
@@ -3374,7 +3378,11 @@ class EmployeeFlowTests(TestCase):
                                             and b["channel"] != self.org.slack_channel_id][-1]))
         self.member.refresh_from_db()
         self.assertTrue(self.member.licence_issued)
-        self.assertEqual((self.member.licence_expires_at - self.member.licence_issued_at).days, 365)
+        from . import trial
+
+        # A Trial licence is valid for the Trial only (a paid plan: a year, see tests_trial.py).
+        self.assertAlmostEqual(self.member.licence_expires_at.timestamp(), trial.ends_at(self.org).timestamp(), delta=1)
+        self.assertLess((self.member.licence_expires_at - self.member.licence_issued_at).days, 7)
         ask = json.dumps(self._posted()[-1])                                      # no avatar yet → pick one
         self.assertIn("/api/avatar/start/?u=", ask)
         self.assertIn("aidl_flow_avatar", ask)
@@ -5367,22 +5375,22 @@ class LicenceDesignTests(TestCase):
 
         from . import licence_image as li
 
-        resp = self.client.get(f"/api/teams/cards/learners-permit/download/?email={quote(self.member.email)}")
+        resp = self.client.get(f"/api/teams/cards/licence/download/?email={quote(self.member.email)}")
         self.assertEqual((resp.status_code, resp["Content-Type"]), (200, "image/png"))
         self.assertEqual(resp.content, li.png_for(self.member, self.org))
         self.assertIn(".png", resp["Content-Disposition"])
-        preview = self.client.get("/api/teams/cards/learners-permit/download/")  # no signed-in user
+        preview = self.client.get("/api/teams/cards/licence/download/")  # no signed-in user
         self.assertEqual((preview.status_code, preview.content[1:4]), (200, b"PNG"))
 
     def test_user_page_and_teams_card_show_the_picture(self):
         from .teams_cards import _licence_card_visual
 
         page = self.client.get("/api/slack/cards/user/").content.decode()
-        self.assertIn('src="/api/teams/cards/learners-permit/download/"', page)
+        self.assertIn('src="/api/teams/cards/licence/download/"', page)
         self.assertNotIn("lc-strip", page)
         card = _licence_card_visual(full_name="", org_name="Secureitlab", user=self.member)
         self.assertEqual(card["type"], "Image")
-        self.assertIn("/cards/learners-permit/download/?email=", card["url"])
+        self.assertIn("/cards/licence/download/?email=", card["url"])
 
 
 class ResetSlackProgressTests(TestCase):
@@ -5582,7 +5590,7 @@ class TeamsWithoutBotTests(TestCase):
     def test_old_endpoints_that_trust_an_email_are_off(self):
         for url in ("/api/teams/tabs/home/", f"/api/teams/admin/home/?email={self.admin.email}",
                     f"/api/teams/admin/export/?email={self.admin.email}",
-                    f"/api/teams/cards/learners-permit/download/?email={self.member.email}"):
+                    f"/api/teams/cards/licence/download/?email={self.member.email}"):
             self.assertEqual(APIClient().get(url).status_code, 404, url)
         self.assertEqual(APIClient().post("/api/teams/bot/messages/", {"type": "message"}, format="json").status_code, 404)
 

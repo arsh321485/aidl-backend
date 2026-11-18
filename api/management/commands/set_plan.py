@@ -35,6 +35,7 @@ class Command(BaseCommand):
         if org is None:
             raise CommandError(f"No organization for Slack workspace {options['team']}")
         changed = []
+        old_plan = org.plan
         if options["plan"] and options["plan"] != org.plan:
             org.plan = options["plan"]
             changed.append("plan")
@@ -54,6 +55,9 @@ class Command(BaseCommand):
         if changed:
             org.save(update_fields=[*changed, "updated_at"])
             if "plan" in changed:
+                from api import trial
+
+                trial.on_plan_change(org, old_plan, org.plan)  # a paid plan ends the Trial and extends licences
                 self.stdout.write(f"Cards re-scheduled: {sync_organization(org)}")
         u = usage(org)
         self.stdout.write(f"{org.name}: {org.admin_seat_limit} admin seats")

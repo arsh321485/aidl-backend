@@ -229,7 +229,7 @@ urlpatterns = [
         name="teams-send-card",
     ),
     path(
-        "teams/cards/learners-permit/download/",
+        "teams/cards/licence/download/",
         _legacy_teams(teams_app_views.teams_licence_download),
         name="teams-licence-download",
     ),

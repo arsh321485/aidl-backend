@@ -94,7 +94,6 @@ Production: `https://aidl-backend.onrender.com/api/auth/signup/`
   "country": "United States",
   "state": "California",
   "city": "San Francisco",
-  "license_class": "class_l",
   "organization_name": ""
 }
 ```

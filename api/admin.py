@@ -20,12 +20,11 @@ class AIDLUserAdmin(admin.ModelAdmin):
         "enroll_as",
         "provider",
         "country",
-        "license_class",
         "is_active",
         "last_login_at",
         "created_at",
     )
-    list_filter = ("enroll_as", "provider", "license_class", "is_active")
+    list_filter = ("enroll_as", "provider", "is_active")
     search_fields = ("email", "full_name", "first_name", "last_name", "mobile_number", "microsoft_id")
 
 

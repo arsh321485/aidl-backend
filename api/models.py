@@ -96,8 +96,6 @@ class AIDLUser(models.Model):
         ADMIN = "admin", "Admin"
         LEARNER = "learner", "Learner"
 
-    class LicenseClass(models.TextChoices):
-        CLASS_L = "class_l", "Class L · Learner's Permit"
 
     microsoft_id = models.CharField(max_length=255, unique=True)
     email = models.EmailField(blank=True, default="")
@@ -109,12 +107,6 @@ class AIDLUser(models.Model):
     country = models.CharField(max_length=100, blank=True, default="")
     state = models.CharField(max_length=100, blank=True, default="")
     city = models.CharField(max_length=100, blank=True, default="")
-    license_class = models.CharField(
-        max_length=32,
-        choices=LicenseClass.choices,
-        blank=True,
-        default="",
-    )
     enroll_as = models.CharField(
         max_length=32,
         choices=EnrollAs.choices,

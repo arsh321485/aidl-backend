@@ -1,6 +1,6 @@
 """Hand Slack the awareness cards that are now within its 120-day
-scheduling window (Trial sends one card a month, so a year of cards can't
-be scheduled at once), and remind admins about cards waiting for approval
+scheduling window (a year of Basic / Enterprise cards can't be scheduled at once),
+close finished Trials (trial.py), and remind admins about cards waiting for approval
 (card_approval.remind). Run daily, e.g. a Render cron job:
 
     python manage.py schedule_package_cards
@@ -14,12 +14,16 @@ from api.card_ack import send_overdue_alerts, send_reminders
 from api.card_approval import remind
 from api.models import Organization
 from api.package_delivery import schedule_due
+from api.trial import close_finished_trials
 
 
 class Command(BaseCommand):
     help = "Schedule saved awareness cards that are now within Slack's 120-day window."
 
     def handle(self, *args, **options):
+        closed = close_finished_trials()
+        if closed:
+            self.stdout.write(f"{closed} Trial(s) closed")
         for org in Organization.objects.filter(is_active=True).exclude(slack_bot_token=""):
             n = schedule_due(org)
             if n:

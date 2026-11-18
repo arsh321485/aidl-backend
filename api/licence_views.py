@@ -39,7 +39,8 @@ def licence_png(request, number: str):
     return resp
 
 
-_NUMBER = re.compile(r"^AIDL-L-\d{4}-\d{4}$")
+# New numbers are AIDL-1234-5678; licences issued before that carry an extra "L-" (AIDL-L-1234-5678).
+_NUMBER = re.compile(r"^AIDL-(?:L-)?\d{4}-\d{4}$")
 
 
 def _issued_member(number: str) -> AIDLUser | None:
@@ -67,7 +68,7 @@ def _facts(member: AIDLUser) -> dict:
 
 @require_GET
 def licence_verify(request):
-    """GET /api/licenses/verify/?lic=AIDL-L-… — the website's "Verify a licence" box. Public, so the name is
+    """GET /api/licenses/verify/?lic=AIDL-1234-5678 — the website's "Verify a licence" box. Public, so the name is
     shortened. { found: false } only when there is no such licence."""
     member = _issued_member((request.GET.get("lic") or "").strip().upper())
     if member is None:

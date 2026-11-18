@@ -10,7 +10,7 @@
     Avatar             → only if they haven't picked one: create it on the
                          website (avatar.py); the Slack photo is never used
     License issued     → the licence image (licence_image.py) with the avatar
-                         and the valid-till date (1 year), download, share
+                         and the valid-till date (the plan's period), download, share
 
 Every card must be approved by an admin first (card_approval.py). If the
 next card isn't approved yet the employee gets a "waiting for approval"
@@ -264,6 +264,15 @@ def _verify_url(number: str) -> str:
 def licence(member: AIDLUser, org: Organization) -> dict:
     from . import licence_image
 
+    from . import trial
+
+    if not member.licence_issued and trial.expired(org):
+        return card("All cards done — the trial has ended.", "*Licence*", COLOR["yellow"], [
+            _header(":hourglass_flowing_sand: Almost there"),
+            _section(f"You've finished every card, but {org.name}'s {trial.trial_days()}-day AIDL Trial has ended, so "
+                     "your licence can't be issued yet. Your AIDL admin can upgrade the plan; your licence arrives "
+                     "here as soon as they do."),
+        ])
     if not member.licence_issued:
         return card("All cards done — your license is waiting for a free seat.", "*License*", COLOR["yellow"], [
             _header(":hourglass_flowing_sand: Almost there"),
@@ -404,7 +413,7 @@ def _repost_policy(org: Organization, member: AIDLUser) -> None:
 
 def advance(org: Organization, member: AIDLUser, action_id: str, value: str, channel: str, ts: str) -> None:
     """A button on a flow card was pressed."""
-    from .licensing import acknowledge, issue_learner_if_ready
+    from .licensing import acknowledge, issue_licence_if_ready
 
     if action_id == "aidl_flow_avatar":  # an older card's "Use my Slack photo" — no longer offered
         update(org, channel, ts, avatar_card(member, org))
@@ -449,7 +458,7 @@ def advance(org: Organization, member: AIDLUser, action_id: str, value: str, cha
         return
     if member.licence_issued:
         return  # a card sent after the licence: agreeing to it is all there is
-    result = issue_learner_if_ready(member, org)
+    result = issue_licence_if_ready(member, org)
     member.refresh_from_db()
     if result == "issued":
         from .package_delivery import sync_package
@@ -465,6 +474,28 @@ def advance(org: Organization, member: AIDLUser, action_id: str, value: str, cha
         from .admin_home import refresh
 
         refresh(org)  # licences issued / waiting for a seat, on the Home tab and the channel post
+
+
+def issue_waiting(org: Organization) -> int:
+    """After an upgrade: people who finished every card while the Trial was over (or the plan was full) get their
+    licence now — their cards, licence card and awareness cards follow as if they'd just finished."""
+    from .licensing import issue_licence_if_ready, learners
+    from .package_delivery import sync_package
+    from .teams_channel import is_teams
+
+    issued = 0
+    for member in learners(org).filter(licence_issued=False):
+        if stage(member, org) != "licence" or issue_licence_if_ready(member, org) != "issued":
+            continue
+        member.refresh_from_db()
+        issued += 1
+        sync_package(org, member)
+        if not is_teams(org):
+            from .policy_awareness import send_to
+
+            post(org, member, licence(member, org))
+            send_to(org, member)
+    return issued
 
 
 def _tell_admin_no_seat(org: Organization, member: AIDLUser) -> None:

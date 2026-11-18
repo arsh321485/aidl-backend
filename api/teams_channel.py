@@ -305,14 +305,18 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
     """package_delivery.sync_package for Teams: the same rules (first card now,
     the rest at the plan's cadence, approved cards only, postponed ones at the
     end) with the slots saved here for dispatch() instead of handed to Slack."""
+    from . import trial
     from .card_approval import deliverable
-    from .package_delivery import pause_package, post_times
+    from .package_delivery import pause_package, post_times, within_trial
     from .plans import plan_key, schedule_of
 
     if not member.licence_issued:
         return {"skipped": "no_licence"}
     if member.slack_left_at:
         return {"skipped": "left"}
+    if trial.expired(org):  # nothing is sent or scheduled after the Trial
+        pause_package(org, member)
+        return {"skipped": "trial_ended"}
     if full:
         pause_package(org, member)
     PackageDelivery.objects.filter(user_id=str(member.pk), status__in=[
@@ -336,7 +340,8 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
         _post_awareness(org, card)
         result["sent_now"] = 1
     start = max([now] + [r.post_at for r in rows if r.status == PackageDelivery.Status.SCHEDULED])
-    for (position, card), when in zip(todo, post_times(start, len(todo), schedule_of(org), _tz_offset(org))):
+    slots = within_trial(org, post_times(start, len(todo), schedule_of(org), _tz_offset(org)))
+    for (position, card), when in zip(todo, slots):
         PackageDelivery.objects.create(**common, card_no=card["no"], post_order=position, post_at=when)
         result["scheduled"] += 1
     return result
@@ -345,8 +350,10 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
 def deliver_due(org: Organization, member: AIDLUser | None = None) -> int:
     """Cards whose time has come: they count as received at once, and
     each one is posted in the channel once however many people it's for."""
+    from .package_delivery import cancel_after_trial
     from .plans import card_by_no
 
+    cancel_after_trial(org)  # a Trial's cards stop when the Trial ends
     rows = PackageDelivery.objects.filter(organization_id=str(org.pk), status=PackageDelivery.Status.SCHEDULED,
                                           post_at__lte=timezone.now())
     if member is not None:
@@ -568,11 +575,14 @@ def dispatch(org: Organization) -> dict:
     from .admin_setup import started, update
     from .card_approval import remind
 
+    from .trial import close_trial
+
     update(org, teams_dispatched_at=timezone.now().isoformat())
     ensure_home(org)
     out = {"team": sync_team(org)}
     if not started(org):
         return out
+    out["trial_closed"] = close_trial(org)
     out["cards"] = deliver_due(org)
     out["policy"] = announce_policy(org, sorted(_due_policy(org)))
     out["awareness"] = post_policy_awareness(org)

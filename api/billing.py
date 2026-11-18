@@ -137,9 +137,12 @@ def validate(org: Organization, plan: str, topics: list[str], schedule: dict | N
 
 
 def _settle(org: Organization, by: AIDLUser | None) -> None:
+    from .employee_flow import issue_waiting
     from .package_delivery import sync_organization
 
     sync_organization(org)
+    if plans.plan_key(org) != "trial":
+        issue_waiting(org)  # people who finished while the Trial was over (or the plan was full)
     if by is not None:
         refresh_slack(org, by)
 
@@ -150,6 +153,7 @@ def activate(org: Organization, plan: str, topics: list[str], schedule: dict | N
     """Switch the plan, save the picks and reschedule everyone's cards.
     `background`: a Slack popup must answer in 3 seconds, so the slow part follows."""
     data = _load(org)
+    old_plan = plans.plan_key(org)
     if stripe:
         data["stripe"] = {k: v for k, v in stripe.items() if v}
     if plans.PLANS[plan]["all_topics"]:
@@ -168,6 +172,10 @@ def activate(org: Organization, plan: str, topics: list[str], schedule: dict | N
         org.seats_purchased = seats
         fields.append("seats_purchased")
     org.save(update_fields=fields)
+    # The Trial is used up, and everyone's licence is valid for the new plan's period (users and seats stay).
+    from . import trial
+
+    trial.on_plan_change(org, old_plan, plan)
     if background:
         from .slack_modals import in_background
 
@@ -258,6 +266,10 @@ def set_internal_plan(org: Organization, plan: str, by_name: str) -> None:
     Enterprise. The same activation as a code; no payment."""
     if not internal_workspace(org) or plan not in ("trial", "enterprise"):
         raise UpgradeError({"plan": "Only our own test workspaces can be switched, to Trial or Enterprise."})
+    if plan == "trial":
+        from . import trial
+
+        trial.restart(org)  # testing the Trial again: it starts over when the programme next starts
     activate(org, plan, [], None, None, None, how="promo", promo=f"django-admin:{by_name}")
     from .slack_onboarding import primary_admin
 
@@ -301,6 +313,12 @@ def org_for_subscription(subscription_id: str) -> Organization | None:
 
 
 def downgrade_to_trial(org: Organization, how: str) -> None:
+    """A paid plan ended (cancelled / unpaid). The Trial doesn't start again, licences keep the dates they have, and
+    awareness cards stop (sync_organization)."""
+    from . import trial
+
+    trial.consume(org)
+    trial.mark_closed(org)  # a cancellation isn't "your Trial has ended"
     data = _load(org)
     data.setdefault("history", []).append({"plan": "trial", "from": plans.plan_key(org), "how": how,
                                            "at": timezone.now().isoformat()})

@@ -168,7 +168,7 @@ DATA_ALLOWED = (
 )
 _DATA_ALLOWED_LABEL = dict(RegisteredApp.DataAllowed.choices)
 
-# Guide 10.3 — Section A, Learner Rules.
+# Guide 10.3 — Section A, Everyday Rules.
 HIGHWAY_CODE = (
     {"sign": "STOP", "shape": "stop", "title": "Keep Private Things Private",
      "text": "Never paste passwords, ID numbers, bank details, or your home address into a consumer AI tool. Once it's in, you've lost control of it.",
@@ -513,7 +513,6 @@ def build_user_cards_context(user: AIDLUser | None, lights: list[str] | None = N
             "demo": True,
             "full_name": "Jordan Ellis",
             "licence_number": "AIDL-L-0455-2210",
-            "licence_class": "L",
             "issued": "02/14/2026",
             "expires": "02/14/2027",
             "status": "ACTIVE",
@@ -529,9 +528,7 @@ def build_user_cards_context(user: AIDLUser | None, lights: list[str] | None = N
             "demo": False,
             "full_name": user.full_name or user.email,
             "licence_number": user.licence_number or "Pending",
-            # Class F is not modelled yet — every issued license is a Learner's Permit.
-            "licence_class": "L",
-            "issued": issued.strftime("%m/%d/%Y") if issued else "—",
+                        "issued": issued.strftime("%m/%d/%Y") if issued else "—",
             "expires": expires.strftime("%m/%d/%Y") if expires else "—",
             "status": licence_status(user) if user.licence_issued else "PENDING",
             "avatar_url": user.avatar_url,
@@ -545,7 +542,7 @@ def build_user_cards_context(user: AIDLUser | None, lights: list[str] | None = N
             "first_name": first_name(data["full_name"]),
             "curriculum_version": CURRICULUM_VERSION,
             "verify_url": _verify_url(data["licence_number"]),
-            "licence_image_url": "/api/teams/cards/learners-permit/download/" + (
+            "licence_image_url": "/api/teams/cards/licence/download/" + (
                 f"?email={quote(user.email)}" if user is not None and user.email else ""),
             "highway_code": _highway_code(fx),
             "lights": _traffic_lights(fx, lights),
@@ -579,12 +576,12 @@ def _traffic_lights(fx: dict, chosen: list[str]) -> list[dict]:
 # ---------- guide 8.1: Export Coverage ----------
 
 COVERAGE_COLUMNS = ("name", "email", "role", "status", "highway_code_accepted", "traffic_light_accepted",
-                    "license_class", "license_number", "license_issued", "aup_signed", "aup_accepted",
+                    "license_number", "license_issued", "aup_signed", "aup_accepted",
                     "cards_received")
 
 
 def coverage_data(org) -> dict:
-    """Every member with license class, AUP status and cards received — used
+    """Every member with licence, AUP status and cards received — used
     by the Slack popup, the CSV file sent in Slack and the web page."""
     from .licensing import STATUS_LABELS, team_progress
 
@@ -598,7 +595,6 @@ def coverage_data(org) -> dict:
             "status": STATUS_LABELS[p["status"]].split(" ", 1)[1],
             "highway_code_accepted": day(p["highway_code_at"]),
             "traffic_light_accepted": day(p["traffic_light_at"]),
-            "license_class": "L" if p["member"].licence_issued else "",
             "license_number": p["member"].licence_number,
             "license_issued": day(p["member"].licence_issued_at),
             "aup_signed": "yes" if p["member"].aup_signed else "no",
@@ -610,7 +606,7 @@ def coverage_data(org) -> dict:
     return {
         "org_name": org.name,
         "rows": rows,
-        "licensed": sum(1 for r in rows if r["license_class"]),
+        "licensed": sum(1 for r in rows if r["license_number"]),
         "unsigned": sum(1 for r in rows if r["aup_signed"] == "no"),
         "cards_sent": cards_sent,
     }

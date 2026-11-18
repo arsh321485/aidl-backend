@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {% if found %}
 <title>{{ name }} · AI Driving Licence</title>
-<meta name="description" content="{{ name }} earned an AI Driving Licence (Learner) through {{ org }}. Verified by AIDL.">
+<meta name="description" content="{{ name }} earned an AI Driving Licence through {{ org }}. Verified by AIDL.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="AIDL · AI Driving Licence">
 <meta property="og:title" content="{{ name }} earned an AI Driving Licence">
-<meta property="og:description" content="Issued through {{ org }} · Learner (L) · valid until {{ expires }}. Verified by AIDL.">
+<meta property="og:description" content="Issued through {{ org }} · valid until {{ expires }}. Verified by AIDL.">
 <meta property="og:url" content="{{ page_url }}">
 {% if image %}<meta property="og:image" content="{{ image }}">
 <meta property="og:image:alt" content="AI Driving Licence {{ number }}">
@@ -50,7 +50,6 @@
     {% if image %}<img class="licence" src="{{ image }}" alt="AI Driving Licence {{ number }}" width="800" height="470">{% endif %}
     <dl>
       <dt>Licence no.</dt><dd>{{ number }}</dd>
-      <dt>Class</dt><dd>Learner (L)</dd>
       <dt>Issued through</dt><dd>{{ org }}</dd>
       <dt>Issued</dt><dd>{{ issued }}</dd>
       <dt>Valid until</dt><dd>{{ expires }}</dd>
