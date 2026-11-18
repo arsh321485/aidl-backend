@@ -329,8 +329,11 @@ def _policy_action(payload: dict, action: dict) -> None:
     if org is None or user.role != AIDLUser.Role.ADMIN or not light_admin_context(user)["can_policy"]:
         return
     view = payload.get("view") or {}
+    url = ""
+    if light_admin_context(user)["can_billing"] and not billing.on_promo(org):
+        url = f"{settings.FRONTEND_URL.rstrip('/')}/plans?token={create_access_token(user)}"
     new = policy_cards_slack.action(org, view, action.get("action_id", ""), action.get("value", ""),
-                                    action.get("block_id") or "")
+                                    action.get("block_id") or "", url)
     if new is None:
         return
     result = slack_client.slack_api("views.update", slack_client.bot_token(org),

@@ -32,11 +32,13 @@ from .models import AIDLUser, Organization
 logger = logging.getLogger(__name__)
 TOPICS = range(1, 15)
 SHORT = {1: "Personal devices (BYOD)", 2: "Monitoring", 3: "Privacy on company devices", 4: "Installing software",
-         5: "Passwords & sign-in", 6: "Company data", 7: "AI tools at work", 8: "Email, chat & social media",
+         5: "Passwords & Sign-in", 6: "Data Classification", 7: "AI tools at work", 8: "Email, Chat & Social Media",
          9: "Reporting a problem", 10: "Working remotely", 11: "Who owns your work", 12: "Leaving the company",
          13: "If rules are broken", 14: "Agreeing & reviews"}
 ICONS = {1: "📱", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🔒", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
          12: "🚪", 13: "⚖️", 14: "✍️"}
+# The Trial includes these three topics only (shown first, in this order); the other eleven come with a paid plan.
+FREE_TOPICS = (5, 8, 6)
 SEND_HOUR = 10
 MAX_DAYS_AHEAD = 110  # Slack schedules messages up to 120 days ahead
 POPULAR_AI_TOOLS = ["ChatGPT (Free / Plus)", "ChatGPT Team", "ChatGPT Enterprise", "Microsoft 365 Copilot",
@@ -44,6 +46,26 @@ POPULAR_AI_TOOLS = ["ChatGPT (Free / Plus)", "ChatGPT Team", "ChatGPT Enterprise
                     "Notion AI", "Canva Magic Studio", "Zoom AI Companion", "Slack AI", "DeepL", "Midjourney",
                     "Otter.ai", "Fireflies.ai"]
 APPROVED_AI = "7.1.b"  # "Allowed — approved tools only" → the approved tools list
+
+
+def is_locked(org: Organization | None, n: int) -> bool:
+    """True when topic n is a paid-plan topic and this organization is on the Trial. A card an organization already
+    approved stays editable (nothing that was sent is taken away)."""
+    from . import trial
+
+    if n in FREE_TOPICS or not trial.is_trial(org):
+        return False
+    return aup_store.card(org, n) is None
+
+
+def ordered(org: Organization | None) -> list[int]:
+    """Topics in the order they are shown: on the Trial the free ones first, then the paid ones; else 1-14."""
+    from . import trial
+
+    if not trial.is_trial(org):
+        return list(TOPICS)
+    free = [n for n in FREE_TOPICS] + [n for n in TOPICS if n not in FREE_TOPICS and not is_locked(org, n)]
+    return free + [n for n in TOPICS if is_locked(org, n)]
 
 
 def questions(n: int, answers: dict) -> list[dict]:

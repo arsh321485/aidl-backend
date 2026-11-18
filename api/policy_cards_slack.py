@@ -85,7 +85,23 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
         blocks.append(_ctx(notice))
     answers = aup_store.answers(org, with_tools=False)["answers"]  # once, not per topic
     states = pc.statuses(org)
-    for n in pc.TOPICS:
+    order = pc.ordered(org)
+    trial = any(pc.is_locked(org, n) for n in order)
+    if trial:
+        blocks.append({"type": "section", "text": _md("*✅ Included in your Trial*")})
+    shown_paid = False
+    for n in order:
+        if pc.is_locked(org, n):
+            if not shown_paid:
+                shown_paid = True
+                blocks += [{"type": "divider"},
+                           {"type": "section", "text": _md("*🔒 Unlock with a paid plan*  ·  11 more topics\n"
+                                                           "_Your Trial covers the 3 essentials. Upgrade to give your team the full AI policy._")}]
+            blocks.append({"type": "section", "block_id": f"topic_{n}",
+                           "text": _md(f"🔒 {pc.ICONS[n]} *{pc.SHORT[n]}*  ·  _point {n}_\n⭐ _Paid plan_"),
+                           "accessory": {"type": "button", "text": _text("🔒 Upgrade to unlock"),
+                                         "action_id": "aidl_pc_locked", "value": str(n)}})
+            continue
         st = states.get(n) or {"state": "new"}
         if st["state"] == "sent":
             line, label = f"✅ Sent · {st['agreed']} agreed", "Edit"
@@ -94,6 +110,8 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
         else:
             qs = len(pc.questions(n, answers)) + (1 if n == 7 else 0)
             line, label = f"{qs} question{'s' if qs != 1 else ''}", "Choose"
+        if trial and n in pc.FREE_TOPICS:
+            line += "  ·  🆓 _Free in your Trial_"
         btn = {"type": "button", "text": _text(label), "action_id": "aidl_pc_pick", "value": str(n)}
         if label == "Choose":
             btn["style"] = "primary"
@@ -114,6 +132,41 @@ def _day(iso: str) -> str:
     except (TypeError, ValueError):
         return iso
     return f"{d:%a} {d.day} {d:%b}"
+
+
+# ---------- paid topics (Trial) ----------
+
+PERKS = ("All 14 policy topics, not just 3",
+         "Upload your own AUP and let AIDL turn it into cards",
+         "Your company logo on every card and licence",
+         "Up to 208 awareness cards a year, on a schedule you choose",
+         "Licences valid for a full year, up to your plan's users")
+
+
+def locked_view(org: Organization, n: int, meta: dict, url: str = "") -> dict:
+    """The popup a Trial admin gets from a paid topic: what it is, what a paid plan adds, one button."""
+    blocks = [{"type": "header", "text": _text(f"🔒 {pc.SHORT[n]} is on the paid plans")},
+              _md_section(f"{pc.ICONS[n]} *{pc.SHORT[n]}* is one of the *11 extra policy topics* that come with Basic and "
+                          "Enterprise. Your Trial includes *Passwords & Sign-in*, *Email, Chat & Social Media* and "
+                          "*Data Classification*."),
+              {"type": "divider"},
+              _md_section("*⭐ What you unlock*\n" + "\n".join(f"•  {p}" for p in PERKS))]
+    if url:
+        blocks.append({"type": "actions", "block_id": "aidl_pc_upsell", "elements": [
+            {"type": "button", "text": _text("⬆️ See plans & upgrade"), "style": "primary", "url": url,
+             "action_id": "aidl_link_plans"},
+            {"type": "button", "text": _text("← Back to topics"), "action_id": "aidl_pc_back", "value": "topics"}]})
+    else:
+        blocks += [_ctx("Only the master admin, or an admin allowed to manage the plan, can upgrade. Ask them to open "
+                        "*⬆️ Upgrade plan* in the Admin Center."),
+                   {"type": "actions", "block_id": "aidl_pc_upsell", "elements": [
+                       {"type": "button", "text": _text("← Back to topics"), "action_id": "aidl_pc_back",
+                        "value": "topics"}]}]
+    return _modal(TOPICS, "Paid plan topic", blocks, meta=_keep(meta))
+
+
+def _md_section(text: str) -> dict:
+    return {"type": "section", "text": _md(text)}
 
 
 # ---------- one card ----------
@@ -304,6 +357,8 @@ def redraw(org: Organization, view: dict, *, paste: bool = False) -> dict:
 def submit_card(admin: AIDLUser, org: Organization, view: dict) -> dict:
     meta = _meta(view)
     n = int(meta.get("no") or 1)
+    if pc.is_locked(org, n):  # a paid topic on the Trial: never approved from here, whatever the popup says
+        return {"response_action": "update", "view": locked_view(org, n, meta)}
     a, when, day, pasted = read_state(org, view)
     a["tools"] = _merge(a["tools"], pasted)
     rev = int(meta.get("rev") or 0)
@@ -431,9 +486,12 @@ def send_regulator_card(org_pk, admin_pk) -> None:
 
 # ---------- clicks inside these popups ----------
 
-def action(org: Organization, view: dict, action_id: str, value: str, block_id: str) -> dict | None:
-    """The new view for a click inside a policy-card popup, or None."""
+def action(org: Organization, view: dict, action_id: str, value: str, block_id: str, url: str = "") -> dict | None:
+    """The new view for a click inside a policy-card popup, or None. `url` = this admin's private plans-page link
+    (empty when they can't change the plan)."""
     meta = _meta(view)
+    if action_id in ("aidl_pc_pick", "aidl_pc_locked") and value.isdigit() and pc.is_locked(org, int(value)):
+        return locked_view(org, int(value), meta, url)
     if action_id == "aidl_pc_pick":
         a = aup_store.answers(org)
         return card_view(org, int(value) if value.isdigit() else 1, a, meta)
