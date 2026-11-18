@@ -40,7 +40,7 @@
             <tr>
               <td>{{ r.name }}</td><td class="cov-email">{{ r.email }}</td><td>{{ r.role|title }}</td>
               <td>{{ r.status }}</td><td>{{ r.highway_code_accepted|default:"—" }}</td><td>{{ r.traffic_light_accepted|default:"—" }}</td>
-              <td>{% if r.license_class %}{{ r.license_class }} · {{ r.license_number }}{% else %}—{% endif %}</td>
+              <td>{% if r.license_number %}{{ r.license_number }}{% else %}—{% endif %}</td>
               <td class="{% if r.aup_signed == 'yes' %}cov-yes{% else %}cov-no{% endif %}">{{ r.aup_signed|title }}</td>
               <td>{{ r.cards_received }}</td>
             </tr>

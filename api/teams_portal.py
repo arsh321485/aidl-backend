@@ -233,7 +233,7 @@ def me(request, user, org):
             ctx[kind] = card_image.image_url(item, org)
     if now == "licence" and user.licence_issued and user.avatar_data:
         version = licence_image.url_version(user, org)
-        verify = f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={user.licence_number}"
+        verify = licence_image.share_url(user.licence_number)
         text = quote(f"I just earned my AI Driving Licence from {org.name}!")
         link = quote(verify, safe="")
         ctx["licence"] = {
@@ -271,7 +271,7 @@ def _paw_acked(user: AIDLUser) -> list[str]:
 def me_action(request, user, org):
     """A button in the flow: what employee_flow.advance does for Slack's buttons."""
     from .employee_flow import stage
-    from .licensing import acknowledge, issue_learner_if_ready
+    from .licensing import acknowledge, issue_licence_if_ready
 
     action = request.POST.get("action", "")
     if user.role == AIDLUser.Role.ADMIN or user.slack_left_at or not admin_setup.started(org):
@@ -298,7 +298,7 @@ def me_action(request, user, org):
     else:
         return redirect("teams-app-me")
     if stage(user, org) == "licence" and not user.licence_issued:
-        result = issue_learner_if_ready(user, org)
+        result = issue_licence_if_ready(user, org)
         user.refresh_from_db()
         if result == "issued":
             from .package_delivery import sync_package

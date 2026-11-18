@@ -5,7 +5,8 @@ api/data/awareness_packages.json (`python manage.py import_awareness_packages`):
 the Default package (12), the Basic package (24) and the full library
 (655 cards in 15 topics / categories).
 
-    Trial       Default 12 cards                         1 card a month (a year)
+    Trial       7 days (trial.py): the first Default      2 a week (Mon, Thu), only
+                cards, 1 at the licence + 2 a week        while the Trial lasts
     Basic       2 a week for a year = 104 cards:         2 a week (Mon, Thu)
                 Default 12 + 92 from topics the admin
                 picks (no picks: the manager's Basic 24
@@ -42,8 +43,8 @@ ORDER = ("trial", "basic", "enterprise")
 WEEKS_A_YEAR = 52
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 PLANS = {
-    "trial": {"label": "Trial", "max_users": 5, "schedule": {"monthly": True, "hour": 10},
-              "cadence": "1 card a month", "picks_topics": False, "all_topics": False},
+    "trial": {"label": "Trial", "max_users": 5, "schedule": {"days": (0, 3), "hour": 10},
+              "cadence": "2 cards a week (Mon, Thu)", "picks_topics": False, "all_topics": False},
     "basic": {"label": "Basic", "max_users": None, "schedule": {"days": (0, 3), "hour": 10},
               "cadence": "2 cards a week (Mon, Thu)", "picks_topics": True, "all_topics": False},
     "enterprise": {"label": "Enterprise", "max_users": None, "schedule": {"days": (0, 1, 3, 4), "hour": 10},
@@ -98,11 +99,17 @@ def rank(plan: str) -> int:
 
 # ---------- cards ----------
 
+def trial_weeks() -> int:
+    from django.conf import settings
+
+    return max(1, -(-int(getattr(settings, "TRIAL_DAYS", 7)) // 7))
+
+
 def total_cards(plan: str) -> int:
-    """Cards a plan delivers: the Default 12 on Trial, a year of cards on
-    the weekly plans."""
+    """Cards a plan delivers: on Trial what its few days can carry (the card sent with the licence, then the
+    weekly slots — the first cards of the Default package), a year of cards on the weekly plans."""
     if plan == "trial":
-        return len(_packages()["default"])
+        return min(1 + len(PLANS["trial"]["schedule"]["days"]) * trial_weeks(), len(_packages()["default"]))
     return len(PLANS[plan]["schedule"]["days"]) * WEEKS_A_YEAR
 
 
@@ -141,7 +148,7 @@ def cards_for_plan(org: Organization, plan: str, topics: dict[str, list[str]] | 
 
     cards = list(_packages()["default"])
     if plan == "trial":
-        return cards
+        return cards[:total_cards("trial")]
     total = total_cards(plan)
     if plan == "enterprise":
         chosen = all_topic_codes()
@@ -163,8 +170,7 @@ def package_cards(org: Organization) -> list[dict]:
 
 
 def schedule_of(org: Organization) -> dict:
-    """{"monthly": True, "hour"} or {"days": (...), "hour"} — Enterprise may
-    have its own days and time."""
+    """{"days": (Mon=0 …), "hour"} — Enterprise may have its own days and time."""
     base = dict(plan_of(org)["schedule"])
     custom = _billing(org).get("schedule") or {}
     if plan_of(org).get("custom_schedule") and custom.get("days"):
@@ -174,8 +180,6 @@ def schedule_of(org: Organization) -> dict:
 
 def cadence(org: Organization) -> str:
     s = schedule_of(org)
-    if s.get("monthly"):
-        return "1 card a month"
     return f"{len(s['days'])} cards a week ({', '.join(WEEKDAYS[d] for d in s['days'])}, {s['hour']:02d}:00)"
 
 
@@ -212,7 +216,10 @@ def usage(org: Organization) -> dict:
     key = plan_key(org)
     limit = user_limit(org)
     used = seat_holders(org).count()
+    from . import trial
+
     return {
+        "trial": trial.summary(org),  # {days, days_left, ends_at, expired, started} on Trial, else None
         "plan": key,
         "label": PLANS[key]["label"],
         "package": key,

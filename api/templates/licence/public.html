@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if found %}
+<title>{{ name }} · AI Driving Licence</title>
+<meta name="description" content="{{ name }} earned an AI Driving Licence through {{ org }}. Verified by AIDL.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AIDL · AI Driving Licence">
+<meta property="og:title" content="{{ name }} earned an AI Driving Licence">
+<meta property="og:description" content="Issued through {{ org }} · valid until {{ expires }}. Verified by AIDL.">
+<meta property="og:url" content="{{ page_url }}">
+{% if image %}<meta property="og:image" content="{{ image }}">
+<meta property="og:image:alt" content="AI Driving Licence {{ number }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{ image }}">{% else %}<meta name="twitter:card" content="summary">{% endif %}
+<meta name="twitter:title" content="{{ name }} earned an AI Driving Licence">
+{% else %}
+<title>Licence not found · AIDL</title>
+<meta name="robots" content="noindex">
+{% endif %}
+<style>
+  :root { --ink:#14140f; --paper:#f6f4ec; --card:#fff; --muted:#5d5d52; --line:#d9d6c8; --yellow:#ffcc00; --ok:#1f7a3d; --warn:#b26a00; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --ink:#f3f1e6; --paper:#14140f; --card:#1d1d17; --muted:#a9a899; --line:#34342a; --ok:#58c47a; --warn:#e8a43a; --bad:#f0827b; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:680px; margin:0 auto; padding:max(20px,env(safe-area-inset-top)) 16px 40px; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.04em; margin-bottom:22px; }
+  .brand i { width:28px; height:28px; background:var(--yellow); border-radius:6px; display:inline-block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; }
+  h1 { font-size:1.4rem; line-height:1.25; margin:0 0 6px; text-wrap:balance; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  .licence { width:100%; height:auto; border-radius:10px; display:block; margin:0 0 18px; }
+  dl { display:grid; grid-template-columns:max-content 1fr; gap:8px 18px; margin:0; }
+  dt { color:var(--muted); } dd { margin:0; font-weight:600; overflow-wrap:anywhere; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:999px; border:1px solid currentColor; font-size:.85rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .active { color:var(--ok); } .expired,.suspended { color:var(--warn); }
+  .note { color:var(--muted); font-size:.9rem; margin:16px 0 0; }
+  a.btn { display:inline-block; margin-top:18px; padding:10px 18px; background:var(--yellow); color:#14140f; border-radius:8px; font-weight:700; text-decoration:none; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><i></i> AIDL · AI Driving Licence</div>
+  <div class="card">
+  {% if found %}
+    <h1>{{ name }} has an AI Driving Licence</h1>
+    <p class="sub">Verified by AIDL.{% if status == "active" %} This licence is current in AIDL's records.{% else %} This licence is {{ status }}.{% endif %}</p>
+    {% if image %}<img class="licence" src="{{ image }}" alt="AI Driving Licence {{ number }}" width="800" height="470">{% endif %}
+    <dl>
+      <dt>Licence no.</dt><dd>{{ number }}</dd>
+      <dt>Issued through</dt><dd>{{ org }}</dd>
+      <dt>Issued</dt><dd>{{ issued }}</dd>
+      <dt>Valid until</dt><dd>{{ expires }}</dd>
+      <dt>Status</dt><dd><span class="badge {{ status }}">{{ status }}</span></dd>
+    </dl>
+    {% if not owner %}<p class="note">The holder's name is shortened on this page. The holder can share their own full link from their licence card.</p>{% endif %}
+  {% else %}
+    <h1>We couldn't find that licence</h1>
+    <p class="sub">There is no current AI Driving Licence with the number <b>{{ number }}</b>. Check the number and try again.</p>
+  {% endif %}
+    <a class="btn" href="{{ home|default:'https://aidl-frontend-8owk.vercel.app' }}">About AIDL</a>
+  </div>
+</main>
+</body>
+</html>

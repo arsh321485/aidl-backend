@@ -261,6 +261,10 @@ INTERNAL_SLACK_TEAMS = {t.strip() for t in os.getenv("INTERNAL_SLACK_TEAMS", "T0
 INTERNAL_PROMO_ENABLED = os.getenv("INTERNAL_PROMO_ENABLED", "True").lower() in ("1", "true", "yes")
 INTERNAL_PROMO_CODE = os.getenv("INTERNAL_PROMO_CODE", "AIDL_INTERNAL_QA").strip().upper()
 BILLING_TEST_MODE = os.getenv("BILLING_TEST_MODE", "False").lower() in ("1", "true", "yes")
+# The Trial lasts this many days from the day the programme starts (trial.py); a licence is valid for as long as the
+# organization's plan entitles it to: until the Trial ends, or PAID_LICENCE_DAYS from issue (and from each upgrade).
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))
+PAID_LICENCE_DAYS = int(os.getenv("PAID_LICENCE_DAYS", "365"))
 PLAN_PRICES = {
     "trial": os.getenv("PLAN_PRICE_TRIAL", "Free"),
     "basic": os.getenv("PLAN_PRICE_BASIC", ""),

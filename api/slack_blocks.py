@@ -358,7 +358,9 @@ def _plan_line(d: dict) -> list:
     p = d.get("plan")
     if not p or d.get("policy_only"):
         return []
-    block = _section(f"📦  *{p['label']} plan*\n{p['cards']} awareness cards, {p['cadence']}{SEP}"
+    from .admin_home import _plan_name
+
+    block = _section(f"📦  *{_plan_name(p) if p.get('trial') else p['label'] + ' plan'}*\n{p['cards']} awareness cards, {p['cadence']}{SEP}"
                      f"{p['used']} of {p['limit']} users")
     if d.get("can_billing") and d.get("testing_access"):  # never the website's payment page
         block["accessory"] = _button("⚙️ Change schedule", "aidl_promo_schedule", value="schedule")
@@ -572,20 +574,24 @@ def user_welcome_blocks(member, org) -> list:
 def licence_progress_blocks(member, org) -> list:
     """License tab before the licence exists: what's left to earn it."""
     from .aup_store import points_accepted, required_points
-    from .licensing import ACK_LABELS, LEARNER_REQUIREMENTS, acknowledged_items, missing_for_learner, seats_left
+    from .licensing import ACK_LABELS, ONBOARDING_REQUIREMENTS, acknowledged_items, missing_for_learner, seats_left
 
     done = acknowledged_items(member)
-    lines = [f"{'✅' if item in done else '⬜'}  {ACK_LABELS[item]}" for item in LEARNER_REQUIREMENTS]
+    lines = [f"{'✅' if item in done else '⬜'}  {ACK_LABELS[item]}" for item in ONBOARDING_REQUIREMENTS]
     total = len(required_points(org))
     if total:
         accepted = len(points_accepted(member, org))
         lines.append(f"{'✅' if accepted == total else '⬜'}  📄 Policy cards — {accepted} of {total} agreed")
     blocks = [
         _context(f"*AIDL* · APP  for {org.name}"),
-        {"type": "header", "text": {"type": "plain_text", "text": "🪪 Earn your Learner's Permit", "emoji": True}},
+        {"type": "header", "text": {"type": "plain_text", "text": "🪪 Earn your AI Driving Licence", "emoji": True}},
         _section("Accept all of these and your AI Driving License is issued automatically:\n" + "\n".join(lines)),
     ]
-    if not missing_for_learner(member) and seats_left(org) <= 0:
+    from . import trial
+
+    if not missing_for_learner(member) and trial.expired(org):
+        blocks.append(_context("⏳ All done — but the trial has ended, so your licence is on hold. Your admin can upgrade."))
+    elif not missing_for_learner(member) and seats_left(org) <= 0:
         blocks.append(_context("⏳ All done — your license is waiting for a free seat. Your admin has been told."))
     else:
         blocks.append(_context("Use the tabs below to open each one."))
@@ -603,14 +609,15 @@ def user_license_blocks(member, org) -> list:
 
     issued = member.licence_issued_at.strftime("%m/%d/%Y") if member.licence_issued_at else "—"
     expires = member.licence_expires_at.strftime("%m/%d/%Y") if member.licence_expires_at else "—"
-    frontend = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
-    verify = f"{frontend}/home#verify?lic={member.licence_number}"
+    from .licence_image import share_url
+
+    verify = share_url(member.licence_number)
     note = policy_effects(get_answers(org))["training_note"]
     card = {
         "type": "section",
         "text": _md(f"*AI DRIVING LICENSE* · issued for {org.name}\n*{(member.full_name or '').upper()}*"),
         "fields": [
-            _md("*CLASS*\nLearner's Permit (L)"),
+            _md(f"*LICENCE*\n`{member.licence_number}`"),
             _md(f"*STATUS*\n{licence_status(member) if member.licence_issued else 'PENDING'}"),
             _md(f"*ISSUED*\n{issued}"),
             _md(f"*EXPIRES*\n{expires}"),
@@ -625,16 +632,13 @@ def user_license_blocks(member, org) -> list:
     initials = "".join(w[0] for w in org.name.split()[:2]).upper() or "AI"
     blocks = [
         _context(f"*AIDL* · APP  for {org.name}"),
-        {"type": "header", "text": {"type": "plain_text", "text": "🪪 Your Learner's Permit is ready", "emoji": True}},
-        # Guide 10.2: the L / F switch shows the real level only.
-        _context("🟨 *L · Learner*  ← current level      ⬜ F · Full"),
+        {"type": "header", "text": {"type": "plain_text", "text": "🪪 Your AI Driving Licence is ready", "emoji": True}},
         card,
         _context(f"*{initials}* · Issued for {org.name} · `{member.licence_number}` · verify at aidl.org/verify"),
-        _section("This is your AI Driving License. You're currently at *Level L — Learner.* "
-                 "As you complete lessons and pass checks, you'll move up to higher levels."),
+        _section("This is your AI Driving Licence. Download it, share it, and keep your cards handy."),
         {"type": "actions", "elements": [
             _button("⬇ Download License", "aidl_link_download",
-                    url=f"{_backend_base()}/api/teams/cards/learners-permit/download/?email={quote(member.email)}"),
+                    url=f"{_backend_base()}/api/teams/cards/licence/download/?email={quote(member.email)}"),
         ]},
         {"type": "actions", "elements": [
             _button("𝕏 Share", "aidl_link_x", url=f"https://twitter.com/intent/tweet?text={share_text}&url={link}"),
@@ -665,7 +669,7 @@ def _ack_block(member, item: str) -> dict:
 
 
 def highway_code_blocks(org, member=None) -> list:
-    """Section A · Learner Rules — sent right after the License card."""
+    """Section A · Everyday rules — sent right after the License card."""
     from .org_policy import get_answers, policy_effects
     from .slack_cards import _highway_code
 
@@ -674,7 +678,7 @@ def highway_code_blocks(org, member=None) -> list:
         _context(f"*AIDL* · APP  for {org.name}"),
         {"type": "header", "text": {"type": "plain_text", "text": "📖 The Highway Code", "emoji": True}},
         _section("The everyday rules for using AI safely and confidently. Learn them, follow them, drive happy."),
-        _context("*SECTION A · LEARNER RULES*"),
+        _context("*SECTION A · EVERYDAY RULES*"),
     ]
     for rule in rules:
         blocks.append(_section(f"*{_SIGN[rule['shape']]}* — *{rule['title']}*\n{rule['text']}"))
@@ -690,7 +694,7 @@ def highway_code_full_view(org) -> dict:
     from .slack_cards import _highway_code
 
     rules = _highway_code(policy_effects(get_answers(org)))
-    blocks = [_context(f"*{org.name.upper()} · LEARNER RULES* · Section A · 5 rules, expanded")]
+    blocks = [_context(f"*{org.name.upper()} · EVERYDAY RULES* · Section A · 5 rules, expanded")]
     for rule in rules:
         blocks.append(_section(f"*{_SIGN[rule['shape']]} — {rule['title']}*\n{rule['text']} {rule['full']}"))
     blocks += [{"type": "divider"}, _context("Reference only — no sign-off needed")]
@@ -733,7 +737,7 @@ USER_TABS = (
 
 
 def user_traffic_light_blocks(org, member=None) -> list:
-    """Traffic Light Check for the learner dashboard. The lights come from
+    """Traffic Light Check for the employee dashboard. The lights come from
     the organization's policy answers (not from an admin's selection)."""
     from .models import TrafficLightRating
     from .org_policy import get_answers, policy_effects
@@ -817,7 +821,7 @@ def aup_blocks(aup: dict, member=None) -> list:
             {"type": "header", "text": {"type": "plain_text", "text": "📄 Your AI Acceptable Use Policy", "emoji": True}},
             _section(f"⏳ *{aup['org_name']}* is still setting up its AI policy. Your AIDL admin will send it to you "
                      "here when it's ready."),
-            _context("Meanwhile, start with the *Highway Code* and the *Traffic Light Check* to earn your Learner's Permit."),
+            _context("Meanwhile, start with the *Highway Code* and the *Traffic Light Check* to earn your AI Driving Licence."),
         ]
     blocks = [
         _context(f"*📄 AIDL · Acceptable Use Policy*   |   {aup['org_name']}"),

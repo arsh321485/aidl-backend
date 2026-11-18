@@ -72,7 +72,7 @@ def learner_context(user: AIDLUser, org: Organization) -> dict:
 
 def _licence(user: AIDLUser, org: Organization) -> dict:
     version = licence_image.url_version(user, org)
-    verify = f"{settings.FRONTEND_URL.rstrip('/')}/home#verify?lic={user.licence_number}"
+    verify = licence_image.share_url(user.licence_number)
     text, link = quote(f"I just earned my AI Driving Licence from {org.name}!"), quote(verify, safe="")
     return {
         "link": verify,
@@ -88,7 +88,7 @@ def _licence(user: AIDLUser, org: Organization) -> dict:
 def learner_action(user: AIDLUser, org: Organization, post) -> str:
     """One button in the flow. Returns a notice to show ("" = none)."""
     from api.employee_flow import stage
-    from api.licensing import acknowledge, issue_learner_if_ready
+    from api.licensing import acknowledge, issue_licence_if_ready
 
     if user.role == AIDLUser.Role.ADMIN or user.slack_left_at or not admin_setup.started(org):
         return ""
@@ -116,7 +116,7 @@ def learner_action(user: AIDLUser, org: Organization, post) -> str:
         return ""
 
     if stage(user, org) == "licence" and not user.licence_issued:
-        result = issue_learner_if_ready(user, org)
+        result = issue_licence_if_ready(user, org)
         user.refresh_from_db()
         if result == "no_seats":
             logger.warning("moodle: %s finished every card but org %s has no free seats", user.pk, org.pk)

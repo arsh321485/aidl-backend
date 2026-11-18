@@ -428,9 +428,9 @@ _ACK_TAB = {"highway_code": "highway-code", "traffic_light": "traffic-light"}
 
 
 def _acknowledge(org, member, payload: dict, item: str) -> None:
-    """Record the acknowledgement; once both are done the Learner licence is
+    """Record the acknowledgement; once both are done the licence is
     issued automatically and the message flips to the License tab."""
-    from .licensing import acknowledge, issue_learner_if_ready
+    from .licensing import acknowledge, issue_licence_if_ready
     from .slack_blocks import user_dashboard_blocks
 
     from .aup_store import is_point_item, required_points
@@ -448,7 +448,7 @@ def _acknowledge(org, member, payload: dict, item: str) -> None:
         tab = "aup"
     else:
         return
-    result = issue_learner_if_ready(member, org)
+    result = issue_licence_if_ready(member, org)
     member.refresh_from_db()
     if result in ("issued", "no_seats"):
         tab = "license"
@@ -461,9 +461,9 @@ def _acknowledge(org, member, payload: dict, item: str) -> None:
             "channel": channel, "ts": ts, "text": "AIDL dashboard", "blocks": user_dashboard_blocks(member, org, tab)})
     slack_user = (payload.get("user") or {}).get("id", "")
     if result == "issued":
-        slack_client.send_dm(token, org, slack_user, text="🎉 Your Learner's Permit is ready!", blocks=[
+        slack_client.send_dm(token, org, slack_user, text="🎉 Your AI Driving Licence is ready!", blocks=[
             {"type": "section", "text": {"type": "mrkdwn", "text":
-                f"🎉 *Your Learner's Permit is ready!*  `{member.licence_number}`\nOpen the *License* tab above to download or share it."}}])
+                f"🎉 *Your AI Driving Licence is ready!*  `{member.licence_number}`\nOpen the *License* tab above to download or share it."}}])
         from .package_delivery import sync_package
 
         sync_package(org, member)  # card 1 now, the rest of the plan's package scheduled

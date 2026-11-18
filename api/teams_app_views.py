@@ -137,7 +137,7 @@ def _admin_tab_context(request, active_tab: str, user_bits: dict) -> dict:
 
 
 def _render_learner_tab(request, tab: str, user_bits: dict):
-    """The Learner's 4-tab dashboard (Home / Learner's Permit / Highway Code /
+    """The employee's 4-tab dashboard (Home / AI Driving Licence / Highway Code /
     Traffic Light Check) — same nav-pill design as Admin Center, personalized
     plain HTML rendered client-side from JSON fetched via teams_tab_content_json
     (no Adaptive Cards / Action.OpenUrl here, so nothing pops out of the tab)."""
@@ -215,7 +215,7 @@ def teams_tab_page(request, tab: str):
             context = build_user_dashboard_payload(db_user)
         return render(request, "teams/user_dashboard.html", context)
 
-    # Learner's 4-tab dashboard (Home / Learner's Permit / Highway Code /
+    # Employee's 4-tab dashboard (Home / AI Driving Licence / Highway Code /
     # Traffic Light Check) — still reachable even for a non-learner viewer
     # (e.g. previewing without ?email=), just without live personalization.
     if tab not in CARD_BUILDERS:
@@ -293,7 +293,7 @@ def teams_tab_content_json(request, tab: str):
 @permission_classes([AllowAny])
 def teams_licence_download(request):
     """The learner's licence as a PNG (licence_image.py). Someone without a
-    licence yet gets the same card with what the Learner's Permit tab shows."""
+    licence yet gets the same card with what the AI Driving Licence tab shows."""
     from . import licence_image
 
     user_bits = _request_user_bits(request)
@@ -379,7 +379,7 @@ def teams_app_index(request):
 @permission_classes([IsAuthenticated])
 def teams_install_channel_tabs(request):
     """
-    Install Home / Learner's Permit / Highway Code / Traffic Light Check tabs
+    Install Home / AI Driving Licence / Highway Code / Traffic Light Check tabs
     on the aidl dashboard channel only (never General).
     """
     user = request.user
@@ -702,17 +702,21 @@ def teams_admin_issue_licence(request):
     if target is None:
         return Response({"error": "user_not_found"}, status=status.HTTP_404_NOT_FOUND)
 
-    from datetime import timedelta
-
     from django.utils import timezone
 
+    from . import trial
+    from .org_service import get_organization_for_user
+
     now = timezone.now()
+    valid_until = trial.licence_valid_until(get_organization_for_user(target), now)
+    if valid_until is None and not target.licence_issued_at:
+        return Response({"error": "trial_ended"}, status=status.HTTP_409_CONFLICT)
     target.licence_issued = True
     if not target.licence_number:
         target.licence_number = _generate_licence_number()
     if not target.licence_issued_at:
         target.licence_issued_at = now
-        target.licence_expires_at = now + timedelta(days=365)
+        target.licence_expires_at = valid_until
     target.save(
         update_fields=[
             "licence_issued",
@@ -735,10 +739,6 @@ def teams_admin_issue_licence(request):
 
 
 def _generate_licence_number() -> str:
-    import secrets
+    from .licensing import new_licence_number
 
-    for _ in range(5):
-        candidate = f"AIDL-L-{secrets.randbelow(10**8):08d}"
-        if not AIDLUser.objects.filter(licence_number=candidate).exists():
-            return candidate
-    return f"AIDL-L-{secrets.randbelow(10**8):08d}"
+    return new_licence_number()

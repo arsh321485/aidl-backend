@@ -94,6 +94,10 @@ def send_item(org: Organization, item: str) -> tuple[int, int]:
     now = timezone.now().isoformat()
     # The older dashboard tabs show these cards once "sent".
     update(org, flow_started=now, aup_sent=now, traffic_light_sent=now, highway_code_sent=now)
+    from . import trial
+
+    if trial.is_trial(org):
+        trial.start(org)  # the 7-day Trial starts the day the programme does
     from .teams_channel import is_teams, start_programme
 
     if is_teams(org):
@@ -204,6 +208,9 @@ def reset(org: Organization, *, answers: bool = True, fresh: bool = False) -> di
     result = {"acceptances_removed": removed, "answers_cleared": answers}
     if fresh:
         from .package_delivery import pause_package
+        from . import trial
+
+        trial.restart(org)  # a fresh start includes a fresh Trial
 
         licensed = AIDLUser.objects.filter(organization_id=str(org.pk), licence_issued=True).exclude(
             role=AIDLUser.Role.ADMIN)

@@ -2,11 +2,12 @@
 
 When a learner earns their licence, card 1 of their plan's package is sent
 to their DM straight away and the rest are scheduled with
-chat.scheduleMessage at the plan's cadence (plans.py: Trial 1 a month,
-Basic Mon + Thu, Enterprise 4 a week on the admin's days), in the learner's
-time zone. Slack posts them. Slack only accepts messages up to 120 days
-ahead, so later cards are saved and handed to Slack by schedule_due() —
-run `python manage.py schedule_package_cards` daily.
+chat.scheduleMessage at the plan's cadence (plans.py: Trial and Basic Mon +
+Thu, Enterprise 4 a week on the admin's days), in the learner's time zone.
+Slack posts them. On Trial nothing is sent or scheduled after the Trial ends
+(within_trial; trial.close_trial cancels what is left). Slack only accepts
+messages up to 120 days ahead, so later cards are saved and handed to Slack
+by schedule_due() — run `python manage.py schedule_package_cards` daily.
 
 Only cards an admin approved are sent (card_approval.py). A card still
 waiting at its slot is postponed: the slot goes to the next approved card,
@@ -43,9 +44,8 @@ _MAX_AHEAD = timedelta(days=119)
 
 def post_times(start: datetime, count: int, schedule, tz_offset: int = 0) -> list[datetime]:
     """The next `count` delivery slots after `start` (UTC), local time.
-    `schedule` is plans.schedule_of(): {"days": (Mon=0 …), "hour"} or
-    {"monthly": True, "hour"} (first Monday of each month); a plain number
-    means that many cards a week."""
+    `schedule` is plans.schedule_of(): {"days": (Mon=0 …), "hour"}; a plain
+    number means that many cards a week."""
     if isinstance(schedule, int):
         schedule = {"days": _WEEKDAYS.get(schedule, _WEEKDAYS[2]), "hour": _POST_HOUR}
     hour = int(schedule.get("hour", _POST_HOUR))
@@ -54,14 +54,18 @@ def post_times(start: datetime, count: int, schedule, tz_offset: int = 0) -> lis
     times: list[datetime] = []
     while len(times) < count:
         utc = local - offset
-        if schedule.get("monthly"):
-            ok = local.weekday() == 0 and local.day <= 7  # first Monday of the month
-        else:
-            ok = local.weekday() in schedule["days"]
-        if ok and utc > start + timedelta(hours=1):
+        if local.weekday() in schedule["days"] and utc > start + timedelta(hours=1):
             times.append(utc)
         local += timedelta(days=1)
     return times
+
+
+def within_trial(org: Organization, times: list[datetime]) -> list[datetime]:
+    """On Trial: only the slots up to the end of the Trial. Paid plans: all of them."""
+    from . import trial
+
+    end = trial.ends_at(org)
+    return times if end is None else [t for t in times if t <= end]
 
 
 def _slack_user_id(member: AIDLUser) -> str:
@@ -164,6 +168,11 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
     token = slack_client.bot_token(org)
     if not slack_user or not token:
         return {"skipped": "not_slack"}
+    from . import trial
+
+    if trial.expired(org):  # nothing is sent or scheduled after the Trial
+        pause_package(org, member)
+        return {"skipped": "trial_ended"}
 
     if full:
         pause_package(org, member)
@@ -212,7 +221,8 @@ def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dic
 
     # Postponed cards follow the learner's last scheduled card.
     start = max([now] + [r.post_at for r in rows if r.status == PackageDelivery.Status.SCHEDULED])
-    for (position, card), when in zip(todo, post_times(start, len(todo), schedule_of(org), tz_offset)):
+    slots = within_trial(org, post_times(start, len(todo), schedule_of(org), tz_offset))
+    for (position, card), when in zip(todo, slots):
         row = PackageDelivery(**common, card_no=card["no"], post_order=position, post_at=when)
         if when - now <= _MAX_AHEAD:
             res = slack_client.slack_api("chat.scheduleMessage", token, json={
@@ -237,6 +247,7 @@ def schedule_due(org: Organization) -> int:
         return 0
     from .card_approval import sequence
 
+    cancel_after_trial(org)
     seq = sequence(org)
     cards = {c["no"]: c for c in seq if c["approval"] == "approved"}
     total = len(seq)
@@ -260,6 +271,26 @@ def schedule_due(org: Organization) -> int:
             row.error = res.get("error", "") or "schedule failed"
         row.save()
     return done
+
+
+def cancel_after_trial(org: Organization) -> int:
+    """On Trial: cards scheduled for after the Trial's end (e.g. a year of monthly cards from before the 7-day
+    Trial) are cancelled, in Slack too. Returns how many."""
+    from . import trial
+
+    end = trial.ends_at(org)
+    if end is None:
+        return 0
+    token = slack_client.bot_token(org)
+    rows = list(PackageDelivery.objects.filter(organization_id=str(org.pk), status=PackageDelivery.Status.SCHEDULED,
+                                               post_at__gt=end))
+    for row in rows:
+        if row.scheduled_message_id and token:
+            slack_client.slack_api("chat.deleteScheduledMessage", token, json={
+                "channel": row.slack_channel_id, "scheduled_message_id": row.scheduled_message_id})
+        row.status = PackageDelivery.Status.CANCELLED
+        row.save(update_fields=["status"])
+    return len(rows)
 
 
 def sync_organization(org: Organization, full: bool = True) -> dict:

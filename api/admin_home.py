@@ -219,7 +219,7 @@ def _next_step(d: dict, all_steps: list[dict]) -> list:
     else:
         blocks.append(_context(f"🔐 Your admin permissions don't cover this step. *{_master_name(d)}* (master admin) "
                                "can do it, or give you access."))
-    return blocks
+    return [b for b in blocks if b]  # _actions / _upload_note give None when there is nothing to show
 
 
 # ---------- things that need an admin (any time, not only during setup) ----------
@@ -230,10 +230,24 @@ def _attention(d: dict) -> list:
     upgrade = None
     if d.get("can_billing") and not d.get("testing_access") and p.get("can_upgrade"):
         upgrade = _button("⬆️ Upgrade plan", "aidl_upgrade", "upgrade")
+    tr = p.get("trial") or {}
+    if tr.get("expired"):
+        items.append(_section(f"⏰ *Your {tr['days']}-day Trial has ended.*\nAwareness cards have stopped and nobody new can "
+                              "earn a licence. Everything your team has done is kept. Upgrading extends their "
+                              "licences and starts the cards again.",
+                              accessory=upgrade))
+        if not upgrade and not d.get("can_billing"):
+            items.append(_context(f"🔐 Upgrading needs the plan permission. *{_master_name(d)}* (master admin) can do it."))
+    elif tr.get("started") and tr.get("days_left", 9) <= 2:
+        items.append(_section(f"⏳ *Your Trial ends in {_plural(tr['days_left'], 'day', 'days')}.*\nLicences and awareness "
+                              "cards stop then. Upgrade to keep them going.", accessory=upgrade))
     if p.get("full"):
         items.append(_section(f"⛔ *All {p['limit']} seats on your {p['label']} plan are in use.*\nPeople added to the "
                               "channel now are taken out again automatically.", accessory=upgrade))
-    if t.get("waiting_seat"):
+    if t.get("waiting_seat") and tr.get("expired"):
+        items.append(_context(f"⏳ {_plural(t['waiting_seat'], 'person has', 'people have')} finished every card and "
+                              f"will get {'their' if t['waiting_seat'] > 1 else 'a'} licence as soon as you upgrade."))
+    elif t.get("waiting_seat"):
         items.append(_section(f"⏳ *{_plural(t['waiting_seat'], 'person has', 'people have')} finished but "
                               f"{'is' if t['waiting_seat'] == 1 else 'are'} waiting for a free seat* to get a licence.",
                               accessory=None if p.get("full") else upgrade))
@@ -329,8 +343,23 @@ def _plan_line(d: dict) -> dict | None:
     a = st["approvals"]
     logo = ("on your cards and licences" if d.get("has_logo") else "not added yet") if p.get("plan") != "trial" \
         else "Basic and Enterprise plans"
+    if p.get("trial"):  # a few cards fit in the Trial's days
+        return _context(f"Awareness cards: *{p['cards']} during your Trial*, {a['approved']} approved  ·  "
+                        f"{p['cadence']}  ·  Company logo: {logo}")
     return _context(f"Awareness cards: *{p['cards']} in your {p['label']} plan*, {a['approved']} approved  ·  "
                     f"{p['cadence']}  ·  Company logo: {logo}")
+
+
+def _plan_name(p: dict) -> str:
+    """"Basic", or on Trial how long it has left."""
+    tr = p.get("trial")
+    if not p or not tr:
+        return p.get("label", "—") if p else "—"
+    if not tr["started"]:
+        return f"Trial · {tr['days']} days"
+    if tr["expired"]:
+        return "Trial · ended"
+    return f"Trial · {_plural(tr['days_left'], 'day', 'days')} left"
 
 
 def _manage(d: dict, all_steps: list[dict]) -> list:
@@ -378,7 +407,7 @@ def _overview(d: dict, user: AIDLUser, all_steps: list[dict], returning: bool) -
         _section(f"You're managing AI Driving Licence for *{d['org_name']}* as {_who(d, user)}."),
         {"type": "section", "fields": [
             _md(f"*Organisation*\n{d['org_name']}"),
-            _md(f"*Plan*\n{p.get('label', '—')}"),
+            _md(f"*Plan*\n{_plan_name(p)}"),
             _md(f"*Team*\n{seats}"),
             _md(f"*Setup*\n{'●' * count}{'○' * (5 - count)}  {count} of 5 steps"),
         ], **({"accessory": accessory} if accessory else {})},
@@ -411,16 +440,17 @@ def admin_home_blocks(d: dict, user: AIDLUser, *, returning: bool = True) -> lis
 def employee_home_blocks(member: AIDLUser, org: Organization) -> list:
     from . import admin_setup
     from .aup_store import points_accepted, required_points
-    from .licensing import ACK_LABELS, LEARNER_REQUIREMENTS, acknowledged_items, licence_status
+    from .licensing import ACK_LABELS, ONBOARDING_REQUIREMENTS, acknowledged_items, licence_status
 
     blocks = [_context(f"*AIDL*  ·  AI Driving Licence for *{org.name}*"),
               {"type": "header", "text": {"type": "plain_text", "text": "Your AI Driving Licence", "emoji": True}}]
     if member.licence_issued:
         until = member.licence_expires_at.strftime("%d %b %Y") if member.licence_expires_at else "—"
+        since = member.licence_issued_at.strftime("%d %b %Y") if member.licence_issued_at else "—"
         blocks += [
             {"type": "section", "fields": [_md(f"*Licence*\n`{member.licence_number}`"),
                                            _md(f"*Status*\n{licence_status(member).title()}"),
-                                           _md(f"*Class*\nLearner (L)"), _md(f"*Valid until*\n{until}")]},
+                                           _md(f"*Issued*\n{since}"), _md(f"*Valid until*\n{until}")]},
             _context("Your licence card, with Download and Share, is in the *Messages* tab. New awareness cards "
                      "arrive there too."),
         ]
@@ -429,13 +459,17 @@ def employee_home_blocks(member: AIDLUser, org: Organization) -> list:
                                "tab here. There's nothing for you to do yet."))
     else:
         done = acknowledged_items(member)
-        lines = [f"{'✅' if item in done else '⬜'}  {ACK_LABELS[item]}" for item in LEARNER_REQUIREMENTS]
+        lines = [f"{'✅' if item in done else '⬜'}  {ACK_LABELS[item]}" for item in ONBOARDING_REQUIREMENTS]
         total = len(required_points(org))
         if total:
             agreed = len(points_accepted(member, org))
             lines.append(f"{'✅' if agreed >= total else '⬜'}  📄 Policy cards: {agreed} of {total} agreed")
+        from . import trial
+
         blocks += [_section("*To earn your licence*\n" + "\n".join(lines)),
-                   _context("Your cards are in the *Messages* tab. Press the button on each one.")]
+                   _context("The trial has ended, so licences are on hold. Your AIDL admin can upgrade to continue."
+                            if trial.expired(org) else
+                            "Your cards are in the *Messages* tab. Press the button on each one.")]
     blocks.append(_actions("aidl_home_employee", _button("☰ Menu", "aidl_employee_menu", "menu")))
     blocks.append(_updated())
     return blocks

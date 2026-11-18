@@ -3,12 +3,6 @@
 
 {% block styles %}
   /* ---------- level strip: shows the real level only (guide 10.2) ---------- */
-  .class-strip { display: flex; gap: 6px; margin: 12px 0 0; }
-  .class-chip { flex: 1; text-align: center; border: 2px solid #D1D1D1; border-radius: 6px; padding: 7px 3px; font-family: "Bungee", sans-serif; font-size: 12px; color: #B0B0B0; }
-  .class-chip span { display: block; font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #8A8A8A; margin-top: 3px; }
-  .class-chip.current { border-color: var(--asphalt); background: var(--sign-yellow); color: var(--asphalt); }
-  .class-chip.current.full { background: var(--signal-green); }
-  .class-chip.current span { color: var(--asphalt); }
 
   .lic-wrap { margin: 12px 0; }
   .lic-wrap img { display: block; width: 100%; height: auto; }
@@ -108,25 +102,20 @@
       <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
       <div class="msg-col">
         <div class="app-line"><span class="bot-name">AIDL</span><span class="bot-tag">APP</span> <span class="org-tag">for {{ d.org_name }}</span></div>
-        <div class="header-block">🪪 {% if d.licence_class == "F" %}Your Full License is ready{% else %}Your Learner's Permit is ready{% endif %}</div>
+        <div class="header-block">🪪 Your AI Driving Licence is ready</div>
 
-        <div class="class-strip" aria-label="License level">
-          <div class="class-chip{% if d.licence_class == 'L' %} current{% endif %}"{% if d.licence_class == 'L' %} aria-current="true"{% endif %}>L<span>Learner</span></div>
-          <div class="class-chip{% if d.licence_class == 'F' %} current full{% endif %}"{% if d.licence_class == 'F' %} aria-current="true"{% endif %}>F<span>Full</span></div>
-        </div>
 
         <div class="lic-wrap">
           <img src="{{ d.licence_image_url }}" alt="AI Driving Licence {{ d.licence_number }} for {{ d.full_name }}" />
         </div>
 
         <div class="section-text">
-          {% if d.licence_class == "F" %}This is your AI Driving License. You've reached <strong>Level F — Full.</strong> You've completed every lesson and cleared the Data Ethics Gate.
-          {% else %}This is your AI Driving License. You're currently at <strong>Level L — Learner.</strong> As you complete lessons and pass checks, you'll move up to higher levels.{% endif %}
+          This is your AI Driving Licence. Download it, share it, and keep your cards handy.
         </div>
 
         <div class="actions-row">
           <a class="slack-btn download-btn" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center"
-             href="/api/teams/cards/learners-permit/download/{% if d.download_email %}?email={{ d.download_email|urlencode }}{% endif %}" download>Download License</a>
+             href="/api/teams/cards/licence/download/{% if d.download_email %}?email={{ d.download_email|urlencode }}{% endif %}" download>Download License</a>
           <div class="share-row">
             <span class="share-label">Share:</span>
             <a class="share-btn x" target="_blank" rel="noopener" aria-label="Share on X" href="https://twitter.com/intent/tweet?text={{ 'I just earned my AI Driving License'|urlencode }}&url={{ d.verify_url|urlencode }}"><svg viewBox="0 0 24 24" fill="#fff"><path d="M18.9 2H22l-7.6 8.7L23 22h-6.6l-5.2-6.6L5.3 22H2l8.2-9.4L1.5 2h6.8l4.7 6.1L18.9 2Zm-1.2 18h1.8L7.4 4H5.5l12.2 16Z"/></svg></a>
@@ -144,7 +133,7 @@
 
 {# ================= HIGHWAY CODE (guide 10.3) ================= #}
 <section class="card-section" id="card-highway-code" role="tabpanel" hidden>
-  <h2 class="section-label">Dashboard — Highway Code <span>Section A · Learner Rules</span></h2>
+  <h2 class="section-label">Dashboard — Highway Code <span>Section A · Everyday Rules</span></h2>
   <div class="msg">
     <div class="msg-row">
       <div class="avatar"><img src="/static/aidl/logo.png" alt="AIDL" /></div>
@@ -203,7 +192,7 @@
 <div class="modal-backdrop" id="highwayModal" role="dialog" aria-modal="true" aria-labelledby="highwayTitle">
   <div class="modal">
     <div class="modal-head">
-      <div><div class="label-caps">{{ d.org_name }} · Learner Rules</div><h3 id="highwayTitle">The Highway Code — Full Edition</h3></div>
+      <div><div class="label-caps">{{ d.org_name }} · Everyday Rules</div><h3 id="highwayTitle">The Highway Code — Full Edition</h3></div>
       <button class="modal-close" type="button" data-close="highwayModal" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">

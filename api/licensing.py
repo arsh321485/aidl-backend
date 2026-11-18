@@ -1,9 +1,10 @@
 """Licence rules — platform-neutral (Slack today, Teams later).
 
-A user earns the Learner (L) licence by accepting the Highway Code, the
+A user earns the AI Driving Licence by accepting the Highway Code, the
 Traffic Light Check and every policy card the admin has sent so far
 (aup_store.py / policy_cards.py). Nobody issues licences by hand; admins only see the result.
-The organization's seat limit still applies.
+The organization's seat limit still applies, and so does its plan: a licence is valid for as long as the plan
+entitles it to (trial.py) — until the Trial ends, or a year on a paid plan.
 """
 
 from __future__ import annotations
@@ -16,15 +17,15 @@ from django.utils import timezone
 
 from .models import Acknowledgement, AIDLUser, Organization
 
-# Things a user must acknowledge for the Learner licence, and their content
+# Things a user must acknowledge for the licence, and their content
 # version (bump when the text changes so people re-acknowledge).
-LEARNER_REQUIREMENTS = ("highway_code", "traffic_light")
+ONBOARDING_REQUIREMENTS = ("highway_code", "traffic_light")
 ACK_VERSION = "v1"
 ACK_LABELS = {"highway_code": "📖 Highway Code", "traffic_light": "🚦 Traffic Light Check",
               "aup": "📄 Policy cards"}
 # Items a user can accept: the two above (version ACK_VERSION) and the policy
 # cards "aup_1" … "aup_14" (each versioned by its card, aup_store.py).
-ACK_ITEMS = LEARNER_REQUIREMENTS + ("aup",)
+ACK_ITEMS = ONBOARDING_REQUIREMENTS + ("aup",)
 
 
 def acknowledged_items(member: AIDLUser) -> set[str]:
@@ -74,7 +75,7 @@ def missing_for_learner(member: AIDLUser) -> list[str]:
     from .org_service import get_organization_for_user
 
     done = acknowledged_items(member)
-    missing = [item for item in LEARNER_REQUIREMENTS if item not in done]
+    missing = [item for item in ONBOARDING_REQUIREMENTS if item not in done]
     if not all_points_accepted(member, get_organization_for_user(member)):
         missing.append("aup")
     return missing
@@ -105,10 +106,10 @@ def seats_left(org: Organization) -> int:
 
 def new_licence_number() -> str:
     for _ in range(5):
-        number = f"AIDL-L-{secrets.randbelow(10**4):04d}-{secrets.randbelow(10**4):04d}"
+        number = f"AIDL-{secrets.randbelow(10**4):04d}-{secrets.randbelow(10**4):04d}"
         if not AIDLUser.objects.filter(licence_number=number).exists():
             return number
-    return f"AIDL-L-{secrets.randbelow(10**4):04d}-{secrets.randbelow(10**4):04d}"
+    return f"AIDL-{secrets.randbelow(10**4):04d}-{secrets.randbelow(10**4):04d}"
 
 
 def licence_status(member: AIDLUser) -> str:
@@ -122,37 +123,44 @@ def licence_status(member: AIDLUser) -> str:
     return "EXPIRED" if expires is not None and expires < timezone.now() else "ACTIVE"
 
 
-def issue_learner_if_ready(member: AIDLUser, org: Organization) -> str:
-    """'issued', 'already', 'left', 'not_ready' or 'no_seats'."""
+def issue_licence_if_ready(member: AIDLUser, org: Organization) -> str:
+    """'issued', 'already', 'left', 'not_ready', 'trial_ended' or 'no_seats'."""
+    from . import trial
+
     if member.licence_issued:
         return "already"
     if member.slack_left_at:
         return "left"
     if missing_for_learner(member):
         return "not_ready"
+    now = timezone.now()
+    valid_until = trial.licence_valid_until(org, now)
+    if valid_until is None:  # the organization's Trial is over: upgrade first
+        return "trial_ended"
     if seats_left(org) <= 0:
         return "no_seats"
-    now = timezone.now()
     member.licence_issued = True
     member.licence_number = member.licence_number or new_licence_number()
     member.licence_issued_at = now
-    member.licence_expires_at = now + timedelta(days=365)
+    member.licence_expires_at = valid_until
     member.save(update_fields=["licence_issued", "licence_number", "licence_issued_at", "licence_expires_at", "updated_at"])
     return "issued"
 
 
 def issue_individual_licence(member: AIDLUser) -> None:
-    """Website individuals: Learner (L) licence on sign-up, valid 365 days.
-    (Organization members earn theirs in Slack — issue_learner_if_ready.)"""
+    """Website individuals: an AI Driving Licence on sign-up. They belong to no organization and so to no plan:
+    valid PAID_LICENCE_DAYS (a year).
+    (Organization members earn theirs in Slack — issue_licence_if_ready.)"""
+    from . import trial
+
     if member.licence_issued:
         return
     now = timezone.now()
     member.licence_issued = True
-    member.license_class = AIDLUser.LicenseClass.CLASS_L
     member.licence_number = member.licence_number or new_licence_number()
     member.licence_issued_at = now
-    member.licence_expires_at = now + timedelta(days=365)
-    member.save(update_fields=["licence_issued", "license_class", "licence_number", "licence_issued_at",
+    member.licence_expires_at = now + timedelta(days=trial.licence_days())
+    member.save(update_fields=["licence_issued", "licence_number", "licence_issued_at",
                                "licence_expires_at", "updated_at"])
 
 
@@ -168,7 +176,7 @@ STATUS_LABELS = {
 
 
 def member_status(member: AIDLUser, done: set[str], policy_needed: bool = True) -> str:
-    complete = (all(item in done for item in LEARNER_REQUIREMENTS)  # no cards sent = no policy to agree
+    complete = (all(item in done for item in ONBOARDING_REQUIREMENTS)  # no cards sent = no policy to agree
                 and ("aup" in done or not policy_needed))
     if member.licence_issued:
         # Licences from the old Add User flow were issued without acknowledgements.

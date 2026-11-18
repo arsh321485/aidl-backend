@@ -54,7 +54,7 @@ def api_index(request):
             "teams_app": {
                 "org_display_name": getattr(settings, "AIDL_ORG_DISPLAY_NAME", "Northwind Logistics"),
                 "send_welcome_on_signup": bool(getattr(settings, "MS_SEND_WELCOME_CARD", True)),
-                "tabs": ["home", "learners-permit", "highway-code", "traffic-light-check"],
+                "tabs": ["home", "licence", "highway-code", "traffic-light-check"],
             },
         }
     )

@@ -7,7 +7,8 @@
   <p class="steps" aria-hidden="true">{% for _ in bar %}🟩{% endfor %}{% for _ in rest %}⬜{% endfor %}</p>
   <p><b>{{ st.done_count }} of 5 setup steps done</b></p>
   <div class="spread" style="margin-top:8px">
-    <div>📦 <b>{{ plan.label }} plan</b> · {{ plan.cards }} awareness cards, {{ plan.cadence }} · {{ plan.used }} of {{ plan.limit }} users</div>
+    <div>📦 <b>{% if plan.trial %}Trial{% if not plan.trial.started %} · {{ plan.trial.days }} days{% elif plan.trial.expired %} · ended{% else %} · {{ plan.trial.days_left }} day{{ plan.trial.days_left|pluralize }} left{% endif %}{% else %}{{ plan.label }} plan{% endif %}</b> · {{ plan.cards }} awareness cards, {{ plan.cadence }} · {{ plan.used }} of {{ plan.limit }} users
+      {% if plan.trial.expired %}<br><b>Your {{ plan.trial.days }}-day Trial has ended.</b> Awareness cards have stopped and nobody new can earn a licence. Upgrading extends everyone's licences and keeps their seats.{% endif %}</div>
     <div class="row" style="flex:none">
       {% if can.can_billing and plan.can_upgrade %}<a class="btn sm go" href="{% url 'teams-app-plans' %}">⬆️ Upgrade plan</a>{% endif %}
       {% if can.can_admins %}{% if logo_allowed %}<a class="btn sm" href="{% url 'teams-app-logo' %}">🖼 {% if org.logo_data %}Change{% else %}Add{% endif %} logo</a>{% else %}<span class="muted">Your logo on cards is a paid feature.</span>{% endif %}{% endif %}

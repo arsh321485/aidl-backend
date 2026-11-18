@@ -8,7 +8,7 @@ from .licensing import licence_status
 
 TEAMS_TABS = (
     ("home", "Home", "🏠"),
-    ("learners-permit", "Learner's Permit", "🪪"),
+    ("licence", "AI Driving Licence", "🪪"),
     ("highway-code", "Highway Code", "📖"),
     ("traffic-light-check", "Traffic Light Check", "🚦"),
 )
@@ -298,51 +298,8 @@ def build_home_card(*, full_name: str = "", org_name: str = "", user=None) -> di
     }
 
 
-def _level_toggle(active: str) -> dict:
-    def _tile(code: str, label: str, is_active: bool) -> dict:
-        return {
-            "type": "Column",
-            "width": "stretch",
-            "items": [
-                {
-                    "type": "Container",
-                    "style": "emphasis",
-                    **({"backgroundImage": {"url": _YELLOW_BG, "fillMode": "repeat"}} if is_active else {}),
-                    "items": [
-                        {
-                            "type": "TextBlock",
-                            "text": code,
-                            "weight": "Bolder",
-                            "horizontalAlignment": "Center",
-                            "spacing": "None",
-                            "isSubtle": not is_active,
-                        },
-                        {
-                            "type": "TextBlock",
-                            "text": label,
-                            "size": "Small",
-                            "weight": "Bolder",
-                            "horizontalAlignment": "Center",
-                            "spacing": "None",
-                            "isSubtle": not is_active,
-                        },
-                    ],
-                }
-            ],
-        }
-
-    return {
-        "type": "ColumnSet",
-        "spacing": "Medium",
-        "columns": [
-            _tile("L", "Learner", active == "learner"),
-            _tile("F", "Full", active == "full"),
-        ],
-    }
-
-
 def _licence_facts(*, full_name: str = "", org_name: str = "", user=None) -> dict:
-    """Real licence fields from the DB when the learner's licence has been
+    """Real licence fields from the DB when the licence has been
     issued; otherwise the same made-up-from-the-name placeholder this card
     always showed, so a preview with no signed-in user still renders."""
     name = (full_name or (user.full_name if user else "") or "Jordan Ellis").strip().upper()
@@ -358,9 +315,9 @@ def _licence_facts(*, full_name: str = "", org_name: str = "", user=None) -> dic
         }
     return {
         "name": name,
-        "licence_number": "AIDL-L-" + "".join(str(ord(c) % 10) for c in (name[:4] or "AIDL")),
+        "licence_number": "AIDL-" + "".join(str(ord(c) % 10) for c in (name[:4] or "AIDL")),
         "issued": "Today",
-        "expires": "1 year from issue",
+        "expires": "Until the end of your plan's period",
         "status": "ACTIVE" if (user is None or user.licence_issued) else "NOT YET ISSUED",
     }
 
@@ -373,17 +330,17 @@ def _licence_card_visual(*, full_name: str, org_name: str, user=None) -> dict:
     email = (user.email if user else "").strip()
     return {
         "type": "Image",
-        "url": f"{_tabs_base_url()}/cards/learners-permit/download/" + (f"?email={quote(email)}" if email else ""),
+        "url": f"{_tabs_base_url()}/cards/licence/download/" + (f"?email={quote(email)}" if email else ""),
         "altText": f"AI Driving Licence {facts['licence_number']} for {facts['name']}",
         "size": "Stretch",
         "spacing": "Medium",
     }
 
 
-def build_learners_permit_card(*, full_name: str = "", org_name: str = "", user=None) -> dict:
+def build_licence_card(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
     email = (user.email if user else "").strip()
-    download_url = f"{_tabs_base_url()}/cards/learners-permit/download/"
+    download_url = f"{_tabs_base_url()}/cards/licence/download/"
     if email:
         from urllib.parse import quote
 
@@ -393,24 +350,21 @@ def build_learners_permit_card(*, full_name: str = "", org_name: str = "", user=
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "version": "1.5",
         "body": [
-            _nav_row("learners-permit"),
+            _nav_row("licence"),
             _header_block(org),
             {
                 "type": "TextBlock",
-                "text": "Your Learner's Permit is ready",
+                "text": "Your AI Driving Licence is ready",
                 "size": "Large",
                 "weight": "Bolder",
                 "wrap": True,
                 "spacing": "Medium",
             },
-            _level_toggle("learner"),
             _licence_card_visual(full_name=full_name, org_name=org, user=user),
             {
                 "type": "TextBlock",
                 "text": (
-                    "This is your AI Driving Licence. You're currently at **Level L — "
-                    "Learner**. As you complete lessons and pass checks, you'll move up "
-                    "to higher levels."
+                    "This is your AI Driving Licence. Keep it handy: you can download it and share it."
                 ),
                 "wrap": True,
                 "spacing": "Medium",
@@ -619,7 +573,7 @@ def build_traffic_light_check_card(*, full_name: str = "", org_name: str = "", u
 
 CARD_BUILDERS = {
     "home": build_home_card,
-    "learners-permit": build_learners_permit_card,
+    "licence": build_licence_card,
     "highway-code": build_highway_code_card,
     "traffic-light-check": build_traffic_light_check_card,
 }
@@ -634,7 +588,7 @@ def build_card(tab: str, *, full_name: str = "", org_name: str = "", user=None) 
 
 # --- Plain JSON content (no Adaptive Card scaffolding) -----------------
 #
-# Used by the Learner tab HTML page (templates/teams/tab.html), which
+# Used by the licence tab HTML page (templates/teams/tab.html), which
 # renders these fields directly into the DOM via fetch(), instead of
 # parsing them as an Adaptive Card. The Adaptive Card builders above stay —
 # they're still needed to post the same content as a bot message into the
@@ -670,31 +624,27 @@ def build_home_content(*, full_name: str = "", org_name: str = "", user=None) ->
     }
 
 
-def build_learners_permit_content(*, full_name: str = "", org_name: str = "", user=None) -> dict:
+def build_licence_content(*, full_name: str = "", org_name: str = "", user=None) -> dict:
     org = org_display_name(org_name)
     facts = _licence_facts(full_name=full_name, org_name=org, user=user)
     email = (user.email if user else "").strip()
-    download_url = f"{_tabs_base_url()}/cards/learners-permit/download/"
+    download_url = f"{_tabs_base_url()}/cards/licence/download/"
     if email:
         from urllib.parse import quote
 
         download_url += f"?email={quote(email)}"
     return {
-        "tab": "learners-permit",
+        "tab": "licence",
         "org": org,
-        "title": "Your Learner's Permit is ready",
-        "level": "learner",
+        "title": "Your AI Driving Licence is ready",
         "name": facts["name"],
-        "class_label": "Learner's Permit",
         "expires": facts["expires"],
         "issued": facts["issued"],
         "status": facts["status"],
         "card_number": facts["licence_number"],
         "download_url": download_url,
         "body": (
-            "This is your AI Driving Licence. You're currently at **Level L — "
-            "Learner**. As you complete lessons and pass checks, you'll move up "
-            "to higher levels."
+            "This is your AI Driving Licence. Keep it handy: you can download it and share it."
         ),
         "share_note": "Share: 𝕏 · LinkedIn · Facebook · WhatsApp",
     }
@@ -737,7 +687,7 @@ def build_traffic_light_check_content(*, full_name: str = "", org_name: str = ""
 
 CONTENT_BUILDERS = {
     "home": build_home_content,
-    "learners-permit": build_learners_permit_content,
+    "licence": build_licence_content,
     "highway-code": build_highway_code_content,
     "traffic-light-check": build_traffic_light_check_content,
 }
