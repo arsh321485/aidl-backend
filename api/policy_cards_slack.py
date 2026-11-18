@@ -70,7 +70,7 @@ def _banner(org: Organization, label: str, at: int | None = None) -> dict:
     positions; outlined = the topic on screen (`at` = point number)."""
     done = sorted(aup_store.cards(org))
     return {"type": "image", "alt_text": "AI policy",
-            "image_url": aup_banner.url(label, f"{len(done)} of {_total(org)} sent", org.name,
+            "image_url": aup_banner.url(label, f"{len(done)} of 14 sent", org.name,
                                         (at - 1) if at else 14, 14, done=done)}
 
 
