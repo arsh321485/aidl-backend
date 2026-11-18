@@ -2842,6 +2842,8 @@ class PolicyCardsSlackTests(TestCase):
 
         from . import aup_store, policy_cards
 
+        self.org.plan = "basic"
+        self.org.save()
         a = aup_store.answers(self.org)
         for n in (5, 7):
             policy_cards.approve(self.org, self.owner, n, a, deliver=False)

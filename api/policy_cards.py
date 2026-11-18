@@ -38,7 +38,7 @@ SHORT = {1: "Personal devices (BYOD)", 2: "Monitoring", 3: "Privacy on company d
 ICONS = {1: "📱", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🏷️", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
          12: "🚪", 13: "⚖️", 14: "✍️"}
 # The Trial includes these three topics only (shown first, in this order); the other eleven come with a paid plan.
-FREE_TOPICS = (5, 8, 6)
+FREE_TOPICS = (5, 6, 8)
 SEND_HOUR = 10
 MAX_DAYS_AHEAD = 110  # Slack schedules messages up to 120 days ahead
 POPULAR_AI_TOOLS = ["ChatGPT (Free / Plus)", "ChatGPT Team", "ChatGPT Enterprise", "Microsoft 365 Copilot",
@@ -66,6 +66,11 @@ def ordered(org: Organization | None) -> list[int]:
         return list(TOPICS)
     free = [n for n in FREE_TOPICS] + [n for n in TOPICS if n not in FREE_TOPICS and not is_locked(org, n)]
     return free + [n for n in TOPICS if is_locked(org, n)]
+
+
+def available(org: Organization | None) -> list[int]:
+    """The topics this organization can use, in the order shown: 3 on the Trial, all 14 on a paid plan."""
+    return [n for n in ordered(org) if not is_locked(org, n)]
 
 
 def questions(n: int, answers: dict) -> list[dict]:

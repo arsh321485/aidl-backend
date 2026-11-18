@@ -21,11 +21,11 @@ class TrialTopicTests(TestCase):
 
     def test_names(self):
         self.assertEqual([pc.SHORT[n] for n in pc.FREE_TOPICS],
-                         ["Passwords & Sign-in", "Email, Chat & Social Media", "Data Classification"])
+                         ["Passwords & Sign-in", "Data Classification", "Email, Chat & Social Media"])
 
     def test_order_free_first_then_paid(self):
         order = pc.ordered(self.org)
-        self.assertEqual(order[:3], [5, 8, 6])
+        self.assertEqual(order[:3], [5, 6, 8])
         self.assertEqual(sorted(order), list(pc.TOPICS))
         self.assertEqual(order[3:], [n for n in pc.TOPICS if n not in pc.FREE_TOPICS])
         self.assertEqual(pc.ordered(self.paid), list(pc.TOPICS))
@@ -105,3 +105,42 @@ class RetirePaidTopicsTests(TestCase):
         self.org.save()
         self.assertEqual(pc.retire_paid_topics(self.org, apply=True)["topics"], [])
         self.assertEqual(sorted(aup_store.cards(self.org)), [5, 7, 9])
+
+
+class StripAndPaidPlanTests(TestCase):
+    def setUp(self):
+        self.trial = trial_org()
+        self.paid = make_org(name="Paid", plan="basic")
+
+    def _strip(self, org, n=None):
+        from urllib.parse import parse_qs, urlparse
+
+        banner = pcs._banner(org, "x", at=n)
+        return parse_qs(urlparse(banner["image_url"]).query)
+
+    def test_trial_strip_has_three_positions(self):
+        a = aup_store.answers(self.trial)
+        pc.approve(self.trial, None, 6, a, deliver=False)
+        q = self._strip(self.trial, 8)
+        self.assertEqual((q["n"], q["d"], q["at"], q["r"]), (["3"], ["2"], ["2"], ["1 of 3 sent"]))
+
+    def test_trial_wording_has_no_point_numbers(self):
+        text = _text(pcs.topics_view(self.trial, {}))
+        self.assertIn("Your Trial includes 3 policy topics. Choose the ones relevant to your organisation", text)
+        self.assertNotIn("point 5", text)
+        self.assertNotIn("Send as many as you like", text)
+
+    def test_paid_plan_keeps_everything(self):
+        a = aup_store.answers(self.paid)
+        for n in (1, 7, 12):
+            pc.approve(self.paid, None, n, a, deliver=False)
+        self.assertEqual(sorted(aup_store.cards(self.paid)), [1, 7, 12])
+        self.assertEqual(pc.retire_paid_topics(self.paid, apply=True)["topics"], [])
+        self.assertEqual(sorted(aup_store.cards(self.paid)), [1, 7, 12])
+        q = self._strip(self.paid, 3)
+        self.assertEqual((q["n"], q["d"], q["r"]), (["14"], ["1,7,12"], ["3 of 14 sent"]))
+        text = _text(pcs.topics_view(self.paid, {}))
+        self.assertIn("point 7", text)
+        self.assertNotIn("aidl_pc_locked", text)
+        self.assertIn("Send as many as you like", text)
+        self.assertIn("3 of 14 policy cards approved", _text(pcs.sent_view(self.paid, 7, {})))

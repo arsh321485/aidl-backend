@@ -3,12 +3,12 @@
 {% block body %}
 <section class="box">
   <h1>📌 Add a policy card</h1>
-  <p class="muted" style="margin-top:6px">{% if on_trial %}{{ done }} of 3 approved. Each topic is one short card your team agrees to. Your Trial includes these 3 — do them in any order.{% else %}{{ done }} of 14 approved. Each topic is one short card your team agrees to. Send as many as you like, in any order.{% endif %}</p>
+  <p class="muted" style="margin-top:6px">{% if on_trial %}{{ done }} of 3 approved. Your Trial includes 3 policy topics. Choose the ones relevant to your organisation and send them to your team for acknowledgement.{% else %}{{ done }} of 14 approved. Each topic is one short card your team agrees to. Send as many as you like, in any order.{% endif %}</p>
   {% if on_trial %}<h3 style="margin:14px 0 0">✅ Included in your Trial</h3>{% endif %}
   <div class="list" style="margin-top:4px">
     {% for t in topics %}
     <div class="spread{% if t.locked %} locked-row{% endif %}">
-      <div><b>{% if t.locked %}🔒 {% endif %}{{ t.icon }} {{ t.title }}</b> <span class="muted">· point {{ t.n }}</span>
+      <div><b>{% if t.locked %}🔒 {% endif %}{{ t.icon }} {{ t.title }}</b> {% if not on_trial %}<span class="muted">· point {{ t.n }}</span>{% endif %}
         {% if t.locked %}<span class="pill paid">⭐ Paid plan</span>{% elif t.free and on_trial %}<span class="pill free">🆓 Free in your Trial</span>{% endif %}<br>
         <span class="muted">{% if t.locked %}Unlock this topic with Basic or Enterprise{% elif t.state == "sent" %}✅ Sent · {{ t.agreed }} agreed{% elif t.state == "scheduled" %}🗓 Goes out {{ t.day }}{% else %}{{ t.qs }} question{{ t.qs|pluralize }}{% endif %}</span></div>
       <a class="btn sm {% if t.state == 'new' and not t.locked %}go{% endif %}" href="{% url 'teams-app-policy-card' t.n %}">{% if t.locked %}🔒 Upgrade to unlock{% elif t.state == "new" %}Choose{% else %}Edit{% endif %}</a>

@@ -66,12 +66,28 @@ def _keep(meta: dict) -> dict:
 
 
 def _banner(org: Organization, label: str, at: int | None = None) -> dict:
-    """The brand strip: yellow = the topics already sent, at their own
-    positions; outlined = the topic on screen (`at` = point number)."""
-    done = sorted(aup_store.cards(org))
+    """The brand strip: yellow = the topics already sent, at their own positions; outlined = the topic on
+    screen (`at` = point number). Paid plans: 14 positions. Trial: only the topics it includes (3), so nobody
+    thinks there are 14 cards to approve."""
+    cards = sorted(aup_store.cards(org))
+    if _trial(org):
+        avail = pc.available(org)
+        done = [avail.index(n) + 1 for n in cards if n in avail]
+        return {"type": "image", "alt_text": "AI policy",
+                "image_url": aup_banner.url(label, f"{len(done)} of {len(avail)} sent", org.name,
+                                            avail.index(at) if at in avail else len(avail), len(avail), done=done)}
     return {"type": "image", "alt_text": "AI policy",
-            "image_url": aup_banner.url(label, f"{len(done)} of 14 sent", org.name,
-                                        (at - 1) if at else 14, 14, done=done)}
+            "image_url": aup_banner.url(label, f"{len(cards)} of 14 sent", org.name,
+                                        (at - 1) if at else 14, 14, done=cards)}
+
+
+def _trial(org: Organization) -> bool:
+    return any(pc.is_locked(org, n) for n in pc.TOPICS)
+
+
+def _tag(org: Organization, n: int) -> str:
+    """"point 5" for paid plans; nothing on the Trial (3 topics, numbered by point, would read "point 8 of 3")."""
+    return "" if _trial(org) else f"  ·  _point {n}_"
 
 
 # ---------- topics ----------
@@ -80,9 +96,9 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
     from .aup_upload import can_upload
 
     blocks = [_banner(org, "Pick one topic · about 1 minute"),
-              _ctx("Each topic is one short card your team agrees to. Send as many as you like, in any order."
-             if not any(pc.is_locked(org, n) for n in pc.TOPICS) else
-             "Each topic is one short card your team agrees to. Your Trial includes these 3 — send them in any order.")]
+              _ctx("Your Trial includes 3 policy topics. Choose the ones relevant to your organisation and send them to your team for acknowledgement."
+                   if _trial(org) else
+                   "Each topic is one short card your team agrees to. Send as many as you like, in any order.")]
     if notice:
         blocks.append(_ctx(notice))
     answers = aup_store.answers(org, with_tools=False)["answers"]  # once, not per topic
@@ -100,7 +116,7 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
                            {"type": "section", "text": _md("*🔒 Unlock with a paid plan*  ·  11 more topics\n"
                                                            "_Your Trial covers the 3 essentials. Upgrade to give your team the full AI policy._")}]
             blocks.append({"type": "section", "block_id": f"topic_{n}",
-                           "text": _md(f"🔒 {pc.ICONS[n]} *{pc.SHORT[n]}*  ·  _point {n}_\n⭐ _Paid plan_"),
+                           "text": _md(f"🔒 {pc.ICONS[n]} *{pc.SHORT[n]}*{_tag(org, n)}\n⭐ _Paid plan_"),
                            "accessory": {"type": "button", "text": _text("🔒 Upgrade to unlock"),
                                          "action_id": "aidl_pc_locked", "value": str(n)}})
             continue
@@ -118,7 +134,7 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
         if label == "Choose":
             btn["style"] = "primary"
         blocks.append({"type": "section", "block_id": f"topic_{n}",
-                       "text": _md(f"{pc.ICONS[n]} *{pc.SHORT[n]}*  ·  _point {n}_\n{line}"), "accessory": btn})
+                       "text": _md(f"{pc.ICONS[n]} *{pc.SHORT[n]}*{_tag(org, n)}\n{line}"), "accessory": btn})
     extra = [{"type": "button", "text": _text("🏛 Your regulators"), "action_id": "aidl_regulators_open",
               "value": "regulators"}]
     if can_upload(org):
@@ -130,7 +146,7 @@ def topics_view(org: Organization, meta: dict, notice: str = "") -> dict:
 
 def _total(org: Organization) -> int:
     """Topics this organization can use: 3 on the Trial, 14 on a paid plan."""
-    return len(pc.FREE_TOPICS) if any(pc.is_locked(org, n) for n in pc.TOPICS) else 14
+    return len(pc.available(org))
 
 
 def _day(iso: str) -> str:
@@ -243,7 +259,7 @@ def _tools_options(org: Organization, chosen: list[str]) -> list[dict]:
 def card_view(org: Organization, n: int, a: dict, meta: dict, *, when: str = "today", day: str = "",
               rev: int = 0, notice: str = "") -> dict:
     existing = aup_store.card(org, n)
-    blocks = [_banner(org, f"{pc.SHORT[n]} · point {n} of 14", at=n),
+    blocks = [_banner(org, f"{pc.SHORT[n]} · " + (f"topic {pc.available(org).index(n) + 1} of {_total(org)}" if _trial(org) and n in pc.available(org) else f"point {n} of 14"), at=n),
               {"type": "header", "text": _text(f"{pc.ICONS[n]} {pc.SHORT[n]}")}]
     if existing:
         blocks.append(_ctx("✏️ Already sent. Approving sends a new version that everyone agrees to again."))
@@ -430,7 +446,7 @@ def company_view(org: Organization, meta: dict, then: str = "topics") -> dict:
     if co.get("industry") in regulators.INDUSTRIES:
         industry["initial_option"] = opt(co["industry"])
     blocks = [{"type": "image", "alt_text": "Your company",
-               "image_url": aup_banner.url("Your company · asked once", "2 answers", org.name, 0, 14)},
+               "image_url": aup_banner.url("Your company · asked once", "2 answers", org.name, 0, _total(org))},
               _ctx(f"AIDL already knows *{org.name}* from Slack. These two answers tell us which regulators may oversee "
                    "you — AIDL works that out and sends it to you as a private card."),
               {"type": "input", "block_id": "countries", "label": _text("Where do you operate?"), "element": countries},
