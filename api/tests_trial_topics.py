@@ -66,3 +66,42 @@ class TrialTopicTests(TestCase):
         out = pcs.submit_card(owner, self.org, view)
         self.assertEqual(out["response_action"], "update")
         self.assertIsNone(aup_store.card(self.org, 7))
+
+
+class RetirePaidTopicsTests(TestCase):
+    def setUp(self):
+        from . import employee_flow  # noqa: F401
+        from .models import AIDLUser
+
+        self.org = trial_org()
+        a = aup_store.answers(self.org)
+        for n in (5, 7, 9):
+            pc.approve(self.org, None, n, a, deliver=False)
+        self.member = make_user(self.org, role=AIDLUser.Role.LEARNER, microsoft_id="slack:T9:U5")
+        from .models import Acknowledgement
+
+        for n in (5, 7, 9):
+            Acknowledgement.objects.create(organization_id=str(self.org.pk), user_id=str(self.member.pk),
+                                           item=aup_store.point_item(n), version=aup_store.card_version(self.org, n))
+
+    def test_dry_run_changes_nothing(self):
+        r = pc.retire_paid_topics(self.org)
+        self.assertEqual([t["no"] for t in r["topics"]], [7, 9])
+        self.assertEqual(r["acknowledgements"], 2)
+        self.assertEqual(sorted(aup_store.cards(self.org)), [5, 7, 9])
+
+    def test_apply_removes_only_paid_topics(self):
+        from .models import Acknowledgement
+
+        pc.retire_paid_topics(self.org, apply=True)
+        self.org.refresh_from_db()
+        self.assertEqual(sorted(aup_store.cards(self.org)), [5])
+        self.assertEqual(sorted(Acknowledgement.objects.values_list("item", flat=True)), ["aup_5"])
+        self.assertEqual(aup_store.points_accepted(self.member, self.org), {5})
+        self.assertTrue(all(pc.is_locked(self.org, n) for n in (7, 9)))
+
+    def test_paid_plan_untouched(self):
+        self.org.plan = "basic"
+        self.org.save()
+        self.assertEqual(pc.retire_paid_topics(self.org, apply=True)["topics"], [])
+        self.assertEqual(sorted(aup_store.cards(self.org)), [5, 7, 9])
