@@ -3,20 +3,38 @@
 {% block body %}
 <section class="box">
   <h1>📌 Add a policy card</h1>
-  <p class="muted" style="margin-top:6px">{{ done }} of 14 approved. Each topic is one short card your team agrees to. Send as many as you like, in any order.</p>
-  <div class="list" style="margin-top:8px">
+  <p class="muted" style="margin-top:6px">{% if on_trial %}{{ done }} of 3 approved. Your Trial includes 3 policy topics. Choose the ones relevant to your organisation and send them to your team for acknowledgement.{% else %}{{ done }} of 14 approved. Each topic is one short card your team agrees to. Send as many as you like, in any order.{% endif %}</p>
+  {% if on_trial %}<h3 style="margin:14px 0 0">✅ Included in your Trial</h3>{% endif %}
+  <div class="list" style="margin-top:4px">
     {% for t in topics %}
-    <div class="spread">
-      <div><b>{{ t.icon }} {{ t.title }}</b> <span class="muted">· point {{ t.n }}</span><br>
-        <span class="muted">{% if t.state == "sent" %}✅ Sent · {{ t.agreed }} agreed{% elif t.state == "scheduled" %}🗓 Goes out {{ t.day }}{% else %}{{ t.qs }} question{{ t.qs|pluralize }}{% endif %}</span></div>
-      <a class="btn sm {% if t.state == 'new' %}go{% endif %}" href="{% url 'teams-app-policy-card' t.n %}">{% if t.state == "new" %}Choose{% else %}Edit{% endif %}</a>
+    <div class="spread{% if t.locked %} locked-row{% endif %}">
+      <div><b>{% if t.locked %}🔒 {% endif %}{{ t.icon }} {{ t.title }}</b> {% if not on_trial %}<span class="muted">· point {{ t.n }}</span>{% endif %}
+        {% if t.locked %}<span class="pill paid">⭐ Paid plan</span>{% elif t.free and on_trial %}<span class="pill free">🆓 Free in your Trial</span>{% endif %}<br>
+        <span class="muted">{% if t.locked %}Unlock this topic with Basic or Enterprise{% elif t.state == "sent" %}✅ Sent · {{ t.agreed }} agreed{% elif t.state == "scheduled" %}🗓 Goes out {{ t.day }}{% else %}{{ t.qs }} question{{ t.qs|pluralize }}{% endif %}</span></div>
+      <a class="btn sm {% if t.state == 'new' and not t.locked %}go{% endif %}" href="{% url 'teams-app-policy-card' t.n %}">{% if t.locked %}🔒 Upgrade to unlock{% elif t.state == "new" %}Choose{% else %}Edit{% endif %}</a>
     </div>
     {% endfor %}
   </div>
+  {% if on_trial %}
+  <div class="upsell">
+    <h2>⭐ Give your team the full AI policy</h2>
+    <p>Your Trial covers the 3 essentials. Basic and Enterprise add:</p>
+    <ul>{% for p in perks %}<li>{{ p }}</li>{% endfor %}</ul>
+    {% if can_upgrade %}<a class="btn go" href="{% url 'teams-app-plans' %}">⬆️ See plans &amp; upgrade</a>{% else %}<p class="muted">Ask your master admin to open ⬆️ Upgrade plan in the Admin Center.</p>{% endif %}
+  </div>
+  {% endif %}
   <div class="row" style="margin-top:12px">
     {% if upload_allowed %}<a class="btn" href="{% url 'teams-app-upload' %}">📤 Upload your own AUP instead</a>{% endif %}
     <a class="btn" href="{% url 'teams-app-regulators' %}">🏛 Your regulators</a>
     <a class="btn" href="{% url 'teams-app-admin' %}">← Admin Center</a>
   </div>
 </section>
+<style>
+  .locked-row { background:repeating-linear-gradient(115deg,#fff 0 12px,#FFF6DD 12px 24px); }
+  .pill.paid { background:var(--yellow); }
+  .pill.free { background:#E4F7EA; border-color:var(--green-dk); color:var(--green-dk); }
+  .upsell { margin-top:16px; padding:16px; border:3px solid var(--ink); background:var(--yellow); box-shadow:5px 5px 0 var(--ink); }
+  .upsell h2 { margin:0 0 6px; }
+  .upsell ul { margin:6px 0 12px; padding-left:20px; }
+</style>
 {% endblock %}

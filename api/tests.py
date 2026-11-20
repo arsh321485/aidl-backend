@@ -2624,7 +2624,7 @@ class PolicyCardsSlackTests(TestCase):
         from .policy_cards_slack import topics_view
 
         topics = json.dumps(topics_view(self.org, {}), ensure_ascii=False)
-        for label in ("AI tools at work", "Passwords & sign-in", "Reporting a problem", "aidl_pc_pick"):
+        for label in ("AI tools at work", "Passwords & Sign-in", "Reporting a problem", "aidl_pc_pick"):
             self.assertIn(label, topics)
         card = self._card(9)
         text = json.dumps(card, ensure_ascii=False)
@@ -2842,6 +2842,8 @@ class PolicyCardsSlackTests(TestCase):
 
         from . import aup_store, policy_cards
 
+        self.org.plan = "basic"
+        self.org.save()
         a = aup_store.answers(self.org)
         for n in (5, 7):
             policy_cards.approve(self.org, self.owner, n, a, deliver=False)

@@ -35,6 +35,7 @@ from django.views.decorators.http import require_POST
 from . import (admin_perms, admin_setup, app_requests, aup_store, aup_upload, card_ack, card_approval, card_image,
                licence_image, licensing, policy_awareness, regulators, teams_channel)
 from . import policy_cards as pc
+from . import policy_cards_slack
 from .models import AIDLUser, AppRequest, AupUpload, Organization, PackageDelivery, RegisteredApp
 from .org_service import get_organization_for_user
 from .plans import card_by_no, cadence, usage
@@ -472,12 +473,15 @@ def policy(request, user, org):
     answers = aup_store.answers(org, with_tools=False)["answers"]
     states = pc.statuses(org)
     topics = []
-    for n in pc.TOPICS:
+    for n in pc.ordered(org):
         st = states.get(n) or {"state": "new"}
         qs = len(pc.questions(n, answers)) + (1 if n == 7 else 0)
         topics.append({"n": n, "title": pc.SHORT[n], "icon": pc.ICONS[n], "state": st["state"],
-                       "agreed": st.get("agreed", 0), "day": _day(st.get("send_on")), "qs": qs})
-    return _render(request, user, org, "policy.html", topics=topics, done=len(states), upload_allowed=can_upload(org))
+                       "agreed": st.get("agreed", 0), "day": _day(st.get("send_on")), "qs": qs,
+                       "locked": pc.is_locked(org, n), "free": n in pc.FREE_TOPICS})
+    on_trial = any(t["locked"] for t in topics)
+    return _render(request, user, org, "policy.html", topics=topics, done=len(states), upload_allowed=can_upload(org),
+                   on_trial=on_trial, perks=policy_cards_slack.PERKS, can_upgrade=_can(user)["can_billing"])
 
 
 def _options(q: dict, value) -> list[dict]:
@@ -535,6 +539,9 @@ def policy_card(request, user, org, n: int):
         return _denied(request, user, org)
     if n not in pc.TOPICS:
         return redirect("teams-app-policy")
+    if pc.is_locked(org, n):  # a paid topic on the Trial
+        return _render(request, user, org, "policy_locked.html", title=pc.SHORT[n], icon=pc.ICONS[n],
+                       perks=policy_cards_slack.PERKS, can_upgrade=_can(user)["can_billing"])
     a, when, day, errors = aup_store.answers(org), "today", "", {}
     if request.method == "POST":
         post = request.POST.copy()

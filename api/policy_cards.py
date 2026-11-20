@@ -32,11 +32,13 @@ from .models import AIDLUser, Organization
 logger = logging.getLogger(__name__)
 TOPICS = range(1, 15)
 SHORT = {1: "Personal devices (BYOD)", 2: "Monitoring", 3: "Privacy on company devices", 4: "Installing software",
-         5: "Passwords & sign-in", 6: "Company data", 7: "AI tools at work", 8: "Email, chat & social media",
+         5: "Passwords & Sign-in", 6: "Data Classification", 7: "AI tools at work", 8: "Email, Chat & Social Media",
          9: "Reporting a problem", 10: "Working remotely", 11: "Who owns your work", 12: "Leaving the company",
          13: "If rules are broken", 14: "Agreeing & reviews"}
-ICONS = {1: "📱", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🔒", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
+ICONS = {1: "📱", 2: "👀", 3: "🗂", 4: "💻", 5: "🔑", 6: "🏷️", 7: "🤖", 8: "💬", 9: "🚨", 10: "🏠", 11: "©️",
          12: "🚪", 13: "⚖️", 14: "✍️"}
+# The Trial includes these three topics only (shown first, in this order); the other eleven come with a paid plan.
+FREE_TOPICS = (5, 6, 8)
 SEND_HOUR = 10
 MAX_DAYS_AHEAD = 110  # Slack schedules messages up to 120 days ahead
 POPULAR_AI_TOOLS = ["ChatGPT (Free / Plus)", "ChatGPT Team", "ChatGPT Enterprise", "Microsoft 365 Copilot",
@@ -44,6 +46,31 @@ POPULAR_AI_TOOLS = ["ChatGPT (Free / Plus)", "ChatGPT Team", "ChatGPT Enterprise
                     "Notion AI", "Canva Magic Studio", "Zoom AI Companion", "Slack AI", "DeepL", "Midjourney",
                     "Otter.ai", "Fireflies.ai"]
 APPROVED_AI = "7.1.b"  # "Allowed — approved tools only" → the approved tools list
+
+
+def is_locked(org: Organization | None, n: int) -> bool:
+    """True when topic n is a paid-plan topic and this organization is on the Trial. A card an organization already
+    approved stays editable (nothing that was sent is taken away)."""
+    from . import trial
+
+    if n in FREE_TOPICS or not trial.is_trial(org):
+        return False
+    return aup_store.card(org, n) is None
+
+
+def ordered(org: Organization | None) -> list[int]:
+    """Topics in the order they are shown: on the Trial the free ones first, then the paid ones; else 1-14."""
+    from . import trial
+
+    if not trial.is_trial(org):
+        return list(TOPICS)
+    free = [n for n in FREE_TOPICS] + [n for n in TOPICS if n not in FREE_TOPICS and not is_locked(org, n)]
+    return free + [n for n in TOPICS if is_locked(org, n)]
+
+
+def available(org: Organization | None) -> list[int]:
+    """The topics this organization can use, in the order shown: 3 on the Trial, all 14 on a paid plan."""
+    return [n for n in ordered(org) if not is_locked(org, n)]
 
 
 def questions(n: int, answers: dict) -> list[dict]:
@@ -317,3 +344,44 @@ def check_day(value: str) -> str:
     if day > today + timedelta(days=MAX_DAYS_AHEAD):
         return f"Pick a day within the next {MAX_DAYS_AHEAD} days."
     return ""
+
+
+def retire_paid_topics(org: Organization, *, apply: bool = False) -> dict:
+    """A Trial organization that approved cards on paid topics before the Trial was limited to FREE_TOPICS:
+    take those cards back as if they had never been approved — the card, its scheduled Slack messages and every
+    "I agree" on it — so progress, "n agreed" counts and the licence requirements are exactly what a Trial
+    gives. Licences already issued are kept; cards already posted in someone's DM stay there (Slack messages
+    aren't recalled). Returns what was (or, without apply, would be) removed."""
+    from . import trial
+    from .models import Acknowledgement
+
+    report = {"topics": [], "acknowledgements": 0, "scheduled": 0, "applied": apply}
+    if not trial.is_trial(org):
+        return report
+    paid = {n: c for n, c in aup_store.cards(org).items() if n not in FREE_TOPICS}
+    if not paid:
+        return report
+    members = [str(pk) for pk in AIDLUser.objects.filter(organization_id=str(org.pk)).values_list("pk", flat=True)]
+    for n, c in sorted(paid.items()):
+        rows = Acknowledgement.objects.filter(user_id__in=members, item=aup_store.point_item(n))
+        count = rows.count()
+        scheduled = sum(1 for _, sid in (c.get("scheduled") or {}).values() if sid)
+        report["topics"].append({"no": n, "title": c.get("title", ""), "version": c.get("version", ""),
+                                 "acknowledgements": count, "scheduled": scheduled})
+        report["acknowledgements"] += count
+        report["scheduled"] += scheduled
+        if apply:
+            if scheduled and slack_client.bot_token(org):
+                _cancel_scheduled(org, c)
+            rows.delete()
+    if apply:
+        data = aup_store._load(org)  # noqa: SLF001
+        for n in paid:
+            (data.get("cards") or {}).pop(str(n), None)
+        aup_store._save(org, data)  # noqa: SLF001
+        from . import employee_flow
+        from .admin_home import refresh
+
+        employee_flow.issue_waiting(org)  # people who were only waiting for a paid card can now finish
+        refresh(org)
+    return report
