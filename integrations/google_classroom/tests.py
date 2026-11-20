@@ -54,11 +54,13 @@ class GoogleClassroomSignIn(TestCase):
         self.assertEqual(q["redirect_uri"], "https://backend.test/api/google-classroom/callback/")
         return q["state"]
 
-    def _sign_in(self, enroll_as="organization", **token_args):
-        """Full round trip → the frontend redirect's query params."""
+    def _sign_in(self, enroll_as="organization", granted="openid email profile", **token_args):
+        """Full round trip → the frontend redirect's query params. granted = the
+        scopes the person ticked on Google's consent screen."""
         state = self._state(enroll_as)
-        with mock.patch("integrations.google_classroom.google_oauth.exchange_code",
-                        return_value=self._id_token(**token_args)):
+        tokens = {"id_token": self._id_token(**token_args), "access_token": "access-1", "scope": granted,
+                  "refresh_token": "refresh-1"}
+        with mock.patch("integrations.google_classroom.google_oauth.exchange_tokens", return_value=tokens):
             back = self.client.get("/api/google-classroom/callback/", {"code": "abc", "state": state})
         self.assertEqual(back.status_code, 302)
         url = urlparse(back["Location"])
@@ -76,11 +78,18 @@ class GoogleClassroomSignIn(TestCase):
         self.assertEqual((org.name, org.owner_user_id), ("school.edu", str(user.pk)))
         self.assertEqual(GoogleWorkspace.objects.get(key="domain:school.edu").organization_id, str(org.pk))
 
+    def test_school_sign_in_asks_for_classroom_permissions_individual_does_not(self):
+        for enroll_as, wanted in (("organization", True), ("individual", False)):
+            resp = self.client.get("/api/google-classroom/login/", {"enroll_as": enroll_as})
+            scope = parse_qs(urlparse(resp.json()["auth_url"]).query)["scope"][0]
+            self.assertEqual("auth/classroom.courses " in f"{scope} ", wanted)
+            self.assertEqual("classroom.announcements" in scope, wanted)
+
     def test_admin_gets_the_google_classroom_link_and_is_signed_in_to_admin_center(self):
         r = self._sign_in()
         self.assertTrue(r["admin_center_url"].startswith("https://backend.test/api/google-classroom/open/?email="))
         self.assertEqual(r["open_admin_center"], "1")
-        # That link goes straight on to Google Classroom, as the signed-in account.
+        # No AIDL class yet: that link opens Google Classroom, as the signed-in account.
         go = self.client.get(r["admin_center_url"].removeprefix("https://backend.test"))
         self.assertEqual(go.status_code, 302)
         self.assertTrue(go["Location"].startswith("https://classroom.google.com/?authuser="))
@@ -163,7 +172,8 @@ class GoogleClassroomSignIn(TestCase):
 
     def test_state_works_only_once(self):
         state = self._state()
-        with mock.patch("integrations.google_classroom.google_oauth.exchange_code", return_value=self._id_token()):
+        tokens = {"id_token": self._id_token(), "access_token": "a", "scope": "openid email profile"}
+        with mock.patch("integrations.google_classroom.google_oauth.exchange_tokens", return_value=tokens):
             self.client.get("/api/google-classroom/callback/", {"code": "abc", "state": state})
             again = self.client.get("/api/google-classroom/callback/", {"code": "abc", "state": state})
         self.assertIn("error=", again["Location"])
@@ -207,6 +217,14 @@ class FakeClassroom:
             "c2": [],
         }
         self.tokens_seen = []
+        self.announcements = {}  # id -> text
+        self.materials = {}  # id -> Classwork material (the 5 teacher-only steps)
+        self.made = 0
+        self.topics = []
+        self.coursework = {}  # id -> body (the learners' cards)
+        self.submissions = {}  # coursework id -> [studentSubmission]
+        self.calls = []  # (method, url) of every write
+        self.fail_writes = False
 
     def get(self, url, params=None, headers=None, timeout=None):
         self.tokens_seen.append(headers["Authorization"])
@@ -214,8 +232,143 @@ class FakeClassroom:
         if url.endswith("/courses"):
             assert params["teacherId"] == "me"
             resp.json.return_value = {"courses": self.courses}
+        elif url.endswith("/courseWork"):
+            resp.json.return_value = {"courseWork": [{"id": i, "associatedWithDeveloper": True, **c}
+                                                     for i, c in self.coursework.items()]}
+        elif url.endswith("/studentSubmissions"):
+            resp.json.return_value = {"studentSubmissions": self.submissions.get(url.split("/")[-2], [])}
+        elif url.endswith("/topics"):
+            resp.json.return_value = {"topic": self.topics}
+        elif url.endswith("/courseWorkMaterials"):
+            # Like Google: materials don't say which app made them.
+            resp.json.return_value = {"courseWorkMaterial": [{"id": i, **m} for i, m in self.materials.items()]}
+        elif url.endswith("/announcements"):  # the teacher's own posts are not AIDL's
+            resp.json.return_value = {"announcements": [
+                {"id": i, "text": t, "associatedWithDeveloper": not i.startswith("own")}
+                for i, t in self.announcements.items()]}
+        elif url.endswith("/teachers"):  # the class owner, plus any co-teachers
+            resp.json.return_value = {"teachers": getattr(self, "teachers", {}).get(url.split("/")[-2],
+                                                                                   [{"userId": "owner"}])}
+        elif url.endswith("/invitations"):
+            resp.json.return_value = {"invitations": [i for i in getattr(self, "invitations", [])
+                                                      if i["courseId"] == params["courseId"]]}
+        elif "/userProfiles/" in url:
+            resp.json.return_value = self.profiles[url.split("/")[-1]]
+        elif url.split("/")[-2] == "courses":  # one course
+            course = next((c for c in self.courses if c["id"] == url.split("/")[-1]), None)
+            if course is None:
+                resp.ok, resp.status_code = False, 404
+                resp.json.return_value = {"error": {"status": "NOT_FOUND", "message": "not found"}}
+            else:
+                resp.json.return_value = course
         else:
             resp.json.return_value = {"students": self.students[url.split("/")[-2]]}
+        return resp
+
+    def request(self, method, url, params=None, json=None, headers=None, timeout=None, data=None):
+        self.calls.append((method, url))
+        if method == "POST" and url.endswith(("/courseWork", "/courseWorkMaterials")) and not self.fail_writes:
+            self.created = getattr(self, "created", []) + [json["title"]]  # Classwork, oldest first
+        resp = mock.Mock(ok=True, status_code=200)
+        if self.fail_writes:
+            resp.ok, resp.status_code = False, 403
+            resp.json.return_value = {"error": {"status": "PERMISSION_DENIED", "message": "not allowed"}}
+        elif method == "POST" and url.endswith("/courses"):
+            new_id = f"aidl{len(self.courses)}"
+            course = {**json, "id": new_id, "courseState": json.get("courseState", "PROVISIONED"),
+                      "alternateLink": f"https://classroom.google.com/c/{new_id}"}
+            course.pop("ownerId")
+            self.courses.append(course)
+            self.students[new_id] = []
+            resp.json.return_value = course
+        elif url.startswith("https://www.googleapis.com/upload/drive"):
+            self.uploads = getattr(self, "uploads", []) + [data]
+            resp.json.return_value = {"id": f"f{len(self.uploads)}"}
+        elif url.endswith("/permissions"):
+            self.shared = getattr(self, "shared", []) + [(url.split("/")[-2], json["emailAddress"])]
+            resp.json.return_value = {}
+        elif method == "POST" and url.endswith(":modifyAssignees"):
+            work = self.coursework[url.split("/")[-1].split(":")[0]]
+            ids = set((work.get("individualStudentsOptions") or {}).get("studentIds") or []) \
+                if work.get("assigneeMode") == "INDIVIDUAL_STUDENTS" else set()
+            opts = json["modifyIndividualStudentsOptions"]
+            ids = (ids | set(opts.get("addStudentIds", []))) - set(opts.get("removeStudentIds", []))
+            work.update(assigneeMode="INDIVIDUAL_STUDENTS", individualStudentsOptions={"studentIds": sorted(ids)})
+            resp.json.return_value = work
+        elif method == "POST" and url.endswith("/courseWork"):
+            self.made += 1
+            cid = f"cw{self.made}"
+            self.coursework[cid] = dict(json)
+            resp.json.return_value = {"id": cid, **json}
+        elif method == "DELETE" and "/students/" in url:
+            course, gid = url.split("/")[-3], url.split("/")[-1]
+            self.students[course] = [s for s in self.students[course] if s["userId"] != gid]
+            self.kicked = getattr(self, "kicked", []) + [gid]
+            resp.json.return_value = {}
+        elif method == "DELETE" and "/topics/" in url:
+            self.topics = [t for t in self.topics if t["topicId"] != url.split("/")[-1]]
+            resp.json.return_value = {}
+        elif method == "POST" and url.endswith("/invitations"):
+            self.invitations = getattr(self, "invitations", [])
+            members = {x["userId"] for x in self.students.get(json["courseId"], [])}
+            if json["userId"] in members or any(i["userId"] == json["userId"] for i in self.invitations):
+                resp.ok, resp.status_code = False, 409
+                resp.json.return_value = {"error": {"status": "ALREADY_EXISTS", "message": "exists"}}
+            elif json["userId"].startswith("outsider"):
+                resp.ok, resp.status_code = False, 403
+                resp.json.return_value = {"error": {"status": "PERMISSION_DENIED", "message": "not in domain"}}
+            else:
+                invite = {"id": f"inv{len(self.invitations) + 1}", **json}
+                self.invitations.append(invite)
+                resp.json.return_value = invite
+        elif method == "DELETE" and "/invitations/" in url:
+            self.invitations = [i for i in self.invitations if i["id"] != url.split("/")[-1]]
+            resp.json.return_value = {}
+        elif method == "DELETE" and "/courseWorkMaterials/" in url:
+            self.materials.pop(url.split("/")[-1], None)
+            resp.json.return_value = {}
+        elif method == "DELETE" and "/courseWork/" in url:
+            self.coursework.pop(url.split("/")[-1], None)
+            resp.json.return_value = {}
+        elif method == "POST" and url.endswith("/topics"):
+            topic = {"topicId": f"t{len(self.topics) + 1}", "name": json["name"]}
+            self.topics.append(topic)
+            resp.json.return_value = topic
+        elif method == "POST" and url.endswith("/courseWorkMaterials"):
+            self.made += 1
+            mid = f"m{self.made}"
+            self.materials[mid] = dict(json)
+            if json["title"] == "🪪 Your AI Driving Licence":  # the licence: a Classwork item for one student
+                self.licence_items = getattr(self, "licence_items", []) + [
+                    (json["individualStudentsOptions"]["studentIds"], json["description"], json.get("topicId"))]
+                self.licence_materials = getattr(self, "licence_materials", []) + [json.get("materials")]
+            resp.json.return_value = {"id": mid, **json}
+        elif method == "PATCH" and "/courseWork/" in url:
+            self.coursework[url.split("/")[-1]].update(json)
+            resp.json.return_value = self.coursework[url.split("/")[-1]]
+        elif method == "PATCH" and "/courseWorkMaterials/" in url:
+            mid = url.split("/")[-1]
+            if mid not in self.materials:
+                resp.ok, resp.status_code = False, 404
+                resp.json.return_value = {"error": {"status": "NOT_FOUND", "message": "not found"}}
+            else:
+                self.materials[mid].update(json)
+                resp.json.return_value = self.materials[mid]
+        elif method == "POST" and url.endswith("/announcements"):
+            aid = f"ann{len(self.announcements) + 1}"
+            self.announcements[aid] = json["text"]
+            if json.get("assigneeMode") == "INDIVIDUAL_STUDENTS":
+                self.private = getattr(self, "private", []) + [(json["individualStudentsOptions"]["studentIds"],
+                                                                 json["text"])]
+                self.private_materials = getattr(self, "private_materials", []) + [json.get("materials")]
+            resp.json.return_value = {"id": aid, **json}
+        elif method == "DELETE" and "/announcements/" in url:
+            self.announcements.pop(url.split("/")[-1], None)
+            resp.json.return_value = {}
+        elif method == "PATCH":
+            aid = url.split("/")[-1]
+            self.announcements[aid] = json["text"]
+            resp.json.return_value = {"id": aid, **json}
         return resp
 
 
@@ -225,9 +378,11 @@ class GoogleClassroomClasses(GoogleClassroomSignIn):
     def setUp(self):
         super().setUp()
         self.fake = FakeClassroom()
-        patcher = mock.patch("integrations.google_classroom.classroom_api.requests.get", side_effect=self.fake.get)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name in ("get", "request"):
+            patcher = mock.patch(f"integrations.google_classroom.classroom_api.requests.{name}",
+                                 side_effect=getattr(self.fake, name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _connect(self, scope=SCOPES, refresh_token="refresh-1", **token_args):
         resp = self.client.get("/api/google-classroom/classes/connect/")
@@ -323,9 +478,774 @@ class GoogleClassroomClasses(GoogleClassroomSignIn):
         self.assertContains(page, "Connect Google Classroom")
 
 
+ALL_SCOPES = " ".join([SCOPES, "https://www.googleapis.com/auth/classroom.courses",
+                        "https://www.googleapis.com/auth/classroom.announcements",
+                        "https://www.googleapis.com/auth/classroom.courseworkmaterials",
+                        "https://www.googleapis.com/auth/classroom.topics",
+                        "https://www.googleapis.com/auth/classroom.coursework.students"])
+
+
+@override_settings(GOOGLE_CLASSROOM_SYNC=True)
+@mock.patch("api.card_image.warm", new=mock.Mock())
+class GoogleClassroomAidlClass(GoogleClassroomClasses):
+    """Sign-up creates the AIDL class (like Slack's #aidl) with the Admin Center post."""
+
+    def test_sign_up_creates_the_aidl_class_and_posts_the_admin_center(self):
+        from integrations.google_classroom.models import AidlClass, GoogleCourse
+
+        self._sign_in(granted=ALL_SCOPES)
+        row = AidlClass.objects.get()
+        self.assertEqual((row.course_id, row.state, row.error), ("aidl2", "ACTIVE", ""))
+        created = [c for c in self.fake.courses if c["id"] == "aidl2"][0]
+        self.assertEqual((created["name"], created["section"]), ("AIDL", "AI Driving Licence"))
+        # Nothing on the Stream (Classroom shows teachers every Stream post), and no students'
+        # topic or welcome until a student joins: only the Admin Center.
+        self.assertEqual(self.fake.announcements, {})
+        # The 5 steps are teacher-only drafts in Classwork, step 1 created last (= on top),
+        # then the setup summary above them.
+        titles = [m["title"] for m in self.fake.materials.values()]
+        self.assertEqual(titles, ["⬜ Step 5 · Start the programme", "⬜ Step 4 · Card approval",
+                                  "⬜ Step 3 · Your team", "⬜ Step 2 · Admins (optional)",
+                                  "👉 Step 1 · Your AI policy", "⭐ Plan: Trial · 1/2 teachers · 0/5 students",
+                                  "📋 Setup progress · 0 of 5 done"])
+        plan = self.fake.materials["m6"]
+        self.assertEqual(plan["state"], "DRAFT")
+        self.assertEqual(plan["materials"][0]["link"]["url"], "https://backend.test/api/google-classroom/admin/upgrade/")
+        self.assertIn("👉 Trial (free): 2 teachers, 5 students", plan["description"])
+        summary = self.fake.materials["m7"]["description"]
+        self.assertIn("👉 1. Your AI policy", summary)
+        self.assertIn("Next: open", summary)
+        self.assertTrue(all(m["state"] == "DRAFT" for m in self.fake.materials.values()))
+        # ... all under the "AIDL Admin Center" topic, made once.
+        self.assertEqual(self.fake.topics, [{"topicId": "t1", "name": "🚦 AIDL Admin Center"}])
+        self.assertTrue(all(m["topicId"] == "t1" for m in self.fake.materials.values()))
+        self.assertEqual(self.fake.materials["m5"]["materials"][0]["link"]["url"],
+                         "https://backend.test/api/google-classroom/admin/step/1/")
+        # Continue on the website opens the AIDL class itself.
+        r = self._sign_in(granted=ALL_SCOPES)
+        go = self.client.get(r["admin_center_url"].removeprefix("https://backend.test"))
+        self.assertEqual(go["Location"], "https://classroom.google.com/c/aidl2?authuser=asha%40school.edu")
+        # Its classes were read, and the AIDL class is in the programme.
+        self.assertEqual(GoogleCourse.objects.count(), 3)
+        self.assertTrue(GoogleCourse.objects.get(course_id="aidl2").in_programme)
+        self.assertFalse(GoogleCourse.objects.get(course_id="c1").in_programme)
+        # Step 3 shows only the AIDL class as the programme; other classes can't be added,
+        # only their students invited to the AIDL class.
+        classes_page = self.client.get("/api/google-classroom/classes/")
+        self.assertContains(classes_page, "AI Driving Licence")
+        self.assertEqual([c["name"] for c in classes_page.context["data"]["classes"]], ["AIDL"])
+        self.assertIn("AI Basics", [c["name"] for c in classes_page.context["other_classes"]])
+        resp = self.client.post("/api/google-classroom/classes/choose/", {"course_id": "c1", "on": "1"})
+        self.assertIn("Only+your+AIDL+class", resp["Location"])
+        self.assertFalse(GoogleCourse.objects.get(course_id="c1").in_programme)
+        page = self.client.get("/api/google-classroom/admin/")
+        self.assertContains(page, "https://classroom.google.com/c/aidl2")
+        self.assertContains(page, "Back to Google Classroom")
+
+    def test_signing_in_again_reuses_the_class_and_updates_the_post(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._sign_in(granted=ALL_SCOPES)
+        self._sign_in(granted=ALL_SCOPES)
+        self.assertEqual(AidlClass.objects.get().course_id, "aidl2")
+        self.assertEqual([c["name"] for c in self.fake.courses].count("AIDL"), 1)
+        self.assertEqual([m for m, u in self.fake.calls if "announcements" in u], [])
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("👋")])
+
+    def test_steps_open_their_pages(self):
+        self._sign_in(granted=ALL_SCOPES)
+        for n, where in ((1, "/api/google-classroom/admin/policy/"), (2, "/api/google-classroom/admin/"),
+                         (3, "/api/google-classroom/classes/"), (4, "/api/google-classroom/admin/"),
+                         (5, "/api/google-classroom/admin/")):
+            resp = self.client.get(f"/api/google-classroom/admin/step/{n}/")
+            self.assertEqual(resp["Location"], where)
+        # Opened from a step: that step only, no Admin Center tabs.
+        self.client.get("/api/google-classroom/admin/step/1/")
+        page = self.client.get("/api/google-classroom/admin/policy/")
+        self.assertContains(page, "Step 1 · Your AI policy")
+        self.assertContains(page, "Back to Google Classroom")
+        self.assertNotContains(page, "🏫 Classes")
+        self.client.get("/api/google-classroom/admin/step/4/")
+        page = self.client.get("/api/google-classroom/admin/")
+        self.assertContains(page, "Traffic Light Check")
+        self.assertNotContains(page, "Your AI policy</h2>")
+        self.assertNotContains(page, "Start the programme</button>")
+        self.assertNotContains(page, "Link for your students")
+        # Continue from the website clears it: the full Admin Center again.
+        self.client.get("/api/google-classroom/open/")
+        page = self.client.get("/api/google-classroom/admin/")
+        self.assertContains(page, "🏫 Classes")
+        self.assertContains(page, "Start the programme</button>")
+
+    def test_an_admin_action_updates_classroom_right_away(self):
+        self._sign_in(granted=ALL_SCOPES)
+        with mock.patch("integrations.google_classroom.google_oauth.refresh_access_token", return_value="access-9"):
+            self.client.post("/api/google-classroom/admin/action/", {"action": "skip_admins"})
+        titles = {m["title"] for m in self.fake.materials.values()}
+        self.assertIn("✅ Step 2 · Admins (optional)", titles)
+        self.assertIn("👉 Step 1 · Your AI policy", titles)
+        self.assertIn("✅ 2. Admins (optional)", self.fake.materials["m7"]["description"])
+        self.assertEqual(self.fake.materials["m7"]["title"], "📋 Setup progress · 1 of 5 done")
+        self.assertEqual(len(self.fake.materials), 7)  # updated, not added again
+
+    def test_signing_in_again_keeps_five_steps(self):
+        self._sign_in(granted=ALL_SCOPES)
+        self._sign_in(granted=ALL_SCOPES)
+        self.assertEqual(len(self.fake.materials), 7)
+        self.assertEqual(len(self.fake.topics), 1)
+        del self.fake.materials["m1"]  # a teacher deleted step 5
+        self._sign_in(granted=ALL_SCOPES)
+        self.assertEqual(len(self.fake.materials), 7)
+
+    def test_old_admin_center_post_is_taken_off_the_stream(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._sign_in(granted=ALL_SCOPES)
+        self.fake.announcements["old"] = "🚦 AIDL Admin Center ..."
+        AidlClass.objects.update(announcement_id="old")
+        self._sign_in(granted=ALL_SCOPES)
+        self.assertNotIn("old", self.fake.announcements)
+        self.assertEqual(AidlClass.objects.get().announcement_id, "")
+        self.assertEqual(self.fake.announcements, {})
+
+    def test_a_class_aidl_lost_track_of_starts_afresh(self):
+        """The database was cleared and the teacher signs up again: the AIDL class is reused,
+        without the old school's welcome, plan, steps, cards and licences."""
+        from integrations.google_classroom.models import AidlClass
+
+        self._sign_in(granted=ALL_SCOPES)
+        self.fake.announcements["ann9"] = "🎉 Well done, Zoya! ... Licence number: ..."  # the old school's
+        self.fake.announcements["own1"] = "Exam on Friday"  # the teacher's own post
+        self.fake.coursework["cw9"] = {"title": "🚦 Traffic Light Check"}
+        self.fake.materials["own2"] = {"title": "Reading list", "state": "PUBLISHED"}  # the teacher's own
+        old = set(self.fake.materials) - {"own2"}
+        AidlClass.objects.all().delete()
+        self._sign_in(granted=ALL_SCOPES)
+        self.assertEqual(AidlClass.objects.get().course_id, "aidl2")  # the same class
+        self.assertFalse(old & set(self.fake.materials))
+        self.assertIn("own2", self.fake.materials)
+        self.assertEqual(len(self.fake.materials), 8)  # theirs + one plan, one summary, 5 steps
+        self.assertEqual(self.fake.announcements, {"own1": "Exam on Friday"})
+        self.assertEqual(self.fake.coursework, {})
+
+    def test_deleted_class_is_made_again(self):
+        self._sign_in(granted=ALL_SCOPES)
+        self.fake.courses = [c for c in self.fake.courses if c["name"] != "AIDL"]
+        self._sign_in(granted=ALL_SCOPES)
+        self.assertEqual([m for m, u in self.fake.calls if u.endswith("/courses")], ["POST", "POST"])
+
+    def test_failure_never_stops_the_sign_in_and_shows_in_admin_center(self):
+        self.fake.fail_writes = True
+        r = self._sign_in(granted=ALL_SCOPES)
+        self.assertIn("access_token", r)
+        self.assertEqual(r["open_admin_center"], "1")
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "set up the AIDL class")
+
+    def test_without_the_permissions_admin_center_offers_to_create_it(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._sign_in()
+        self.assertFalse(AidlClass.objects.exists())
+        self.assertEqual(self.fake.calls, [])
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "Create AIDL class in Google Classroom")
+
+    def test_learner_sign_in_creates_nothing(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._sign_in(granted=ALL_SCOPES)
+        self._sign_in(sub="222", email="ravi@school.edu", granted=ALL_SCOPES)
+        self.assertEqual(AidlClass.objects.count(), 1)
+        self.assertEqual(len([u for m, u in self.fake.calls if u.endswith("/courses")]), 1)
+
+
+class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
+    """Students of the AIDL class: cards as Classroom questions, answers, licence."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch("integrations.google_classroom.google_oauth.refresh_access_token", return_value="access-2")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _school_with_a_student(self):
+        self._sign_in(granted=ALL_SCOPES)
+        self.fake.students["aidl2"] = [{"userId": "s7", "profile": {"name": {"fullName": "Zoya Khan"},
+                                                                   "emailAddress": "zoya@school.edu"}}]
+
+    def _start(self):
+        for item in ("traffic_light", "highway_code"):
+            self.client.post("/api/google-classroom/admin/action/", {"action": "approve", "item": item})
+        self.client.post("/api/google-classroom/admin/action/", {"action": "start"})
+
+    def _answer(self, title, gid="s7"):
+        cid = next(i for i, c in self.fake.coursework.items() if c["title"] == title)
+        answer = self.fake.coursework[cid]["multipleChoiceQuestion"]["choices"][0]
+        self.fake.submissions[cid] = [{"userId": gid, "state": "TURNED_IN",
+                                       "multipleChoiceSubmission": {"answer": answer}}]
+
+    def _sync(self):
+        self.client.post("/api/google-classroom/classes/sync/")
+
+    def test_joining_the_aidl_class_makes_a_learner(self):
+        self._school_with_a_student()
+        self._sync()
+        zoya = AIDLUser.objects.get(microsoft_id="google:s7")
+        self.assertEqual((zoya.role, zoya.full_name), ("learner", "Zoya Khan"))
+
+    def test_no_cards_until_the_programme_starts(self):
+        self._school_with_a_student()
+        self._sync()
+        self.assertEqual(self.fake.coursework, {})
+
+    def test_cards_are_questions_in_classroom_then_the_licence(self):
+        self._school_with_a_student()
+        self._start()
+        cards = list(self.fake.coursework.values())
+        self.assertEqual([c["title"] for c in cards], ["📖 The Highway Code", "🚦 Traffic Light Check"])  # TL on top
+        self.assertTrue(all(c["workType"] == "MULTIPLE_CHOICE_QUESTION" and c["state"] == "PUBLISHED"
+                            for c in cards))
+        self.assertIn({"topicId": "t2", "name": "🎓 Your AI Driving Licence"}, self.fake.topics)
+
+        # Answered out of order: the Highway Code counts only after the Traffic Light Check.
+        self._answer("📖 The Highway Code")
+        self._sync()
+        zoya = AIDLUser.objects.get(microsoft_id="google:s7")
+        self.assertFalse(zoya.licence_issued)
+        self._answer("🚦 Traffic Light Check")
+        self._sync()
+        zoya.refresh_from_db()
+        self.assertTrue(zoya.licence_issued)
+        (ids, text, topic), = self.fake.licence_items
+        self.assertEqual((ids, topic), (["s7"], "t2"))  # in Classwork with the cards, not on the Stream
+        self.assertIn(zoya.licence_number, text)
+        self.assertIn("Only you and your teachers can see this", text)
+        self.assertFalse(any("Licence number" in t for t in self.fake.announcements.values()))
+        self._sync()  # posted once
+        self.assertEqual(len(self.fake.licence_items), 1)
+        self.assertEqual(len(self.fake.coursework), 2)  # published once
+
+    def test_the_licence_post_has_the_licence_card_picture(self):
+        self._sign_in(granted=f"{ALL_SCOPES} https://www.googleapis.com/auth/drive.file")
+        self.fake.students["aidl2"] = [{"userId": "s7", "profile": {"name": {"fullName": "Zoya Khan"},
+                                                                   "emailAddress": "zoya@school.edu"}}]
+        self._start()
+        self._answer("🚦 Traffic Light Check")
+        self._answer("📖 The Highway Code")
+        self._sync()
+        self.assertTrue(self.fake.uploads[0].startswith(b"--aidl-licence-boundary"))
+        self.assertIn(b"\x89PNG", self.fake.uploads[0])
+        self.assertEqual(self.fake.shared, [("f1", "zoya@school.edu")])
+        self.assertEqual(self.fake.licence_materials[-1],
+                         [{"driveFile": {"driveFile": {"id": "f1"}, "shareMode": "VIEW"}}])
+
+    def test_a_new_google_name_is_followed_and_the_licence_posted_again(self):
+        self._sign_in(granted=f"{ALL_SCOPES} https://www.googleapis.com/auth/drive.file")
+        self.fake.students["aidl2"] = [{"userId": "s7", "profile": {"name": {"fullName": "Zoyakhan"},
+                                                                   "emailAddress": "zoya@school.edu"}}]
+        self._start()
+        self._answer("🚦 Traffic Light Check")
+        self._answer("📖 The Highway Code")
+        self._sync()
+        self.assertEqual(len(self.fake.uploads), 1)
+        self.fake.students["aidl2"][0]["profile"]["name"]["fullName"] = "Zoya Khan"
+        self._sync()
+        zoya = AIDLUser.objects.get(microsoft_id="google:s7")
+        self.assertEqual((zoya.first_name, zoya.last_name, zoya.full_name), ("Zoya", "Khan", "Zoya Khan"))
+        self.assertEqual(len(self.fake.uploads), 2)  # a new licence picture
+        self.assertEqual(len(self.fake.licence_items), 2)
+        self.assertEqual(sum(1 for m in self.fake.materials.values() if "Licence number" in m["description"]), 1)
+        self._sync()  # once
+        self.assertEqual(len(self.fake.uploads), 2)
+
+    def test_avatar_like_slack_then_the_licence_card_is_drawn_again(self):
+        import base64
+        import io
+
+        from PIL import Image
+
+        self._sign_in(granted=f"{ALL_SCOPES} https://www.googleapis.com/auth/drive.file")
+        self.fake.students["aidl2"] = [{"userId": "s7", "profile": {"name": {"fullName": "Zoya Khan"},
+                                                                   "emailAddress": "zoya@school.edu"}}]
+        self._start()
+        self._answer("🚦 Traffic Light Check")
+        self._answer("📖 The Highway Code")
+        self._sync()
+        zoya = AIDLUser.objects.get(microsoft_id="google:s7")
+        (ask,) = [m for m in self.fake.materials.values() if m["title"] == "🧑 Create your licence avatar"]
+        self.assertEqual((ask["assigneeMode"], ask["individualStudentsOptions"]), ("INDIVIDUAL_STUDENTS",
+                                                                                  {"studentIds": ["s7"]}))
+        self.assertIn(f"/api/avatar/start/?u={zoya.pk}", ask["materials"][0]["link"]["url"])
+        self._sync()  # asked once
+        self.assertEqual(sum(1 for m in self.fake.materials.values() if m["title"].startswith("🧑")), 1)
+
+        buf = io.BytesIO()
+        Image.new("RGBA", (40, 40), "#2EC866").save(buf, "PNG")
+        AIDLUser.objects.filter(pk=zoya.pk).update(avatar_data=base64.b64encode(buf.getvalue()).decode())
+        self._sync()
+        self.assertEqual(len(self.fake.uploads), 2)  # the licence card again, now with the avatar
+        self.assertEqual(sum(1 for m in self.fake.materials.values() if "Licence number" in m["description"]), 1)
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("🧑")])
+        self._sync()  # once
+        self.assertEqual(len(self.fake.uploads), 2)
+
+    def test_upgrading_on_the_website_updates_the_plan_item(self):
+        from api.models import Organization
+
+        self._school_with_a_student()
+        self._sync()
+        resp = self.client.get("/api/google-classroom/admin/upgrade/")
+        self.assertTrue(resp["Location"].startswith("http"))
+        self.assertIn("/plans?token=", resp["Location"])
+        Organization.objects.update(plan="enterprise", seats_purchased=50)
+        self._sync()
+        (plan,) = [m for m in self.fake.materials.values() if m["title"].startswith("⭐")]
+        self.assertEqual(plan["title"], "⭐ Plan: Enterprise · 1/∞ teachers · 1 students · unlimited")
+        self.assertIn("👉 Enterprise", plan["description"])
+
+    def test_a_requested_upgrade_shows_as_waiting(self):
+        from api import billing
+        from api.models import Organization
+
+        self._school_with_a_student()
+        self._sync()
+        org = Organization.objects.get()
+        data = billing._load(org)
+        data["pending"] = {"plan": "basic"}  # what the plans page saves when there's no payment set up
+        billing._save(org, data)
+        self._sync()
+        (plan,) = [m for m in self.fake.materials.values() if m["title"].startswith("⭐")]
+        self.assertTrue(plan["title"].startswith("⭐ Plan: Trial"))
+        self.assertTrue(plan["title"].endswith("⏳ Basic requested"))
+        self.assertIn("You asked for Basic", plan["description"])
+
+    def test_a_text_only_licence_post_is_replaced_once_drive_is_allowed(self):
+        from integrations.google_classroom.models import AidlClass, GoogleCredential
+
+        self._school_with_a_student()
+        self._start()
+        self._answer("🚦 Traffic Light Check")
+        self._answer("📖 The Highway Code")
+        self._sync()
+        self.assertEqual(self.fake.licence_materials, [None])  # no Drive permission yet: text only
+        old = next(iter(AidlClass.objects.get().licences.values()))["id"]
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/drive.file")
+        self._sync()
+        self.assertNotIn(old, self.fake.materials)
+        self.assertEqual(len(self.fake.licence_materials), 2)
+        self._sync()  # once
+        self.assertEqual(len(self.fake.licence_materials), 2)
+
+    def test_the_welcome_moves_off_the_stream_and_stays_above_the_cards(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._school_with_a_student()
+        self._sync()  # the student joined: the welcome is up
+        # As it was before: the welcome was a Stream post, which teachers see too.
+        self.fake.announcements["annw"] = "👋 Welcome to AIDL ..."
+        row = AidlClass.objects.get()
+        welcome = row.step_ids.pop("welcome_item")
+        del self.fake.materials[welcome]
+        row.step_ids = {**row.step_ids, "welcome": "annw"}
+        row.save(update_fields=["step_ids"])
+        self._start()
+        self.assertEqual(self.fake.announcements, {})
+        items = [m["title"] for m in self.fake.materials.values() if m.get("topicId") == "t2"]
+        self.assertEqual(items, ["👋 Welcome to AIDL · start here"])  # once
+        # Posted after the cards, so it lists above them (Classwork shows the newest first).
+        created = self.fake.created
+        self.assertGreater(len(created) - 1 - created[::-1].index("👋 Welcome to AIDL · start here"),
+                           created.index("🚦 Traffic Light Check"))
+        self.assertIn("Start with 🚦 Traffic Light Check", next(
+            m for m in self.fake.materials.values() if m["title"].startswith("👋"))["description"])
+
+    def test_the_students_topic_shows_only_once_a_student_joins(self):
+        self._sign_in(granted=ALL_SCOPES)
+        self._sync()
+        self.assertEqual([t["name"] for t in self.fake.topics], ["🚦 AIDL Admin Center"])
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("👋")])
+        self._start()  # started, still nobody: nothing for students yet
+        self.assertEqual([t["name"] for t in self.fake.topics], ["🚦 AIDL Admin Center"])
+        self.assertEqual(self.fake.coursework, {})
+        self.fake.students["aidl2"] = [{"userId": "s7", "profile": {"name": {"fullName": "Zoya Khan"},
+                                                                   "emailAddress": "zoya@school.edu"}}]
+        self._sync()
+        topic = next(t["topicId"] for t in self.fake.topics if t["name"] == "🎓 Your AI Driving Licence")
+        (welcome,) = [m for m in self.fake.materials.values() if m["title"].startswith("👋")]
+        self.assertEqual((welcome["state"], welcome["topicId"]), ("PUBLISHED", topic))
+        self.assertNotIn("assigneeMode", welcome)  # all students
+        self.assertNotIn("Teachers", welcome["description"])  # for students only
+        self.assertEqual(len(self.fake.coursework), 2)  # and their cards
+        self._sync()  # once
+        self.assertEqual(sum(1 for m in self.fake.materials.values() if m["title"].startswith("👋")), 1)
+
+    def test_the_students_topic_goes_when_the_only_student_leaves_before_any_cards(self):
+        self._school_with_a_student()
+        self._sync()
+        self.assertTrue([m for m in self.fake.materials.values() if m["title"].startswith("👋")])
+        self.fake.students["aidl2"] = []
+        self._sync()
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("👋")])
+        self.assertEqual([t["name"] for t in self.fake.topics], ["🚦 AIDL Admin Center"])
+
+    def test_a_licence_posted_on_the_stream_moves_to_classwork(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._school_with_a_student()
+        self._start()
+        self._answer("🚦 Traffic Light Check")
+        self._answer("📖 The Highway Code")
+        self._sync()
+        # As it was before: the licence was a Stream post, which teachers see too.
+        row = AidlClass.objects.get()
+        (uid, entry), = row.licences.items()
+        self.fake.announcements["annold"] = "🎉 Well done, Zoya! ... Licence number: ..."
+        row.licences = {uid: {"id": "annold", "image": False}}
+        row.save(update_fields=["licences"])
+        self._sync()
+        self.assertNotIn("annold", self.fake.announcements)
+        self.assertEqual(AidlClass.objects.get().licences[uid]["kind"], "material")
+        self.assertEqual(len(self.fake.licence_items), 2)
+        self._sync()  # once
+        self.assertEqual(len(self.fake.licence_items), 2)
+
+    def test_a_student_who_is_also_an_aidl_admin_still_gets_the_licence(self):
+        self._school_with_a_student()
+        self._start()
+        AIDLUser.objects.filter(microsoft_id="google:s7").update(role=AIDLUser.Role.ADMIN)
+        self._answer("🚦 Traffic Light Check")
+        self._answer("📖 The Highway Code")
+        self._sync()
+        zoya = AIDLUser.objects.get(microsoft_id="google:s7")
+        self.assertTrue(zoya.licence_issued)
+        (ids, _text, _topic), = self.fake.licence_items
+        self.assertEqual(ids, ["s7"])
+
+    def test_a_card_with_an_old_title_is_renamed_not_sent_again(self):
+        self._school_with_a_student()
+        self._start()
+        cid = next(i for i, c in self.fake.coursework.items() if c["title"] == "🚦 Traffic Light Check")
+        self.fake.coursework[cid]["title"] = "🏠 Old School AI policy · Privacy on company devices"
+        ids = set(self.fake.coursework)
+        self._sync()
+        self.assertEqual(set(self.fake.coursework), ids)  # the same question: answers stay
+        self.assertEqual(self.fake.coursework[cid]["title"], "🚦 Traffic Light Check")
+
+    def test_policy_card_titles_leave_out_the_school_name(self):
+        from api.models import Organization
+        from integrations.google_classroom.learners import _cards
+
+        org = Organization.objects.create(name="Sakshi Vanjare's classroom")
+        self.assertTrue(all(org.name not in c["title"] for c in _cards(org)))
+
+    def test_a_card_deleted_in_classroom_is_published_again(self):
+        self._school_with_a_student()
+        self._start()
+        tl = next(i for i, c in self.fake.coursework.items() if c["title"] == "🚦 Traffic Light Check")
+        del self.fake.coursework[tl]
+        self._sync()
+        titles = sorted(c["title"] for c in self.fake.coursework.values())
+        self.assertEqual(titles, ["📖 The Highway Code", "🚦 Traffic Light Check"])
+
+    def test_a_deleted_cards_topic_is_made_again_with_the_cards_in_it(self):
+        self._school_with_a_student()
+        self._start()
+        self.fake.topics = [t for t in self.fake.topics if t["name"] != "🎓 Your AI Driving Licence"]
+        for c in self.fake.coursework.values():
+            c.pop("topicId", None)  # Classroom moves them to "No topic"
+        self._sync()
+        (topic,) = [t for t in self.fake.topics if t["name"] == "🎓 Your AI Driving Licence"]
+        self.assertTrue(all(c.get("topicId") == topic["topicId"] for c in self.fake.coursework.values()))
+
+    def test_cards_go_only_to_students_the_plan_lets_in(self):
+        self._school_with_a_student()
+        self._start()
+        for c in self.fake.coursework.values():
+            self.assertEqual((c["assigneeMode"], c["individualStudentsOptions"]["studentIds"]),
+                             ("INDIVIDUAL_STUDENTS", ["s7"]))
+
+    def test_trial_lets_in_five_students_and_tells_the_sixth(self):
+        self._school_with_a_student()
+        self.fake.students["aidl2"] = [{"userId": f"s{i}", "profile": {"name": {"fullName": f"Student {i}"},
+                                                                       "emailAddress": f"s{i}@school.edu"}}
+                                       for i in range(1, 7)]
+        self._start()
+        allowed = self.fake.coursework[next(iter(self.fake.coursework))]["individualStudentsOptions"]["studentIds"]
+        self.assertEqual(len(allowed), 5)
+        (ids, text), = self.fake.private
+        self.assertEqual(len(ids), 1)
+        self.assertNotIn(ids[0], allowed)
+        self.assertIn("plan is full", text)
+        self._sync()  # told once
+        self.assertEqual(len(self.fake.private), 1)
+
+    def test_basic_is_for_teachers_only(self):
+        from api.models import Organization
+
+        self._school_with_a_student()
+        Organization.objects.update(plan="basic", seats_purchased=50)
+        self._start()
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:s7").exists())
+        self.assertEqual(self.fake.coursework, {})  # no student allowed: nothing published
+        (ids, text), = self.fake.private
+        self.assertEqual(ids, ["s7"])
+        self.assertIn("teachers only", text)
+        page = self.client.get("/api/google-classroom/admin/")
+        self.assertContains(page, "teachers-only plan")
+
+    def test_on_a_teachers_only_plan_student_invitations_are_cancelled(self):
+        from api.models import Organization
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()
+        self.fake.students["aidl2"] = []
+        Organization.objects.update(plan="basic", seats_purchased=50)
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        teacher = AIDLUser.objects.get(role=AIDLUser.Role.ADMIN)
+        teacher_gid = teacher.microsoft_id.removeprefix("google:")
+        self.fake.invitations = [
+            {"id": "i1", "courseId": "aidl2", "userId": "s9", "role": "STUDENT"},
+            {"id": "i2", "courseId": "aidl2", "userId": teacher_gid, "role": "STUDENT"},  # taking the course
+            {"id": "i3", "courseId": "aidl2", "userId": "t5", "role": "TEACHER"},
+            {"id": "i4", "courseId": "c1", "userId": "s8", "role": "STUDENT"},  # another class
+        ]
+        self.fake.profiles = {"s9": {"name": {"fullName": "Piyush Dhote"}, "emailAddress": "piyush@school.edu"}}
+        self._start()
+        self.assertEqual([i["id"] for i in self.fake.invitations], ["i2", "i3", "i4"])
+        self._sync()  # the plan item shows who
+        (plan,) = [m for m in self.fake.materials.values() if m["title"].startswith("⭐")]
+        self.assertIn("Piyush Dhote (piyush@school.edu) · student invitation cancelled", plan["description"])
+        # The teacher is emailed, once per cancelled invitation.
+        from django.core import mail
+
+        (email,) = [m for m in mail.outbox if "student invitation cancelled" in m.subject]
+        self.assertEqual(email.to, [teacher.email])
+        self.assertIn("Piyush Dhote (piyush@school.edu)", email.body)
+        self.assertIn("teachers only", email.body)
+        # ... and warned beforehand, on top of the Admin Center (teachers only) and on the website.
+        (warn,) = [m for m in self.fake.materials.values() if m["title"].startswith("⛔")]
+        self.assertEqual((warn["state"], warn["topicId"]), ("DRAFT", "t1"))
+        self.assertIn("Don't invite students", warn["description"])
+        made = self.fake.created  # newer = higher in Classwork: above the setup summary
+        self.assertGreater(made.index(warn["title"]), max(i for i, t in enumerate(made) if t.startswith("📋")))
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "AIDL cancels their invitations")
+
+    def test_the_dont_invite_warning_goes_away_after_an_upgrade(self):
+        from api.models import Organization
+
+        self._school_with_a_student()
+        Organization.objects.update(plan="basic", seats_purchased=50)
+        self._sync()
+        self._sync()
+        self.assertEqual(sum(1 for m in self.fake.materials.values() if m["title"].startswith("⛔")), 1)
+        Organization.objects.update(plan="enterprise", seats_purchased=50)
+        self._sync()
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("⛔")])
+
+    def test_a_doubled_dont_invite_warning_is_cleaned_up(self):
+        from api.models import Organization
+        from integrations.google_classroom.models import AidlClass
+
+        self._school_with_a_student()
+        Organization.objects.update(plan="basic", seats_purchased=50)
+        self._sync()
+        # Two syncs at once each made one, and the kept id was lost.
+        (warn,) = [m for m in self.fake.materials.values() if m["title"].startswith("⛔")]
+        self.fake.materials["mx"] = dict(warn)
+        row = AidlClass.objects.get()
+        row.step_ids = {**row.step_ids, "no_students": ""}
+        row.save(update_fields=["step_ids"])
+        Organization.objects.update(seats_purchased=60)  # any admin action refreshes the Admin Center
+        from integrations.google_classroom import aidl_class
+
+        aidl_class.refresh(Organization.objects.get())
+        self.assertEqual(sum(1 for m in self.fake.materials.values() if m["title"].startswith("⛔")), 1)
+
+    def test_on_trial_a_third_teacher_invitation_is_cancelled(self):
+        from django.core import mail
+
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self.fake.teachers = {"aidl2": [{"userId": "owner"}]}  # Trial: 2 teachers, so room for one more
+        self.fake.invitations = [
+            {"id": "i1", "courseId": "aidl2", "userId": "t2", "role": "TEACHER"},
+            {"id": "i2", "courseId": "aidl2", "userId": "t3", "role": "TEACHER"},
+        ]
+        self.fake.profiles = {"t3": {"name": {"fullName": "Ravi Teacher"}, "emailAddress": "ravi@school.edu"}}
+        self._sync()
+        self.assertEqual([i["id"] for i in self.fake.invitations], ["i1"])  # the second teacher fits; the third doesn't
+        (email,) = [m for m in mail.outbox if "teacher invitation cancelled" in m.subject]
+        self.assertIn("Ravi Teacher (ravi@school.edu)", email.body)
+        self.assertIn("allows 2 teachers", email.body)
+        self._sync()  # the plan item shows who
+        (plan,) = [m for m in self.fake.materials.values() if m["title"].startswith("⭐")]
+        self.assertIn("Ravi Teacher (ravi@school.edu) · teacher invitation cancelled", plan["description"])
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("⛔ Don't invite more")])
+
+        # Once the second teacher joins, the class is full: a warning for teachers, on top of the Admin Center.
+        self.fake.teachers["aidl2"].append({"userId": "t2"})
+        self.fake.invitations = []
+        self._sync()  # no admin action needed
+        (warn,) = [m for m in self.fake.materials.values() if m["title"].startswith("⛔ Don't invite more")]
+        self.assertEqual(warn["state"], "DRAFT")
+        self.assertIn("allows 2 teachers", warn["description"])
+        self.fake.teachers["aidl2"].pop()  # a teacher left: room again
+        self._sync()
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("⛔ Don't invite more")])
+
+    def _enterprise(self, seats=50):
+        from api.models import Organization
+
+        Organization.objects.update(plan="enterprise", seats_purchased=seats)
+
+    def test_invite_all_students_from_my_other_classes(self):
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()  # Zoya (s7) is in the AIDL class
+        self._enterprise()
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self.fake.students["c1"] = [  # AI Basics: Ravi, Meera, Zoya again, and someone outside the school
+            {"userId": s, "profile": {"name": {"fullName": n}, "emailAddress": f"{s}@school.edu"}}
+            for s, n in (("s1", "Ravi Kumar"), ("s2", "Meera Shah"), ("s7", "Zoya Khan"), ("outsider1", "Out Sider"))]
+        self.fake.students["c2"] = [{"userId": "s1", "profile": {"name": {"fullName": "Ravi Kumar"}}},
+                                    {"userId": "s3", "profile": {"name": {"fullName": "Asha Rao"}}}]
+        self.client.post("/api/google-classroom/classes/sync/")
+        self._sync()
+        page = self.client.get("/api/google-classroom/classes/")
+        self.assertContains(page, "Invite students from your other classes")
+        self.assertContains(page, "3 not in AIDL yet")  # AI Basics: everyone but Zoya
+        resp = self.client.post("/api/google-classroom/classes/invite/", {"course_ids": ["c1", "c2"]}, follow=True)
+        invited = sorted(i["userId"] for i in self.fake.invitations if i["courseId"] == "aidl2")
+        self.assertEqual(invited, ["s1", "s2", "s3"])  # each once; Zoya's already in
+        self.assertTrue(all(i["role"] == "STUDENT" for i in self.fake.invitations))
+        self.assertContains(resp, "3 students invited")
+        self.assertContains(resp, "couldn")  # the outsider
+        # Again: nobody twice.
+        resp = self.client.post("/api/google-classroom/classes/invite/", {"course_ids": ["c1"]}, follow=True)
+        self.assertEqual(len(self.fake.invitations), 3)
+        self.assertContains(resp, "0 students invited")
+
+    def test_enterprise_has_no_student_limit(self):
+        from api.licensing import seats_left
+        from api.models import Organization
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()
+        self._enterprise(seats=5)  # however few seats were bought
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self.fake.students["c1"] = [{"userId": f"s{i}", "profile": {"name": {"fullName": f"Student {i}"}}}
+                                    for i in range(10, 20)]
+        self.client.post("/api/google-classroom/classes/sync/")
+        self._sync()
+        resp = self.client.post("/api/google-classroom/classes/invite/", {"course_ids": ["c1"]}, follow=True)
+        self.assertEqual(len(self.fake.invitations), 10)  # all of them
+        self.assertNotContains(resp, "no free seats")
+        self.assertGreater(seats_left(Organization.objects.get()), 100_000)  # licences never run out either
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "/ unlimited")
+
+    def test_invite_from_classes_needs_the_roster_permission(self):
+        self._school_with_a_student()
+        self._enterprise()
+        self.client.post("/api/google-classroom/classes/sync/")
+        resp = self.client.post("/api/google-classroom/classes/invite/", {"course_ids": ["c1"]}, follow=True)
+        self.assertContains(resp, "needs permission to invite students")
+        self.assertFalse(getattr(self.fake, "invitations", []))
+
+    def test_invite_by_email_into_the_aidl_class(self):
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()  # Zoya (s7, zoya@school.edu) is in the AIDL class
+        self._enterprise()
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self._sync()
+        page = self.client.get("/api/google-classroom/classes/")
+        self.assertContains(page, "Invite students by email")
+        pasted = ("Riya Sharma <Riya@School.edu>, aman@school.edu\n"
+                  "zoya@school.edu\taman@school.edu\nnot an email\noutsider1@other.org")
+        resp = self.client.post("/api/google-classroom/classes/invite-emails/", {"emails": pasted}, follow=True)
+        invited = [i["userId"] for i in self.fake.invitations]
+        self.assertEqual(invited, ["riya@school.edu", "aman@school.edu"])  # each once; Zoya's in already
+        self.assertContains(resp, "2 students invited")
+        self.assertContains(resp, "1 already in the class")
+        self.assertContains(resp, "couldn")  # outsider1: Google refused
+        resp = self.client.post("/api/google-classroom/classes/invite-emails/", {"emails": "aman@school.edu"},
+                                follow=True)  # again: Google says it exists
+        self.assertEqual(len(self.fake.invitations), 2)
+        self.assertContains(resp, "0 students invited")
+
+    def test_bulk_invite_is_for_enterprise_only(self):
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()  # Trial: students are added in Classroom's People tab
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self.fake.students["c1"] = [{"userId": "s1", "profile": {"name": {"fullName": "Ravi Kumar"}}}]
+        self.client.post("/api/google-classroom/classes/sync/")
+        page = self.client.get("/api/google-classroom/classes/")
+        self.assertContains(page, "Enterprise feature")
+        self.assertNotContains(page, "Invite these students")
+        for url, data in (("/api/google-classroom/classes/invite-emails/", {"emails": "aman@school.edu"}),
+                          ("/api/google-classroom/classes/invite/", {"course_ids": ["c1"]})):
+            resp = self.client.post(url, data, follow=True)
+            self.assertContains(resp, "part of the Enterprise plan")
+        self.assertFalse(getattr(self.fake, "invitations", []))
+        self.assertFalse([m for m in self.fake.materials.values() if m["title"] == "👥 Add students"])
+
+    def test_invitations_are_kept_when_the_plan_has_room(self):
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self.fake.invitations = [{"id": "i1", "courseId": "aidl2", "userId": "s9", "role": "STUDENT"}]
+        self._start()
+        self.assertEqual(len(self.fake.invitations), 1)
+
+    def test_like_slack_a_student_without_room_is_taken_out_of_the_class(self):
+        from api.models import Organization
+        from integrations.google_classroom.models import GoogleCredential
+
+        self._school_with_a_student()
+        Organization.objects.update(plan="basic", seats_purchased=50)
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self._start()
+        self.assertEqual(self.fake.kicked, ["s7"])
+        self.assertEqual(self.fake.students["aidl2"], [])
+        self.assertFalse(getattr(self.fake, "private", []))  # no note: they can't see the class any more
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:s7").exists())
+        (plan,) = [m for m in self.fake.materials.values() if m["title"].startswith("⭐")]
+        self.assertIn("Taken out of the AIDL class", plan["description"])
+        self.assertIn("Zoya Khan (zoya@school.edu)", plan["description"])
+        self._sync()  # once
+        self.assertEqual(self.fake.kicked, ["s7"])
+
+    def test_trial_allows_two_teachers(self):
+        self._school_with_a_student()
+        self._sync()
+        zoya = AIDLUser.objects.get(microsoft_id="google:s7")
+        self.client.post("/api/google-classroom/admin/admins/action/", {"action": "add", "user_id": zoya.pk})
+        self.assertEqual(AIDLUser.objects.get(pk=zoya.pk).role, "admin")
+        AIDLUser.objects.create(microsoft_id="google:s8", email="x@school.edu", full_name="X", role="learner",
+                                organization_id=zoya.organization_id, is_active=True)
+        third = AIDLUser.objects.get(microsoft_id="google:s8")
+        resp = self.client.post("/api/google-classroom/admin/admins/action/",
+                                {"action": "add", "user_id": third.pk}, follow=True)
+        self.assertContains(resp, "Your plan allows 2 teachers")
+        self.assertEqual(AIDLUser.objects.get(pk=third.pk).role, "learner")
+
+    def test_someone_not_in_the_class_is_ignored(self):
+        self._school_with_a_student()
+        self._start()
+        self._answer("🚦 Traffic Light Check", gid="stranger")
+        self._sync()
+        self.assertFalse(AIDLUser.objects.filter(microsoft_id="google:stranger").exists())
+
+
 # The step-2 class inherits from the sign-in class for its helpers; don't run the sign-in tests twice.
 for _name in [n for n in dir(GoogleClassroomSignIn) if n.startswith("test_")]:
     setattr(GoogleClassroomClasses, _name, None)
+    setattr(GoogleClassroomAidlClass, _name, None)
+for _name in [n for n in dir(GoogleClassroomAidlClass) if n.startswith("test_")]:
+    setattr(GoogleClassroomLearnerCards, _name, None)
 
 
 # --- step 3: classes in the AIDL programme ---
@@ -638,6 +1558,7 @@ class GoogleClassroomAdminCenter(GoogleClassroomLearners):
 
     def test_admin_cannot_give_permissions_they_lack(self):
         _t, ravi, meera = self._school()
+        Organization.objects.filter(pk=ravi.organization_id).update(plan="enterprise", seats_purchased=50)  # 3 admins
         self.client.post("/api/google-classroom/admin/admins/action/",
                          {"action": "add", "user_id": ravi.pk, "perm": ["manage_admins"]})
         self._as("s1", "ravi@school.edu")
@@ -659,12 +1580,11 @@ class GoogleClassroomAdminCenter(GoogleClassroomLearners):
         self.assertEqual(meera.role, "learner")
 
     def test_admin_seat_limit(self):
-        _t, ravi, meera = self._school()
-        Organization.objects.filter(pk=ravi.organization_id).update(admin_seat_limit=2)
+        _t, ravi, meera = self._school()  # Trial: 2 teachers (plan_limits)
         self.client.post("/api/google-classroom/admin/admins/action/", {"action": "add", "user_id": ravi.pk})
         resp = self.client.post("/api/google-classroom/admin/admins/action/",
                                 {"action": "add", "user_id": meera.pk}, follow=True)
-        self.assertContains(resp, "allows 2 admins")
+        self.assertContains(resp, "Your plan allows 2 teachers")
 
     def test_admin_without_card_permission_cannot_start(self):
         _t, ravi, _m = self._school()

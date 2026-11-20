@@ -30,6 +30,35 @@ def set_session(request, response, user: AIDLUser):
     return response
 
 
+STEP_COOKIE = "aidl_gclassroom_step"
+
+
+def set_focus_step(request, response, n: int):
+    """Opened from Classwork's "Step n": every AIDL page then shows only that
+    step, plus "Back to Google Classroom" (no Admin Center tabs)."""
+    response.set_cookie(STEP_COOKIE, str(n), max_age=86400, httponly=True, samesite="Lax", path=COOKIE_PATH,
+                        secure=request.is_secure() or not settings.DEBUG)
+    return response
+
+
+def clear_focus_step(response):
+    response.delete_cookie(STEP_COOKIE, path=COOKIE_PATH)
+    return response
+
+
+def focus_step(request) -> int:
+    """1-5 when the page was opened from a Classwork step, else 0."""
+    value = request.COOKIES.get(STEP_COOKIE, "")
+    return int(value) if value in ("1", "2", "3", "4", "5") else 0
+
+
+def focus_context(request) -> dict:
+    from .aidl_class import STEPS
+
+    n = focus_step(request)
+    return {"focus_step": n, "focus_title": STEPS[n - 1][1] if n else ""}
+
+
 def clear_session(response):
     response.delete_cookie(COOKIE, path=COOKIE_PATH)
     return response

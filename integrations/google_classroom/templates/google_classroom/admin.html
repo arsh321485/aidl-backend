@@ -3,6 +3,28 @@
 {% block body %}
 {% with tab="home" %}{% include "google_classroom/_nav.html" %}{% endwith %}
 
+{% if not focus_step %}
+{% if aidl_class.link %}
+<section class="box flat done">
+  <div class="spread">
+    <div>
+      <b>🏫 Your AIDL class is ready in Google Classroom</b>
+      <p class="muted" style="margin-top:4px">{% if aidl_class.provisioned %}Accept it in Google Classroom first. {% endif %}Each step is also in the class's Classwork (only teachers see it), and Google Classroom shows your progress.</p>
+    </div>
+    <a class="btn go back-to-classroom" href="{{ aidl_class.link }}">↩ Back to Google Classroom</a>
+  </div>
+</section>
+{% elif aidl_class.error %}
+<div class="error" role="alert">{{ aidl_class.error }} <a href="{% url 'google-classroom-classes-connect' %}">Connect Google Classroom again</a></div>
+{% else %}
+<section class="box flat">
+  <div class="spread">
+    <p class="muted">Let AIDL create your AIDL class in Google Classroom, where students join and get their licence.</p>
+    <a class="btn go" href="{% url 'google-classroom-classes-connect' %}">🏫 Create AIDL class in Google Classroom</a>
+  </div>
+</section>
+{% endif %}
+
 <section class="box">
   <div class="spread">
     <div>
@@ -16,9 +38,14 @@
     </div>
   </div>
   <p class="steps" aria-label="{{ done_count }} of 5 steps done" style="margin-top:10px">{% for _ in bar %}🟩{% endfor %}{% for _ in rest %}⬜{% endfor %} <span class="muted">{{ done_count }} of 5 done</span></p>
+  <p class="muted" style="margin-top:6px">👩‍🏫 Teachers {{ limits.teachers_used }} / {% if limits.teachers_limit is None %}unlimited{% else %}{{ limits.teachers_limit }}{% endif %} ·
+    🎓 Students {% if limits.teachers_only %}not included (teachers-only plan){% else %}{{ limits.students_used }} / {% if limits.students_limit is None %}unlimited{% else %}{{ limits.students_limit }}{% endif %}{% endif %}</p>
+  {% if limits.teachers_only %}<div class="error" role="alert" style="margin-top:8px">⛔ Your {{ limits.label }} plan is for teachers only. Don't invite students to the AIDL class in Google Classroom: AIDL cancels their invitations automatically. Upgrade your plan to add students.</div>{% endif %}
   {% if plan.full %}<div class="error" role="alert" style="margin-top:8px">Your plan is full ({{ plan.used }} of {{ plan.limit }} seats). New students can't join until you upgrade or remove someone.</div>{% endif %}
 </section>
+{% endif %}
 
+{% if not focus_step or focus_step == 1 %}
 <section class="box flat{% if steps.policy %} done{% endif %}">
   <h2>{% if steps.policy %}✅ {% endif %}1 · Your AI policy</h2>
   <p class="muted">{{ policy_approved }} of 14 policy cards approved. Each is one short card your learners agree to before their licence.</p>
@@ -31,7 +58,9 @@
   </div>
   {% else %}<p class="muted">Your admin permissions don't include the policy.</p>{% endif %}
 </section>
+{% endif %}
 
+{% if not focus_step or focus_step == 2 %}
 <section class="box flat{% if steps.admins %} done{% endif %}">
   <h2>{% if steps.admins %}✅ {% endif %}2 · Admins (optional)</h2>
   <p class="muted">{{ admins_count }} admin{{ admins_count|pluralize }}. Other teachers can help run AIDL.</p>
@@ -42,7 +71,9 @@
     {% endif %}
   </div>
 </section>
+{% endif %}
 
+{% if not focus_step or focus_step == 3 %}
 <section class="box flat{% if steps.team %} done{% endif %}">
   <h2>{% if steps.team %}✅ {% endif %}3 · Your team</h2>
   <p class="muted">{{ members }} learner{{ members|pluralize }} from {{ classes_in_aidl }} class{{ classes_in_aidl|pluralize:"es" }} in AIDL. Add a class on the Classes page and its students join.</p>
@@ -51,8 +82,10 @@
     <a class="btn" href="{% url 'google-classroom-admin-team' %}">👥 Team progress</a>
   </div>
 </section>
+{% endif %}
 
-<section class="box flat{% if steps.approval %} done{% endif %}">
+{% if not focus_step or focus_step == 4 %}
+<section id="step-4" class="box flat{% if steps.approval %} done{% endif %}">
   <h2>{% if steps.approval %}✅ {% endif %}4 · Card approval</h2>
   <div class="list">
     {% for c in onboarding %}
@@ -68,8 +101,10 @@
     {% endfor %}
   </div>
 </section>
+{% endif %}
 
-<section class="box flat{% if steps.started %} done{% endif %}">
+{% if not focus_step or focus_step == 5 %}
+<section id="step-5" class="box flat{% if steps.started %} done{% endif %}">
   <h2>{% if steps.started %}✅ 5 · Programme started{% else %}5 · Start the programme{% endif %}</h2>
   {% if steps.started %}
   <p><b>{{ licensed }}</b> of <b>{{ members }}</b> learner{{ members|pluralize }} licensed.</p>
@@ -81,14 +116,18 @@
   </form>
   {% endif %}
   {% endif %}
+  {% if not focus_step %}
   <div style="margin-top:12px">
     <b>🔗 Link for your students</b>
     <p class="muted" style="margin:4px 0 6px">Post it in your Google Classroom class (Classwork → Create → Material → Link).
       Students sign in with Google and get their cards and licence.</p>
     <input type="text" readonly value="{{ learn_url }}" onclick="this.select()" aria-label="Link for your students">
   </div>
+  {% endif %}
 </section>
+{% endif %}
 
+{% if not focus_step %}
 <section class="box flat">
   <h2>Reports</h2>
   <div class="row">
@@ -96,4 +135,5 @@
     <a class="btn" href="{% url 'google-classroom-admin-coverage' %}">⬇ Export coverage (CSV)</a>
   </div>
 </section>
+{% endif %}
 {% endblock %}

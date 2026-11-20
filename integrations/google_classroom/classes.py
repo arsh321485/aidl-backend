@@ -21,6 +21,8 @@ Step 3 rules:
 
 from __future__ import annotations
 
+import re
+
 from django.utils import timezone
 
 from api.microsoft_auth import open_refresh_token, seal_refresh_token
@@ -38,6 +40,21 @@ NO_SEAT = "no_seat"
 OTHER_ORG = "other_org"
 INACTIVE = "inactive"
 REMOVED = "removed"  # an admin took them out of the programme (Admin Center)
+
+
+def aidl_course_id(org_id: str) -> str:
+    """The AIDL class's Google id ("" when AIDL hasn't made one). Once it
+    exists, it is the programme, like #aidl in Slack: its students are the
+    team, and the teacher's other classes stay out of AIDL."""
+    from .models import AidlClass
+
+    row = AidlClass.objects.filter(organization_id=org_id).exclude(course_id="").first()
+    return row.course_id if row else ""
+
+
+def _allowed(org_id: str, course_id: str) -> bool:
+    aidl = aidl_course_id(org_id)
+    return not aidl or course_id == aidl
 
 
 def connect(user: AIDLUser, profile: GoogleProfile, tokens: dict) -> int:
@@ -83,7 +100,7 @@ def _fetch(user: AIDLUser, cred: GoogleCredential, access_token: str) -> int:
             "synced_at": now,
         })
         _save_students(org_id, c["id"], students, now)
-        if course.in_programme:
+        if course.in_programme and _allowed(org_id, c["id"]):
             enrol_class(course)  # new students of a chosen class join AIDL
         seen.append(c["id"])
 
@@ -124,6 +141,9 @@ def choose(teacher: AIDLUser, course_id: str, on: bool) -> dict:
                                          teacher_user_id=str(teacher.pk)).first()
     if course is None:
         raise GoogleError("unknown_class", "That class isn't in your list. Press Refresh and try again.")
+    if on and not _allowed(teacher.organization_id, course_id):
+        raise GoogleError("not_aidl_class", "Only your AIDL class is in the programme. "
+                                            "Ask students to join the AIDL class in Google Classroom.")
     course.in_programme = on
     course.added_to_programme_at = timezone.now() if on else None
     course.save(update_fields=["in_programme", "added_to_programme_at"])
@@ -145,8 +165,19 @@ def enrol_class(course: GoogleCourse) -> dict:
     return counts
 
 
+def _follow_google_name(user: AIDLUser, student: GoogleStudent) -> None:
+    """The student changed their name in their Google account: AIDL (and their
+    licence card) follow it. Only for the account Google sign-in links."""
+    name = (student.full_name or "").strip()
+    if not name or name == user.full_name or user.microsoft_id != f"google:{student.google_user_id}":
+        return
+    first, _, last = name.partition(" ")
+    user.first_name, user.last_name, user.full_name = first[:100], last[:100], name[:255]
+    user.save(update_fields=["first_name", "last_name", "full_name", "updated_at"])
+
+
 def _enrol(org: Organization, student: GoogleStudent) -> tuple[str, AIDLUser | None]:
-    from api.plans import can_join
+    from .plan_limits import can_add_student as can_join  # the plan's teacher / student rules
 
     user = AIDLUser.objects.filter(microsoft_id=f"google:{student.google_user_id}").first()
     if user is None and student.email:
@@ -156,6 +187,7 @@ def _enrol(org: Organization, student: GoogleStudent) -> tuple[str, AIDLUser | N
         if not user.is_active:
             return INACTIVE, user
         if user.organization_id == str(org.pk):
+            _follow_google_name(user, student)
             return (REMOVED if user.slack_left_at else ADDED), user
         if user.organization_id:
             return OTHER_ORG, user
@@ -204,6 +236,9 @@ def summary(counts: dict) -> str:
 def for_teacher(user: AIDLUser) -> dict:
     cred = GoogleCredential.objects.filter(user_id=str(user.pk)).first()
     courses = list(GoogleCourse.objects.filter(organization_id=user.organization_id, teacher_user_id=str(user.pk)))
+    aidl = aidl_course_id(user.organization_id)
+    if aidl:  # only the AIDL class (see aidl_course_id)
+        courses = [c for c in courses if c.course_id == aidl]
     students: dict[str, list] = {}
     for s in GoogleStudent.objects.filter(organization_id=user.organization_id,
                                           course_id__in=[c.course_id for c in courses]):
@@ -221,3 +256,138 @@ def for_teacher(user: AIDLUser) -> dict:
             "students": students.get(c.course_id, []),
         } for c in courses],
     }
+
+
+# --- step 3: invite the students of the teacher's other classes to the AIDL class ---
+
+INVITE_MAX = 500  # one press; more than any school class list
+
+
+def other_classes(user: AIDLUser) -> list[dict]:
+    """The teacher's classes other than the AIDL class, with how many of their students
+    aren't in the AIDL class yet."""
+    aidl = aidl_course_id(user.organization_id)
+    if not aidl:
+        return []
+    in_aidl = set(GoogleStudent.objects.filter(organization_id=user.organization_id, course_id=aidl)
+                  .values_list("google_user_id", flat=True))
+    out = []
+    for c in GoogleCourse.objects.filter(organization_id=user.organization_id, teacher_user_id=str(user.pk)
+                                         ).exclude(course_id=aidl).order_by("name"):
+        ids = set(GoogleStudent.objects.filter(organization_id=user.organization_id, course_id=c.course_id)
+                  .values_list("google_user_id", flat=True))
+        out.append({"id": c.course_id, "name": c.name, "section": c.section, "student_count": len(ids),
+                    "new": len(ids - in_aidl)})
+    return out
+
+
+def bulk_invite_allowed(org: Organization) -> bool:
+    """Inviting many students at once (by email or from other classes) is an Enterprise feature."""
+    from api.plans import plan_key
+
+    return plan_key(org) == "enterprise"
+
+
+def _invite_access(teacher: AIDLUser) -> tuple[Organization, str, str]:
+    """(organization, AIDL class id, access token) for inviting, or a GoogleError saying what's missing."""
+    org = Organization.objects.filter(pk=teacher.organization_id, is_active=True).first()
+    aidl = aidl_course_id(teacher.organization_id)
+    if org is None or not aidl:
+        raise GoogleError("no_aidl_class", "Your AIDL class isn't set up yet.")
+    if not bulk_invite_allowed(org):
+        raise GoogleError("enterprise_only", "Inviting many students at once is part of the Enterprise plan. "
+                                             "Upgrade your plan to use it.")
+    cred = GoogleCredential.objects.filter(user_id=str(teacher.pk)).first()
+    refresh = open_refresh_token(cred.refresh_token) if cred else ""
+    if not refresh:
+        raise GoogleError("reconnect", "Connect Google Classroom first.")
+    if google_oauth.ROSTERS_SCOPE not in (cred.scopes or "").split():
+        raise GoogleError("reconnect", "AIDL needs permission to invite students. Press “Connect Google Classroom” "
+                                       "and allow managing your class rosters, then try again.")
+    return org, aidl, google_oauth.refresh_access_token(refresh)
+
+
+def _invite(org: Organization, aidl: str, token: str, people: list[str]) -> dict:
+    """Invite these people (Google ids or emails) to the AIDL class as students: skips anyone
+    already in it or already invited, and stops at the plan's free seats. Google still asks
+    each student to press Join (only a Workspace admin can add people without an invitation).
+    Returns counts: invited, already, no_room, failed."""
+    from .plan_limits import student_room
+
+    members = classroom_api.list_students(token, aidl) + classroom_api.list_teachers(token, aidl)
+    in_aidl = {m["userId"] for m in members}
+    in_aidl |= {((m.get("profile") or {}).get("emailAddress") or "").lower() for m in members} - {""}
+    invites = classroom_api.list_invitations(token, aidl)
+    pending = {i.get("userId") for i in invites}
+    counts = {"invited": 0, "already": 0, "no_room": 0, "failed": 0}
+    # Seats left, less the student invitations still open (each may join and take one).
+    room = min(student_room(org) - sum(1 for i in invites if i.get("role") == "STUDENT"), INVITE_MAX)
+    for person in people:
+        if person in in_aidl or person in pending:
+            counts["already"] += 1
+            continue
+        if counts["invited"] >= room:
+            counts["no_room"] += 1
+            continue
+        try:
+            classroom_api.create_invitation(token, aidl, person)
+            counts["invited"] += 1
+        except GoogleError as exc:
+            if exc.code == "already_exists":  # Google knows them by email: in the class or invited already
+                counts["already"] += 1
+            elif exc.code == "reconnect":
+                raise
+            else:
+                counts["failed"] += 1
+    return counts
+
+
+def invite_from_classes(teacher: AIDLUser, course_ids: list[str]) -> dict:
+    """Invite every student of these classes (the teacher's own) to the AIDL class, in one go."""
+    org, aidl, token = _invite_access(teacher)
+    mine = set(GoogleCourse.objects.filter(organization_id=teacher.organization_id, teacher_user_id=str(teacher.pk),
+                                           course_id__in=course_ids).exclude(course_id=aidl)
+               .values_list("course_id", flat=True))
+    if not mine:
+        raise GoogleError("no_classes", "Tick at least one of your classes.")
+    people = []
+    for gid in GoogleStudent.objects.filter(organization_id=teacher.organization_id, course_id__in=mine
+                                            ).order_by("full_name").values_list("google_user_id", flat=True):
+        if gid not in people:
+            people.append(gid)
+    return _invite(org, aidl, token, people)
+
+
+EMAIL = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def emails_in(text: str) -> list[str]:
+    """Every email address in pasted text (one per line, commas, a copied spreadsheet column,
+    "Name <email>"...), lower-case, each once, in order."""
+    out = []
+    for email in EMAIL.findall(text or ""):
+        email = email.lower().strip(".")
+        if email not in out:
+            out.append(email)
+    return out
+
+
+def invite_emails(teacher: AIDLUser, text: str) -> dict:
+    """Invite a pasted list of student emails to the AIDL class, in one go."""
+    emails = emails_in(text)
+    if not emails:
+        raise GoogleError("no_emails", "Paste at least one student email address.")
+    org, aidl, token = _invite_access(teacher)
+    return _invite(org, aidl, token, emails)
+
+
+def invite_summary(counts: dict) -> str:
+    parts = [f"📨 {counts['invited']} student{'s' if counts['invited'] != 1 else ''} invited to the AIDL class. "
+             "They each get a Google Classroom invitation and press Join; AIDL adds them as learners."]
+    if counts.get("already"):
+        parts.append(f"{counts['already']} already in the class or invited.")
+    if counts.get("no_room"):
+        parts.append(f"⚠️ {counts['no_room']} not invited: no free seats on your plan. Upgrade, then invite again.")
+    if counts.get("failed"):
+        parts.append(f"{counts['failed']} couldn't be invited (Google refused; e.g. outside your school's domain).")
+    return " ".join(parts)

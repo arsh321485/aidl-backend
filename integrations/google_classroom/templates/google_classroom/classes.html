@@ -28,6 +28,51 @@
   </div>
 </section>
 
+{% if has_aidl_class %}
+<section class="box">
+  <h2>📋 Invite students by email</h2>
+  {% if not invite.enterprise %}
+  <p class="muted" style="margin-top:6px">⭐ Enterprise feature: paste your whole school's student emails and AIDL invites them all to the AIDL class at once. Your {{ invite.label }} plan adds students in Google Classroom (People → Invite students). Upgrade to Enterprise to use it.</p>
+  {% elif invite.teachers_only %}
+  <p class="muted" style="margin-top:6px">Your {{ invite.label }} plan is for teachers only, so students can't be invited. Upgrade your plan to add students.</p>
+  {% else %}
+  <p class="muted" style="margin-top:6px">Paste your students' school emails: one per line, separated by commas, or a column copied from a spreadsheet. AIDL invites them all to the AIDL class at once. Each student gets a Google Classroom invitation and presses <b>Join</b>; AIDL then adds them as learners. Anyone already in the class or already invited is skipped.
+    {% if invite.enterprise %}Your Enterprise plan has no student limit: invite your whole school.{% else %}Your {{ invite.label }} plan has room for <b>{{ invite.room }}</b> more student{{ invite.room|pluralize }}.{% endif %}</p>
+  <form method="post" action="{% url 'google-classroom-classes-invite-emails' %}" style="margin-top:10px">{% csrf_token %}
+    <label for="emails">Student emails</label>
+    <textarea id="emails" name="emails" rows="6" placeholder="riya.sharma@school.edu&#10;aman.verma@school.edu&#10;..."></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn go"{% if not invite.room %} disabled{% endif %}>📨 Invite these students</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if other_classes %}
+<section class="box">
+  <h2>📨 Invite students from your other classes</h2>
+  {% if not invite.enterprise %}
+  <p class="muted" style="margin-top:6px">⭐ Enterprise feature: invite all the students of your other classes in one go. Upgrade to Enterprise to use it.</p>
+  {% elif invite.teachers_only %}
+  <p class="muted" style="margin-top:6px">Your {{ invite.label }} plan is for teachers only, so students can't be invited. Upgrade your plan to add students.</p>
+  {% else %}
+  <p class="muted" style="margin-top:6px">Tick your classes and AIDL invites all their students to the AIDL class in one go. Each student gets a Google Classroom invitation and presses <b>Join</b>; AIDL then adds them as learners. Anyone already in the AIDL class or already invited is skipped.
+    {% if invite.enterprise %}Your Enterprise plan has no student limit: invite your whole school.{% else %}Your {{ invite.label }} plan has room for <b>{{ invite.room }}</b> more student{{ invite.room|pluralize }}.{% endif %}</p>
+  <form method="post" action="{% url 'google-classroom-classes-invite' %}" style="margin-top:10px">{% csrf_token %}
+    {% for c in other_classes %}
+    <label class="check"><input type="checkbox" name="course_ids" value="{{ c.id }}"{% if not c.new %} disabled{% endif %}>
+      {{ c.name }}{% if c.section %} · {{ c.section }}{% endif %} <span class="muted">· {{ c.student_count }} student{{ c.student_count|pluralize }}{% if c.student_count %} · {% if c.new %}{{ c.new }} not in AIDL yet{% else %}all in AIDL already{% endif %}{% endif %}</span></label>
+    {% endfor %}
+    <div class="row" style="margin-top:10px">
+      <button class="btn go"{% if not invite.room %} disabled{% endif %}>📨 Invite all their students</button>
+      <span class="muted">Press ↻ Refresh first if you've added students in Classroom since.</span>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
 {% for c in data.classes %}
 <section class="box flat{% if c.in_programme %} done{% endif %}">
   <div class="spread">

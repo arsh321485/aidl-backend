@@ -11,6 +11,11 @@ GET /api/google-classroom/callback/
     or with ?error=&error_description=.
     One button does both sign-up and sign-in: a new Google account is created,
     a known one just signs in.
+    A school (organization) sign-in also grants the Classroom permissions: for an
+    admin AIDL then creates / reuses the "AIDL" class with the Admin Center post
+    (aidl_class.py), and the website opens that class in Google Classroom (/open/).
+GET /api/google-classroom/open/
+    Where the website sends an admin after sign-in: the AIDL class in Google Classroom.
 
 Step 2 (AIDL admins = teachers)
 GET  /api/google-classroom/classes/           page: the teacher's classes and students
@@ -53,7 +58,7 @@ from api.org_service import get_organization_for_user
 # api/; it lives in the Moodle folder because Moodle had it first.
 from integrations.moodle import flow
 
-from . import classes, google_oauth, session
+from . import aidl_class, classes, google_oauth, session
 from .accounts import find_user, sign_in
 from .google_oauth import GoogleError
 
@@ -79,7 +84,8 @@ def login(request):
                                         "(GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)."}, status=503)
     enroll_as = _enroll_as(request.GET.get("enroll_as"))
     state = create_oauth_state(enroll_as, payload=MODE)
-    url = google_oauth.auth_url(state)
+    # A school also lets AIDL read its classes and create the AIDL class (like "Add to Slack").
+    url = google_oauth.auth_url(state, classroom=enroll_as == "organization")
     if request.GET.get("redirect") == "1":
         return HttpResponseRedirect(url)
     return JsonResponse({"auth_url": url, "state": state, "enroll_as": enroll_as, "mode": MODE})
@@ -107,10 +113,13 @@ def callback(request):
             return _connect_classes(request, code)
         if payload == LEARN:
             return _learner_signed_in(request, code)
-        profile = google_oauth.verify_id_token(google_oauth.exchange_code(code))
-        user, _org = sign_in(profile, _enroll_as(enroll_as))
+        tokens = google_oauth.exchange_tokens(code)
+        profile = google_oauth.verify_id_token(tokens["id_token"])
+        user, org = sign_in(profile, _enroll_as(enroll_as))
     except GoogleError as exc:
         return fail(request, exc.code, str(exc))
+    if org is not None and user.role == AIDLUser.Role.ADMIN:
+        aidl_class.setup(user, org, profile, tokens)  # never fails the sign-in
     return _redirect(request, user)
 
 
@@ -128,9 +137,8 @@ def _redirect(request, user: AIDLUser):
         "role": user.role,
     }
     if user.role == AIDLUser.Role.ADMIN and user.organization_id:
-        # The website opens this link after sign-in: it goes straight on to
-        # Google Classroom itself (see open_classroom). The Admin Center stays
-        # at /api/google-classroom/admin/.
+        # The website opens this link after sign-in: the AIDL class in Google
+        # Classroom, whose post shows the 5 Admin Center steps (see open_classroom).
         open_url = f"{settings.BACKEND_URL.rstrip('/')}{reverse('google-classroom-open')}"
         query["admin_center_url"] = f"{open_url}?{urlencode({'email': user.email})}"
         query["open_admin_center"] = "1"
@@ -138,16 +146,24 @@ def _redirect(request, user: AIDLUser):
     return session.set_session(request, response, user) if user.organization_id else response
 
 
-GOOGLE_CLASSROOM_URL = "https://classroom.google.com/"
-
-
 @require_GET
 def open_classroom(request):
-    """Sends the browser on to Google Classroom. authuser picks the Google
-    account that just signed in, when the browser has several."""
+    """The link the website opens after an admin's sign-in: the AIDL class in
+    Google Classroom with its Admin Center post (like Slack opening #aidl), or
+    Google Classroom's home when there's no AIDL class. authuser picks the
+    Google account that just signed in, when the browser has several."""
+    from .models import AidlClass
+
+    user = session.signed_in(request)
+    row = AidlClass.objects.filter(organization_id=user.organization_id).first() if user and user.organization_id else None
+    base = row.link if row and row.link else GOOGLE_CLASSROOM_URL
     email = request.GET.get("email", "").strip()
-    query = f"?{urlencode({'authuser': email})}" if "@" in email else ""
-    return HttpResponseRedirect(f"{GOOGLE_CLASSROOM_URL}{query}")
+    if "@" in email:
+        base += ("&" if "?" in base else "?") + urlencode({"authuser": email})
+    return session.clear_focus_step(HttpResponseRedirect(base))
+
+
+GOOGLE_CLASSROOM_URL = "https://classroom.google.com/"
 
 
 def _error(request, code: str, description: str):
@@ -178,6 +194,9 @@ def _connect_classes(request, code: str):
     if refusal:
         return _message(request, "Can't connect Google Classroom", refusal, 403)
     count = classes.connect(user, profile, tokens)
+    org = get_organization_for_user(user)
+    if org is not None:  # admins who signed up before sign-in asked for these permissions
+        aidl_class.setup(user, org, profile, tokens)
     logger.info("google classroom connected: user %s, %s classes", user.pk, count)
     response = _back(f"Google Classroom connected. Found {count} class{'es' if count != 1 else ''}.")
     return session.set_session(request, response, user)
@@ -213,7 +232,11 @@ def classes_page(request):
         return session.clear_session(_message(request, "Google Classroom", refusal, 403))
     return render(request, "google_classroom/classes.html", {
         "user": None, "org": get_organization_for_user(user), "person": user, "notice": notice,
-        "data": classes.for_teacher(user), "connect_url": reverse("google-classroom-classes-connect"), "tab": "classes"})
+        "data": classes.for_teacher(user), "connect_url": reverse("google-classroom-classes-connect"), "tab": "classes",
+        "other_classes": classes.other_classes(user), "invite": _invite_context(user),
+        "has_aidl_class": bool(classes.aidl_course_id(user.organization_id)),
+        "classroom_link": aidl_class.info(org)["link"] if (org := get_organization_for_user(user)) else "",
+        **session.focus_context(request)})
 
 
 @require_GET
@@ -237,6 +260,8 @@ def classes_sync(request):
         count = classes.sync(user)
     except GoogleError as exc:
         return _back(str(exc))
+    if (org := get_organization_for_user(user)) is not None:
+        aidl_class.refresh_later(org)  # cards, answers, licences
     return _back(f"Up to date. {count} class{'es' if count != 1 else ''}.")
 
 
@@ -251,8 +276,48 @@ def classes_choose(request):
         counts = classes.choose(user, request.POST.get("course_id", ""), on)
     except GoogleError as exc:
         return _back(str(exc))
+    if (org := get_organization_for_user(user)) is not None:
+        aidl_class.refresh_later(org)  # step 3 may be done now
     return _back(f"Class added to AIDL: {classes.summary(counts)}." if on
                  else "Class taken out of AIDL. Its students keep their AIDL accounts.")
+
+
+def _invite_context(user) -> dict:
+    from .plan_limits import limits, student_room, summary
+
+    org = get_organization_for_user(user)
+    if org is None:
+        return {}
+    return {"room": student_room(org), "teachers_only": limits(org)["students"] == 0, "label": summary(org)["label"],
+            "enterprise": classes.bulk_invite_allowed(org)}
+
+
+@require_POST
+def classes_invite(request):
+    """Step 3: invite every student of the teacher's ticked classes to the AIDL class."""
+    user = session.signed_in(request)
+    refusal = _teacher_refusal(user)
+    if refusal:
+        return _message(request, "Google Classroom", refusal, 403)
+    try:
+        counts = classes.invite_from_classes(user, request.POST.getlist("course_ids"))
+    except GoogleError as exc:
+        return _back(str(exc))
+    return _back(classes.invite_summary(counts))
+
+
+@require_POST
+def classes_invite_emails(request):
+    """Step 3: invite a pasted list of student emails to the AIDL class."""
+    user = session.signed_in(request)
+    refusal = _teacher_refusal(user)
+    if refusal:
+        return _message(request, "Google Classroom", refusal, 403)
+    try:
+        counts = classes.invite_emails(user, request.POST.get("emails", "")[:200_000])
+    except GoogleError as exc:
+        return _back(str(exc))
+    return _back(classes.invite_summary(counts))
 
 
 @require_POST
@@ -268,7 +333,9 @@ def classes_setup(request):
     from .admin_center import can
     if not can(org, user)["cards"]:
         return _back("Your admin permissions don't include approving cards.")
-    return _back(flow.teacher_action(user, org, request.POST) or "Nothing changed.")
+    notice = flow.teacher_action(user, org, request.POST) or "Nothing changed."
+    aidl_class.refresh_later(org)
+    return _back(notice)
 
 
 @require_POST

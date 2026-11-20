@@ -7,9 +7,10 @@ Env (.env):
                                            → OAuth client ID (type: Web application)
   GOOGLE_CLASSROOM_REDIRECT_URI            optional; default <BACKEND_URL>/api/google-classroom/callback/
 
-Sign-in asks only for openid/email/profile. The Classroom scopes (courses,
-rosters) will be asked for later, when we read classes, with
-include_granted_scopes so the person just adds them to what they granted.
+A school (organization) sign-up / sign-in also asks for the Classroom scopes:
+AIDL reads the teacher's classes and creates the "AIDL" class with its Admin
+Center post (aidl_class.py), like "Add to Slack" creates #aidl. Individuals and
+learners sign in with openid/email/profile only.
 """
 
 from __future__ import annotations
@@ -36,6 +37,19 @@ CLASSROOM_SCOPES = (
     "https://www.googleapis.com/auth/classroom.courses.readonly",
     "https://www.googleapis.com/auth/classroom.rosters.readonly",
     "https://www.googleapis.com/auth/classroom.profile.emails",
+)
+# Create the "AIDL" class and post the Admin Center announcement in it.
+SETUP_SCOPES = (
+    "https://www.googleapis.com/auth/classroom.courses",
+    "https://www.googleapis.com/auth/classroom.announcements",
+    "https://www.googleapis.com/auth/classroom.courseworkmaterials",  # the 5 steps, as teacher-only drafts
+    "https://www.googleapis.com/auth/classroom.topics",  # ... under the "AIDL Admin Center" topic
+    "https://www.googleapis.com/auth/classroom.coursework.students",  # learners' cards (questions) + answers
+    # The licence card picture: AIDL uploads it to the teacher's Drive and attaches it. drive.file only
+    # reaches files AIDL itself created, nothing else in their Drive.
+    "https://www.googleapis.com/auth/drive.file",
+    # Take a student out of the AIDL class when the plan has no room (like Slack's channel kick).
+    "https://www.googleapis.com/auth/classroom.rosters",
 )
 
 _jwks_client: jwt.PyJWKClient | None = None
@@ -85,7 +99,7 @@ def auth_url(state: str, classroom: bool = False, login_hint: str = "") -> str:
         "response_type": "code",
         "client_id": client_id(),
         "redirect_uri": redirect_uri(),
-        "scope": " ".join((SCOPES, *CLASSROOM_SCOPES)) if classroom else SCOPES,
+        "scope": " ".join((SCOPES, *CLASSROOM_SCOPES, *SETUP_SCOPES)) if classroom else SCOPES,
         "state": state,
         "access_type": "offline" if classroom else "online",
         "include_granted_scopes": "true",
@@ -147,6 +161,17 @@ def refresh_access_token(refresh_token: str) -> str:
 def has_classroom_scopes(granted: str) -> bool:
     """Google lets people untick permissions on the consent screen."""
     return set(CLASSROOM_SCOPES) <= set((granted or "").split())
+
+
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+
+ROSTERS_SCOPE = "https://www.googleapis.com/auth/classroom.rosters"
+OPTIONAL_SCOPES = {DRIVE_SCOPE, ROSTERS_SCOPE}  # sign-ins from before AIDL asked for these still work
+
+
+def has_setup_scopes(granted: str) -> bool:
+    return set(SETUP_SCOPES) - OPTIONAL_SCOPES <= set((granted or "").split())
 
 
 def _signing_key(id_token: str):

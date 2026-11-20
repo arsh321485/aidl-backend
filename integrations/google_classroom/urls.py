@@ -12,6 +12,8 @@ urlpatterns = [
     path("classes/connect/", views.classes_connect, name="google-classroom-classes-connect"),
     path("classes/sync/", views.classes_sync, name="google-classroom-classes-sync"),
     path("classes/choose/", views.classes_choose, name="google-classroom-classes-choose"),
+    path("classes/invite/", views.classes_invite, name="google-classroom-classes-invite"),
+    path("classes/invite-emails/", views.classes_invite_emails, name="google-classroom-classes-invite-emails"),
     path("classes/setup/", views.classes_setup, name="google-classroom-classes-setup"),
     path("classes/signout/", views.classes_signout, name="google-classroom-classes-signout"),
     path("api/classes/", views.api_classes, name="google-classroom-api-classes"),
@@ -22,11 +24,13 @@ urlpatterns = [
     path("learn/action/", views.learn_action, name="google-classroom-learn-action"),
     # step 5: Admin Center
     path("admin/", admin_views.home, name="google-classroom-admin"),
+    path("admin/step/<int:n>/", admin_views.step, name="google-classroom-admin-step"),
     path("admin/action/", admin_views.action, name="google-classroom-admin-action"),
     path("admin/team/", admin_views.team, name="google-classroom-admin-team"),
     path("admin/team/action/", admin_views.team_action, name="google-classroom-admin-team-action"),
     path("admin/admins/", admin_views.admins, name="google-classroom-admin-admins"),
     path("admin/admins/action/", admin_views.admins_action, name="google-classroom-admin-admins-action"),
+    path("admin/upgrade/", admin_views.upgrade, name="google-classroom-admin-upgrade"),
     path("admin/plans/", admin_views.plans, name="google-classroom-admin-plans"),
     path("admin/coverage.csv", admin_views.coverage, name="google-classroom-admin-coverage"),
     # step 6: Admin Center, AI policy

@@ -6,6 +6,8 @@ GoogleWorkspace   one school (Google Workspace for Education domain) that set up
                   Workspace too) gets a one-person "school" keyed by their Google id.
 GoogleCredential  a teacher's (encrypted) Google refresh token for the Classroom API.
 GoogleCourse      a class the teacher teaches in Google Classroom.
+AidlClass         the "AIDL" class AIDL creates in the first admin's Google Classroom
+                  at sign-up (like Slack's #aidl channel), with its Admin Center post.
 GoogleStudent     a student of one of those classes (Google's roster). When the class is
                   in the AIDL programme (step 3), aidl_user_id links the AIDL learner.
 """
@@ -81,3 +83,25 @@ class GoogleStudent(models.Model):
 
     def __str__(self):
         return self.full_name or self.email
+
+
+class AidlClass(models.Model):
+    organization_id = models.CharField(max_length=64, unique=True)
+    teacher_user_id = models.CharField(max_length=64)  # the admin whose Classroom it's in (its owner)
+    course_id = models.CharField(max_length=64, blank=True, default="")  # Google's id
+    link = models.URLField(max_length=500, blank=True, default="")
+    state = models.CharField(max_length=32, blank=True, default="")  # ACTIVE, or PROVISIONED (teacher must accept)
+    announcement_id = models.CharField(max_length=64, blank=True, default="")
+    step_ids = models.JSONField(default=dict, blank=True)  # {"1": Classwork material id, ...}
+    topic_id = models.CharField(max_length=64, blank=True, default="")  # the "AIDL Admin Center" Classwork topic
+    # Learners (learners.py): the cards as Classwork questions, and the licence posts.
+    cards_topic_id = models.CharField(max_length=64, blank=True, default="")
+    cards = models.JSONField(default=dict, blank=True)  # {card key: {"id": courseWork id, "version": ...}}
+    licences = models.JSONField(default=dict, blank=True)  # {AIDL user id: {"id": Classwork material id, ...}}
+    notices = models.JSONField(default=dict, blank=True)  # {Google user id: post telling them the plan has no room}
+    error = models.TextField(blank=True, default="")  # why the last setup failed, shown in the Admin Center
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"AIDL class {self.course_id or '(not created)'}"

@@ -2,6 +2,7 @@
 
 GET  /api/google-classroom/admin/               home: plan, the 5 setup steps, student link
 POST /api/google-classroom/admin/action/        approve a starter card / start / skip the admins step
+GET  /api/google-classroom/admin/step/<n>/       Classwork's "Step n" (teacher-only draft) → that step's page
 GET  /api/google-classroom/admin/team/          learners' progress; remove / add back
 POST /api/google-classroom/admin/team/action/
 GET  /api/google-classroom/admin/admins/        add / remove admins, permissions
@@ -51,7 +52,11 @@ def _admin_page(view):
         org = get_organization_for_user(user)
         if org is None:
             return _message(request, "Admins only", "Your AIDL organization is switched off.", 403)
-        return view(request, user, org, *args, **kwargs)
+        response = view(request, user, org, *args, **kwargs)
+        if request.method == "POST":  # something may have changed: update the AIDL class in Classroom
+            from .aidl_class import refresh_later
+            refresh_later(org)
+        return response
     return wrapper
 
 
@@ -62,7 +67,8 @@ def _back(name: str, notice: str):
 
 def _render(request, user, org, template: str, **ctx):
     return render(request, f"google_classroom/{template}", {
-        "user": None, "org": org, "person": user,
+        "user": None, "org": org, "person": user, "classroom_link": admin_center.aidl_class_info(org)["link"],
+        **session.focus_context(request),
         "notice": request.GET.get("notice", "")[:300], **ctx})
 
 
@@ -70,6 +76,15 @@ def _render(request, user, org, template: str, **ctx):
 def home(request, user, org):
     return _render(request, user, org, "admin.html", **admin_center.home(org, user),
                    learn_url=request.build_absolute_uri(reverse("google-classroom-learn")))
+
+
+@_admin_page
+def step(request, user, org, n: int):
+    from .aidl_class import STEPS, step_url
+
+    if not 1 <= n <= len(STEPS):
+        return redirect("google-classroom-admin")
+    return session.set_focus_step(request, redirect(step_url(n)), n)
 
 
 @require_POST
@@ -136,6 +151,16 @@ def plans(request, user, org):
     if not admin_center.can(org, user)["billing"]:
         return _back("google-classroom-admin", "Your admin permissions don't include the plan.")
     return HttpResponseRedirect(f"{settings.FRONTEND_URL.rstrip('/')}/plans?token={create_access_token(user)}")
+
+
+@_admin_page
+def upgrade(request, user, org):
+    """Classwork's "⭐ Plan" item: the website's plans page (choose a plan → topics → checkout),
+    or a one-step page saying who can upgrade."""
+    if not admin_center.can(org, user)["billing"]:
+        return _message(request, "Upgrade plan", "Only the master admin, or admins allowed to manage the plan, "
+                                                 "can upgrade. Ask your master admin.", 403)
+    return plans(request)
 
 
 @_admin_page

@@ -26,7 +26,13 @@ from api import admin_perms, admin_setup, card_approval, licensing
 from api.models import AIDLUser, Organization
 from api.plans import seat_holders, usage, user_limit
 
+from . import plan_limits
 from .models import GoogleCourse, GoogleStudent
+
+
+def _teacher_limit_label(org: Organization) -> str:
+    limit = plan_limits.limits(org)["teachers"]
+    return "unlimited" if limit is None else str(limit)
 
 
 def _forget_primary(org: Organization) -> None:
@@ -72,7 +78,15 @@ def home(org: Organization, user: AIDLUser) -> dict:
         "members": members, "licensed": licensed, "admins_count": admins,
         "classes_in_aidl": GoogleCourse.objects.filter(organization_id=str(org.pk), in_programme=True).count(),
         "plan": usage(org), "can": can(org, user),
+        "aidl_class": aidl_class_info(org),
+        "limits": plan_limits.summary(org),
     }
+
+
+def aidl_class_info(org: Organization) -> dict:
+    from .aidl_class import info
+
+    return info(org)
 
 
 # --- team ---
@@ -145,8 +159,8 @@ def admins(org: Organization, user: AIDLUser) -> dict:
         "rows": rows,
         "candidates": list(licensing.learners(org).order_by("full_name")),
         "perms": [{"key": k, "label": l, "desc": d, "allowed": k in allowed} for k, _f, l, d in admin_perms.PERMS],
-        "seat_limit": org.admin_seat_limit, "is_master": master,
-        "full": len(rows) >= (org.admin_seat_limit or 3),
+        "seat_limit": _teacher_limit_label(org), "is_master": master,
+        "full": not plan_limits.can_add_teacher(org),
     }
 
 
@@ -158,9 +172,9 @@ def add_admin(org: Organization, by: AIDLUser, user_id: str, chosen: list[str]) 
         return "Pick someone from your programme."
     if target.role == AIDLUser.Role.ADMIN:
         return f"{target.full_name or target.email} is already an admin."
-    count = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True).count()
-    if count >= (org.admin_seat_limit or 3):
-        return f"Your plan allows {org.admin_seat_limit} admins. Remove an admin first."
+    if not plan_limits.can_add_teacher(org):
+        return (f"Your plan allows {_teacher_limit_label(org)} teachers (admins). "
+                "Remove an admin first, or upgrade your plan.")
     target.role = AIDLUser.Role.ADMIN
     for field in admin_perms.FIELDS:
         setattr(target, field, False)

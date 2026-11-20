@@ -1,8 +1,28 @@
+{% if focus_step %}
+<nav class="row" aria-label="AIDL step" style="font-size:14px">
+  <b style="font-size:17px">Step {{ focus_step }} · {{ focus_title }}</b>
+  {% if classroom_link %}<a class="btn sm go back-to-classroom" href="{{ classroom_link }}" style="margin-left:auto">↩ Back to Google Classroom</a>{% endif %}
+</nav>
+{% else %}
 <nav class="row" aria-label="Admin Center" style="font-size:14px">
   <a class="btn sm{% if tab == 'home' %} go{% endif %}" href="{% url 'google-classroom-admin' %}">🏠 Admin Center</a>
   <a class="btn sm{% if tab == 'classes' %} go{% endif %}" href="{% url 'google-classroom-classes' %}">🏫 Classes</a>
   <a class="btn sm{% if tab == 'team' %} go{% endif %}" href="{% url 'google-classroom-admin-team' %}">👥 Team</a>
   <a class="btn sm{% if tab == 'admins' %} go{% endif %}" href="{% url 'google-classroom-admin-admins' %}">🧑‍💼 Admins</a>
   <a class="btn sm{% if tab == 'policy' %} go{% endif %}" href="{% url 'google-classroom-admin-policy' %}">📌 Policy</a>
-  <form method="post" action="{% url 'google-classroom-classes-signout' %}" style="margin-left:auto">{% csrf_token %}<button class="btn sm">Sign out</button></form>
+  {% if classroom_link %}<a class="btn sm go back-to-classroom" href="{{ classroom_link }}" style="margin-left:auto">↩ Back to Google Classroom</a>{% endif %}
+  <form method="post" action="{% url 'google-classroom-classes-signout' %}"{% if not classroom_link %} style="margin-left:auto"{% endif %}>{% csrf_token %}<button class="btn sm">Sign out</button></form>
 </nav>
+{% endif %}
+<script>
+/* Steps open from Google Classroom in a new tab, so "Back" closes this tab and
+   Classroom is right there again. Browsers only let a page close a tab it
+   wasn't opened by script in some cases; if the tab is still open, go to the class. */
+document.addEventListener("click", function (e) {
+  var a = e.target.closest && e.target.closest("a.back-to-classroom");
+  if (!a) return;
+  e.preventDefault();
+  window.close();
+  setTimeout(function () { window.location.href = a.href; }, 300);
+});
+</script>
