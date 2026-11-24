@@ -1,0 +1,28 @@
+{% if classroom_link %}
+{# Opened from a Classwork step: this step only, and a way back to Classroom. #}
+<nav class="row" aria-label="Setup step" style="font-size:14px">
+  <b style="font-size:17px">Step {{ step }} of 2 · {% if step == 1 %}School details{% else %}Your AI policy{% endif %}</b>
+  <a class="btn sm back-to-classroom" href="{{ classroom_link }}" style="margin-left:auto">↩ Back to Google Classroom</a>
+</nav>
+{% else %}
+<nav class="row" aria-label="Setup steps" style="font-size:14px;gap:6px">
+  <span class="pill{% if step == 1 %} on{% endif %}">{% if step > 1 %}✅{% else %}1{% endif %} · School details</span>
+  <span class="pill{% if step == 2 %} on{% endif %}">{% if step > 2 %}✅{% else %}2{% endif %} · AI policy</span>
+  <span class="pill{% if step == 3 %} on{% endif %}">{% if step == 3 %}🎉{% else %}3{% endif %} · Done</span>
+</nav>
+<style>.pill.on { background:var(--yellow); font-weight:700; }</style>
+{% endif %}
+<script>
+/* The step opens from the AIDL class's Classwork in a new tab: "Back" closes this tab, so
+   Classroom is right there again. If the browser won't close it, go to the class instead. */
+function aidlBackToClassroom(href) {
+  window.close();
+  setTimeout(function () { window.location.href = href; }, 300);
+}
+document.addEventListener("click", function (e) {
+  var a = e.target.closest && e.target.closest("a.back-to-classroom");
+  if (!a) return;
+  e.preventDefault();
+  aidlBackToClassroom(a.href);
+});
+</script>

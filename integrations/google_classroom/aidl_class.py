@@ -9,7 +9,7 @@ setup() runs once per sign-in:
   3. post the students' welcome in its Stream (everyone in a class sees the
      Stream, so nothing for teachers goes there), or update the one we posted
      before, so signing in again doesn't flood the class
-  4. add the 5 Admin Center steps to the class's Classwork as DRAFT materials,
+  4. add the setup steps (STEPS) to the class's Classwork as DRAFT materials,
      under the "🚦 AIDL Admin Center" topic, with a "📋 Setup progress" draft on
      top (the Admin Center summary, like Slack's post_admin_center).
      Drafts are seen only by the class's teachers, never by students. Each one
@@ -46,19 +46,16 @@ NAME = "AIDL"
 TOPIC = "🚦 AIDL Admin Center"
 SECTION = "AI Driving Licence"
 # (key in admin_center.home()["steps"], title, what the teacher does there)
+# The school's short setup (onboarding.py). Approving the starter cards and starting the
+# programme are automatic once both are done, so they aren't steps any more.
 STEPS = (
+    ("details", "School details",
+     "Your school's name and roughly how many students. Just an estimate: you can add more later."),
     ("policy", "Your AI policy",
-     "Approve the AI policy cards your learners agree to before their licence. Add AI apps and IT apps."),
-    ("admins", "Admins (optional)",
-     "Let other teachers help run AIDL, or skip this step."),
-    ("team", "Your team",
-     "Choose which Google Classroom classes are in AIDL. Their students become learners."),
-    ("approval", "Card approval",
-     "Approve the two starter cards: the Traffic Light Check and the Highway Code."),
-    ("started", "Start the programme",
-     "Start AIDL. Learners then get their cards and, at the end, their AI Driving Licence."),
+     "AIDL's school AI policy, already filled in. Check it and press Use this policy."),
 )
 STEP_LABELS = tuple((key, title) for key, title, _ in STEPS)
+STEPS_VERSION = 2  # in AidlClass.step_ids: Classwork steps made before this are replaced
 
 
 def _url(name: str, *args) -> str:
@@ -72,7 +69,7 @@ def _steps(org: Organization, user: AIDLUser) -> dict:
 
 
 def _next_step(steps: dict) -> int:
-    """1-5, or 0 when all done."""
+    """1-len(STEPS), or 0 when all done."""
     return next((n for n, (key, _t, _d) in enumerate(STEPS, 1) if not steps.get(key)), 0)
 
 
@@ -301,13 +298,45 @@ def _post_welcome(row: AidlClass, org: Organization, steps: dict, access_token: 
                 classroom_api.delete_material(access_token, row.course_id, item)
             else:
                 classroom_api.update_material(access_token, row.course_id, item, description=text)
+                ids["welcome_item"] = _one_welcome(row, item, text, access_token)
+                row.step_ids = ids
                 return
         except GoogleError as exc:
             if exc.code != "not_found":
                 raise
-    ids["welcome_item"] = classroom_api.create_class_material(
+    item = classroom_api.create_class_material(
         access_token, row.course_id, WELCOME_TITLE, text, topic_id=_topic(row, access_token)).get("id", "")
+    ids["welcome_item"] = _one_welcome(row, item, text, access_token)
     row.step_ids = ids
+
+
+def _one_welcome(row: AidlClass, item: str, text: str, access_token: str) -> str:
+    """Syncs running side by side (adding a whole school, the poller, the Admin Center)
+    can each post the welcome, so students saw it two or three times. Keep one, the
+    oldest, so every sync keeps the same one, and delete the rest. Returns its id."""
+    try:
+        posts = [m for m in classroom_api.list_materials(access_token, row.course_id)
+                 if m.get("title") == WELCOME_TITLE and m.get("id")]
+    except GoogleError as exc:
+        logger.info("google classroom: welcome copies not checked (%s)", exc.code)
+        return item
+    if len(posts) < 2:
+        return item
+    posts.sort(key=lambda m: (m.get("creationTime") or "", m["id"]))
+    keep = posts[0]["id"]
+    for extra in posts[1:]:
+        try:
+            classroom_api.delete_material(access_token, row.course_id, extra["id"])
+        except GoogleError as exc:
+            if exc.code != "not_found":
+                logger.info("google classroom: extra welcome %s kept (%s)", extra["id"], exc.code)
+    if keep != item:  # the kept copy may hold older text
+        try:
+            classroom_api.update_material(access_token, row.course_id, keep,
+                                          description=text)
+        except GoogleError as exc:
+            logger.info("google classroom: kept welcome not updated (%s)", exc.code)
+    return keep
 
 
 def _welcome_wanted(row: AidlClass) -> bool:
@@ -347,14 +376,14 @@ def welcome_on_top(row: AidlClass, org: Organization, user: AIDLUser, access_tok
 # --- the Admin Center summary (Classwork, teacher-only draft) ---
 
 def summary_title(steps: dict) -> str:
-    done = sum(1 for key, _t, _d in STEPS if steps.get(key))
-    return f"🎉 Setup done · {done} of 5" if done == len(STEPS) else f"📋 Setup progress · {done} of 5 done"
+    done, total = sum(1 for key, _t, _d in STEPS if steps.get(key)), len(STEPS)
+    return f"🎉 Setup done · {done} of {total}" if done == total else f"📋 Setup progress · {done} of {total} done"
 
 
 def summary_text(org: Organization, steps: dict) -> str:
     nxt = _next_step(steps)
     lines = [
-        f"Set up AIDL for {org.name} in 5 steps:",
+        f"Set up AIDL for {org.name} in {len(STEPS)} steps:",
         *(f"{'✅' if steps.get(key) else '👉' if n == nxt else '⬜'} {n}. {title}"
           for n, (key, title, _d) in enumerate(STEPS, 1)),
         "",
@@ -362,7 +391,8 @@ def summary_text(org: Organization, steps: dict) -> str:
     if nxt:
         lines.append(f"Next: open “👉 Step {nxt} · {STEPS[nxt - 1][1]}” below.")
     else:
-        lines.append("All 5 steps are done. Your learners are on their way to their AI Driving Licence.")
+        lines.append("Setup is done and the programme has started. Teachers have nothing else to do: "
+                     "just tell your students about AIDL.")
     lines += ["", "Only teachers see this (it's a draft)."]
     return "\n".join(lines)
 
@@ -393,6 +423,17 @@ def _ensure_topic(row: AidlClass, access_token: str) -> str:
 def _sync_steps(row: AidlClass, steps: dict, access_token: str) -> None:
     ids = dict(row.step_ids or {})
     topic_id = _ensure_topic(row, access_token)
+    # Classes set up when there were 5 steps: take those down; the new ones are made below.
+    old_steps = range(1, 6) if ids.get("steps_v") != STEPS_VERSION else range(len(STEPS) + 1, 6)
+    ids["steps_v"] = STEPS_VERSION
+    for n in old_steps:
+        old = ids.pop(str(n), "")
+        if old:
+            try:
+                classroom_api.delete_material(access_token, row.course_id, old)
+            except GoogleError as exc:
+                if exc.code != "not_found":
+                    raise
     # Classwork lists the newest first: create step 5 first so step 1 is on top.
     for n in range(len(STEPS), 0, -1):
         title = step_title(n, steps)
@@ -643,8 +684,8 @@ def plan_changed(row: AidlClass, org: Organization) -> bool:
 
 def step_url(n: int) -> str:
     """Where Classwork's "Step n" sends the teacher."""
-    return {1: reverse("google-classroom-admin-policy"),
-            3: reverse("google-classroom-classes")}.get(n, reverse("google-classroom-admin"))
+    return {1: reverse("google-classroom-setup"),
+            2: reverse("google-classroom-setup-policy")}.get(n, reverse("google-classroom-admin"))
 
 
 def info(org: Organization) -> dict:

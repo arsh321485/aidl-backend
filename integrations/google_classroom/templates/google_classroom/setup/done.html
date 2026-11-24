@@ -1,0 +1,38 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Set up AIDL · Done{% endblock %}
+{% block body %}
+{% include "google_classroom/setup/_steps.html" %}
+<section class="box done">
+  <h1>🎉 AIDL is ready for {{ org.name }}</h1>
+  <div class="list" style="margin-top:10px">
+    <div>✅ <b>School details</b> <span class="muted">· about {{ s.students|lower }} students{% if s.teachers %}, {{ s.teachers|lower }} teachers{% endif %}</span></div>
+    <div>✅ <b>AI policy</b> <span class="muted">· in use</span></div>
+    <div>{% if s.started %}✅ <b>Programme started</b> <span class="muted">· students get their cards as soon as they join</span>{% else %}⏳ <b>Starting the programme…</b>{% endif %}</div>
+    <div>
+      {% if aidl_class.link %}✅ <b>AIDL class ready in Google Classroom</b>{% if aidl_class.provisioned %} <span class="muted">· accept it in Google Classroom first</span>{% endif %}
+      {% elif aidl_class.error %}⚠️ {{ aidl_class.error }} <a href="{% url 'google-classroom-classes-connect' %}">Connect Google Classroom again</a>
+      {% else %}⚠️ <b>No AIDL class yet.</b> <a href="{% url 'google-classroom-classes-connect' %}">Create it in Google Classroom</a>{% endif %}
+    </div>
+    <div>
+      {% if s.invited.invited %}📨 <b>{{ s.invited.invited }} student{{ s.invited.invited|pluralize }} invited</b> <span class="muted">from your other classes. Each one presses Join in Google Classroom.</span>
+      {% elif s.invited.skipped == "plan" %}👥 <b>Students:</b> <span class="muted">share the AIDL class code in Google Classroom (People → Invite students). Inviting everyone automatically is part of Enterprise.</span>
+      {% elif s.invited.skipped == "error" %}⚠️ <b>Students weren't invited:</b> <span class="muted">{{ s.invited.message }}</span>
+      {% else %}👥 <b>Students:</b> <span class="muted">invite them to the AIDL class in Google Classroom, or add more any time from <a href="{% url 'google-classroom-classes' %}">Students</a>.</span>{% endif %}
+    </div>
+  </div>
+  {% if s.hint %}
+  <div class="notice" style="margin-top:12px">⭐ You expect {{ s.hint.estimate|lower }} students. Your {{ s.hint.plan }} plan {% if s.hint.limit %}covers {{ s.hint.limit }}{% else %}is for teachers only{% endif %}. Enterprise covers your whole school with no limit.
+    <a class="btn sm go" href="{% url 'google-classroom-admin-plans' %}" style="margin-left:6px">⬆️ See plans</a></div>
+  {% endif %}
+  <p style="margin-top:14px"><b>👩‍🏫 Teachers:</b> nothing to set up. Just tell your students about AIDL.</p>
+  <div class="row" style="margin-top:14px">
+    {% if classroom_link %}
+    <a class="btn go back-to-classroom" href="{{ classroom_link }}">↩ Back to Google Classroom</a>
+    {% else %}
+    <a class="btn go" href="{% url 'google-classroom-open' %}?email={{ person.email|urlencode }}">Open Google Classroom →</a>
+    {% endif %}
+    <a class="btn" href="{% url 'google-classroom-admin' %}">Admin Center</a>
+  </div>
+  {% if classroom_link %}<p class="muted" style="margin-top:8px">In Google Classroom, Classwork now shows “🎉 Setup done”. Reload the page if it still shows the steps.</p>{% endif %}
+</section>
+{% endblock %}

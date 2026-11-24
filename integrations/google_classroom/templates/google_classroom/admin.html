@@ -9,7 +9,7 @@
   <div class="spread">
     <div>
       <b>🏫 Your AIDL class is ready in Google Classroom</b>
-      <p class="muted" style="margin-top:4px">{% if aidl_class.provisioned %}Accept it in Google Classroom first. {% endif %}Each step is also in the class's Classwork (only teachers see it), and Google Classroom shows your progress.</p>
+      <p class="muted" style="margin-top:4px">{% if aidl_class.provisioned %}Accept it in Google Classroom first. {% endif %}Students who join it get their cards and their AI Driving Licence.</p>
     </div>
     <a class="btn go back-to-classroom" href="{{ aidl_class.link }}">↩ Back to Google Classroom</a>
   </div>
@@ -29,110 +29,64 @@
   <div class="spread">
     <div>
       <h1>Admin Center</h1>
-      <p class="muted" style="margin-top:8px">{{ person.full_name|default:person.email }} · {% if can.master %}👑 Master admin{% else %}Admin{% endif %}</p>
+      <p class="muted" style="margin-top:8px">{{ org.name }} · {{ person.full_name|default:person.email }}{% if can.master %} · 👑 Master admin{% endif %}</p>
     </div>
     <div class="row" style="flex:0 0 auto">
-      <span class="pill">{{ plan.label }} plan · {{ plan.used }} / {{ plan.limit }} seats</span>
+      <span class="pill">{{ plan.label }} plan</span>
       {% if can.billing and plan.can_upgrade %}<a class="btn sm go" href="{% url 'google-classroom-admin-plans' %}">⬆️ Upgrade plan</a>{% endif %}
-      {% if can.admins %}{% if logo_allowed %}<a class="btn sm" href="{% url 'google-classroom-admin-logo' %}">🖼 {% if org.logo_data %}Change{% else %}Add{% endif %} logo</a>{% else %}<span class="muted">Your logo on cards is a paid feature.</span>{% endif %}{% endif %}
+      {% if can.admins %}{% if logo_allowed %}<a class="btn sm" href="{% url 'google-classroom-admin-logo' %}">🖼 {% if org.logo_data %}Change{% else %}Add{% endif %} logo</a>{% endif %}{% endif %}
     </div>
   </div>
-  <p class="steps" aria-label="{{ done_count }} of 5 steps done" style="margin-top:10px">{% for _ in bar %}🟩{% endfor %}{% for _ in rest %}⬜{% endfor %} <span class="muted">{{ done_count }} of 5 done</span></p>
-  <p class="muted" style="margin-top:6px">👩‍🏫 Teachers {{ limits.teachers_used }} / {% if limits.teachers_limit is None %}unlimited{% else %}{{ limits.teachers_limit }}{% endif %} ·
-    🎓 Students {% if limits.teachers_only %}not included (teachers-only plan){% else %}{{ limits.students_used }} / {% if limits.students_limit is None %}unlimited{% else %}{{ limits.students_limit }}{% endif %}{% endif %}</p>
+  <p class="muted" style="margin-top:10px">👩‍🏫 Teachers {{ limits.teachers_used }} / {% if limits.teachers_limit is None %}unlimited{% else %}{{ limits.teachers_limit }}{% endif %} ·
+    🎓 Students {% if limits.teachers_only %}not included (teachers-only plan){% else %}{{ limits.students_used }} / {% if limits.students_limit is None %}unlimited{% else %}{{ limits.students_limit }}{% endif %}{% endif %}{% if setup.students %} · expected about {{ setup.students|lower }}{% endif %}</p>
   {% if limits.teachers_only %}<div class="error" role="alert" style="margin-top:8px">⛔ Your {{ limits.label }} plan is for teachers only. Don't invite students to the AIDL class in Google Classroom: AIDL cancels their invitations automatically. Upgrade your plan to add students.</div>{% endif %}
   {% if plan.full %}<div class="error" role="alert" style="margin-top:8px">Your plan is full ({{ plan.used }} of {{ plan.limit }} seats). New students can't join until you upgrade or remove someone.</div>{% endif %}
+  {% if setup.hint and not limits.teachers_only %}<p class="notice" style="margin-top:8px">⭐ You expect {{ setup.hint.estimate|lower }} students; your {{ setup.hint.plan }} plan covers {{ setup.hint.limit }}. Enterprise covers your whole school with no limit.</p>{% endif %}
 </section>
 {% endif %}
 
-{% if not focus_step or focus_step == 1 %}
-<section class="box flat{% if steps.policy %} done{% endif %}">
-  <h2>{% if steps.policy %}✅ {% endif %}1 · Your AI policy</h2>
-  <p class="muted">{{ policy_approved }} of 14 policy cards approved. Each is one short card your learners agree to before their licence.</p>
-  {% if can_policy %}
-  <div class="row">
-    <a class="btn{% if not steps.policy %} go{% endif %}" href="{% url 'google-classroom-admin-policy' %}">📌 Add a policy card</a>
-    {% if upload_allowed %}<a class="btn" href="{% url 'google-classroom-admin-upload' %}">📤 Upload your own AUP</a>{% endif %}
-    {% if company_set %}<a class="btn" href="{% url 'google-classroom-admin-regulators' %}">🏛 Your regulators</a>{% endif %}
-    {% if can_apps %}<a class="btn" href="{% url 'google-classroom-admin-apps' %}">🤖 AI apps</a> <a class="btn" href="{% url 'google-classroom-admin-apps' %}?kind=it">💻 IT apps</a>{% endif %}
-  </div>
-  {% else %}<p class="muted">Your admin permissions don't include the policy.</p>{% endif %}
-</section>
-{% endif %}
-
-{% if not focus_step or focus_step == 2 %}
-<section class="box flat{% if steps.admins %} done{% endif %}">
-  <h2>{% if steps.admins %}✅ {% endif %}2 · Admins (optional)</h2>
-  <p class="muted">{{ admins_count }} admin{{ admins_count|pluralize }}. Other teachers can help run AIDL.</p>
-  <div class="row">
-    <a class="btn{% if not steps.admins %} go{% endif %}" href="{% url 'google-classroom-admin-admins' %}">🧑‍💼 Add or remove admins</a>
-    {% if not steps.admins and can.admins %}
-    <form method="post" action="{% url 'google-classroom-admin-action' %}">{% csrf_token %}<input type="hidden" name="action" value="skip_admins"><button class="btn">Skip →</button></form>
-    {% endif %}
-  </div>
-</section>
-{% endif %}
-
-{% if not focus_step or focus_step == 3 %}
-<section class="box flat{% if steps.team %} done{% endif %}">
-  <h2>{% if steps.team %}✅ {% endif %}3 · Your team</h2>
-  <p class="muted">{{ members }} learner{{ members|pluralize }} from {{ classes_in_aidl }} class{{ classes_in_aidl|pluralize:"es" }} in AIDL. Add a class on the Classes page and its students join.</p>
-  <div class="row">
-    <a class="btn{% if not steps.team %} go{% endif %}" href="{% url 'google-classroom-classes' %}">🏫 Choose classes</a>
-    <a class="btn" href="{% url 'google-classroom-admin-team' %}">👥 Team progress</a>
-  </div>
-</section>
-{% endif %}
-
-{% if not focus_step or focus_step == 4 %}
-<section id="step-4" class="box flat{% if steps.approval %} done{% endif %}">
-  <h2>{% if steps.approval %}✅ {% endif %}4 · Card approval</h2>
-  <div class="list">
-    {% for c in onboarding %}
-    <div class="spread">
-      <div><b>{{ c.label }}</b><br><span class="muted">{% if c.status == "approved" %}✅ Approved{% if c.by %} by {{ c.by }}{% endif %}{% else %}Waiting for approval{% endif %}</span></div>
-      {% if c.status != "approved" and can.cards %}
-      <form method="post" action="{% url 'google-classroom-admin-action' %}">{% csrf_token %}
-        <input type="hidden" name="action" value="approve"><input type="hidden" name="item" value="{{ c.item }}">
-        <button class="btn ok sm">Approve</button>
-      </form>
-      {% endif %}
-    </div>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-{% if not focus_step or focus_step == 5 %}
-<section id="step-5" class="box flat{% if steps.started %} done{% endif %}">
-  <h2>{% if steps.started %}✅ 5 · Programme started{% else %}5 · Start the programme{% endif %}</h2>
-  {% if steps.started %}
-  <p><b>{{ licensed }}</b> of <b>{{ members }}</b> learner{{ members|pluralize }} licensed.</p>
-  {% else %}
-  <p class="muted">{% if steps.approval %}Ready. Learners see their first card when they open the link below.{% else %}Approve both cards first.{% endif %}</p>
-  {% if can.cards %}
-  <form method="post" action="{% url 'google-classroom-admin-action' %}">{% csrf_token %}
-    <input type="hidden" name="action" value="start"><button class="btn go"{% if not steps.approval %} disabled{% endif %}>🚀 Start the programme</button>
-  </form>
-  {% endif %}
-  {% endif %}
-  {% if not focus_step %}
-  <div style="margin-top:12px">
-    <b>🔗 Link for your students</b>
-    <p class="muted" style="margin:4px 0 6px">Post it in your Google Classroom class (Classwork → Create → Material → Link).
-      Students sign in with Google and get their cards and licence.</p>
-    <input type="text" readonly value="{{ learn_url }}" onclick="this.select()" aria-label="Link for your students">
-  </div>
-  {% endif %}
+{% if not steps.policy %}
+<section class="box flat">
+  <h2>👉 One step left: your AI policy</h2>
+  <p class="muted">AIDL has written it for you. Check it and press Use this policy; AIDL then starts the programme by itself.</p>
+  <a class="btn go" href="{% url 'google-classroom-setup-policy' %}">📌 Review your AI policy</a>
 </section>
 {% endif %}
 
 {% if not focus_step %}
+<section class="box flat{% if steps.started %} done{% endif %}">
+  <h2>{% if steps.started %}✅ Programme running{% else %}Programme{% endif %}</h2>
+  <p><b>{{ members }}</b> learner{{ members|pluralize }} in AIDL · <b>{{ licensed }}</b> licensed</p>
+  <p class="muted">{% if steps.started %}Students get their cards as soon as they join the AIDL class. Teachers have nothing to do: just tell your students about AIDL.{% else %}It starts by itself once your AI policy is in use.{% endif %}</p>
+</section>
+
+<section class="box flat">
+  <h2>👥 Add students</h2>
+  <p class="muted">Invite students to the AIDL class: from your other classes in one click, by pasting their emails, or the whole school at once (Enterprise). You can add more any time.</p>
+  <div class="row">
+    <a class="btn go" href="{% url 'google-classroom-classes' %}">📨 Invite students</a>
+    <a class="btn" href="{% url 'google-classroom-admin-school' %}">🌐 Whole school</a>
+    <a class="btn" href="{% url 'google-classroom-admin-team' %}">👥 Student progress</a>
+  </div>
+</section>
+
+<section class="box flat{% if steps.policy %} done{% endif %}">
+  <h2>{% if steps.policy %}✅ {% endif %}📌 Your AI policy</h2>
+  <p class="muted">{% if steps.policy %}In use: {{ policy_approved }} policy card{{ policy_approved|pluralize }} your students agree to.{% else %}Not in use yet.{% endif %}</p>
+  {% if can_policy %}
+  <div class="row">
+    <a class="btn" href="{% url 'google-classroom-setup-policy' %}">👀 View or change</a>
+    {% if upload_allowed %}<a class="btn" href="{% url 'google-classroom-admin-upload' %}">📤 Upload your own policy</a>{% endif %}
+  </div>
+  {% endif %}
+</section>
+
 <section class="box flat">
   <h2>Reports</h2>
   <div class="row">
-    <a class="btn" href="{% url 'google-classroom-admin-team' %}">👥 Team progress</a>
+    <a class="btn" href="{% url 'google-classroom-admin-team' %}">👥 Student progress</a>
     <a class="btn" href="{% url 'google-classroom-admin-coverage' %}">⬇ Export coverage (CSV)</a>
+    <a class="btn" href="{% url 'google-classroom-setup' %}">🏫 School details</a>
   </div>
 </section>
 {% endif %}

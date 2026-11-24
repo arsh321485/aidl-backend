@@ -1,0 +1,120 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Whole school · AIDL{% endblock %}
+{% block body %}
+{% include "google_classroom/_nav.html" %}
+{% if adding %}<meta http-equiv="refresh" content="10">{% endif %}
+
+<section class="box">
+  <h1>🏫 Your whole school</h1>
+  <p class="muted" style="margin-top:8px">Send AIDL to every student in your school in one go. Your school's IT admin
+    (Google Workspace admin) connects AIDL once. AIDL then adds every student straight into your AIDL class.
+    Nobody has to create a class or accept an invitation, and new students are added every day.</p>
+</section>
+
+{% if not enterprise %}
+<section class="box flat">
+  <p>Adding the whole school is part of the <b>Enterprise</b> plan.</p>
+  <p style="margin-top:10px"><a class="btn go" href="{% url 'google-classroom-admin-plans' %}">⭐ See plans</a></p>
+</section>
+
+{% elif not domain %}
+<section class="box flat">
+  <p>This needs a school Google Workspace account (like <b>you@school.edu</b>). Your AIDL account was set up with a
+    personal Google account, which has no school to read.</p>
+</section>
+
+{% elif not row %}
+{# 1. connect #}
+<section class="box flat">
+  <h2>Step 1 · Your IT admin connects the school</h2>
+  <p style="margin-top:6px">AIDL asks Google for permission to read <b>@{{ domain }}</b>'s accounts and folders,
+    and to add students to your AIDL class. Only a Google Workspace admin can allow this.</p>
+  <div class="row" style="margin-top:12px">
+    <a class="btn go" href="{% url 'google-classroom-admin-school-connect' %}">🔑 I'm the IT admin, connect with Google</a>
+  </div>
+</section>
+<section class="box flat">
+  <h2>Not the IT admin?</h2>
+  <p style="margin-top:6px">Send this link to your school's IT admin. It works for 7 days, and only for a
+    <b>@{{ domain }}</b> admin account.</p>
+  <div class="row" style="margin-top:10px">
+    <input id="it-link" type="text" readonly value="{{ it_admin_link }}" aria-label="Link for your IT admin" style="flex:1;min-width:0;padding:8px 10px;border:2px solid currentColor;font:inherit" onclick="this.select()">
+    <button class="btn sm" type="button" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('it-link').value); this.textContent='Copied ✓'">Copy link</button>
+  </div>
+</section>
+
+{% else %}
+<section class="box flat done">
+  <div class="spread">
+    <div><b>✅ Connected by {{ row.admin_email|default:"your IT admin" }}</b>
+      <p class="muted" style="margin-top:4px">@{{ row.domain }}{% if row.last_sync_at %} · last checked {{ row.last_sync_at|timesince }} ago{% endif %}</p></div>
+    <form method="post" action="{% url 'google-classroom-admin-school-action' %}" onsubmit="return confirm('Disconnect the whole school? Students already added stay in the AIDL class.')">{% csrf_token %}
+      <input type="hidden" name="action" value="disconnect"><button class="btn no sm">Disconnect</button></form>
+  </div>
+</section>
+
+{% if row.error %}<div class="error" role="alert">{{ row.error }}{% if "connect" in row.error %} <a href="{% url 'google-classroom-admin-school-connect' %}">Connect again</a>{% endif %}</div>{% endif %}
+
+{# 2. which folders are students #}
+<section class="box flat">
+  <h2>Step 2 · Which accounts are students?</h2>
+  <p class="muted" style="margin-top:6px">Tick the folders (organisational units) in your Google Workspace that hold
+    your students. Folders inside them are included. Don't tick staff folders.</p>
+  {% if units_error %}
+  <div class="error" role="alert" style="margin-top:10px">{{ units_error }}</div>
+  {% else %}
+  <form method="post" action="{% url 'google-classroom-admin-school-action' %}" style="margin-top:10px">{% csrf_token %}
+    <input type="hidden" name="action" value="count">
+    <div class="list">
+      {% for u in units %}
+      <label class="check"><input type="checkbox" name="unit" value="{{ u.path }}"{% if u.on %} checked{% endif %}>
+        <span><b>{{ u.path }}</b>{% if u.description %} · <span class="muted">{{ u.description }}</span>{% endif %}</span></label>
+      {% empty %}
+      <p>Your Google Workspace has no folders yet. Ask your IT admin to put students in a folder such as <b>/Students</b>.</p>
+      {% endfor %}
+    </div>
+    {% if units %}<button class="btn" style="margin-top:12px">Count students</button>{% endif %}
+  </form>
+  {% endif %}
+</section>
+
+{# 3. send #}
+{% if row.student_units %}
+<section class="box{% if row.send_all %} flat{% endif %}">
+  <h2>Step 3 · Send AIDL to all students</h2>
+  <p style="margin-top:6px"><b style="font-size:22px">{{ row.student_count }}</b> student{{ row.student_count|pluralize }} found in
+    {{ row.student_units|join:", " }}{% if row.counted_at %} <span class="muted">(counted {{ row.counted_at|timesince }} ago)</span>{% endif %}</p>
+  {% if row.preview %}<p class="muted" style="margin-top:4px">{{ row.preview|join:", " }}{% if row.student_count > row.preview|length %}, …{% endif %}</p>{% endif %}
+  {% if over_limit %}<div class="error" role="alert" style="margin-top:10px">Google Classroom allows about {{ class_limit }} people in one class, so not all {{ row.student_count }} students fit in your AIDL class. AIDL adds students until the class is full.</div>{% endif %}
+  {% if not aidl_class %}
+  <div class="error" role="alert" style="margin-top:10px">Your AIDL class isn't set up in Google Classroom yet. <a href="{% url 'google-classroom-admin' %}">Set it up in the Admin Center</a> first.</div>
+  {% elif adding %}
+  <p style="margin-top:12px"><b>⏳ Adding students…</b> {{ row.progress.added|default:0 }} added so far. This page updates by itself.</p>
+  {% else %}
+  <form method="post" action="{% url 'google-classroom-admin-school-action' %}" style="margin-top:12px">{% csrf_token %}
+    {% if row.send_all %}
+    <input type="hidden" name="action" value="recheck"><button class="btn">🔄 Check for new students now</button>
+    {% else %}
+    <input type="hidden" name="action" value="send"><button class="btn go">🚀 Send AIDL to all {{ row.student_count }} students</button>
+    {% endif %}
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if row.progress.total %}
+<section class="box flat">
+  <h2>Last run</h2>
+  <div class="list" style="margin-top:8px">
+    <div class="spread"><span>Students in your folders</span><b>{{ row.progress.total }}</b></div>
+    <div class="spread"><span>Already in the AIDL class</span><b>{{ row.progress.in_class }}</b></div>
+    <div class="spread"><span>Added now</span><b>{{ row.progress.added }}</b></div>
+    {% if row.progress.invited %}<div class="spread"><span>Invited (Google didn't allow adding them directly)</span><b>{{ row.progress.invited }}</b></div>{% endif %}
+    {% if row.progress.class_full %}<div class="spread"><span>Didn't fit: the class is full</span><b>{{ row.progress.class_full }}</b></div>{% endif %}
+    {% if row.progress.failed %}<div class="spread"><span>Couldn't be added</span><b>{{ row.progress.failed }}</b></div>{% endif %}
+  </div>
+  {% if row.send_all %}<p class="muted" style="margin-top:10px">AIDL checks again every day and adds new students. They get their AIDL cards in the AIDL class.</p>{% endif %}
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

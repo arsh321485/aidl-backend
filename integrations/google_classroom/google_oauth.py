@@ -169,6 +169,37 @@ DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 ROSTERS_SCOPE = "https://www.googleapis.com/auth/classroom.rosters"
 OPTIONAL_SCOPES = {DRIVE_SCOPE, ROSTERS_SCOPE}  # sign-ins from before AIDL asked for these still work
 
+# Enterprise "whole school" (school_directory.py), asked only of the school's Google Workspace admin:
+# read the school's accounts and folders (organisational units) to find every student, and add
+# them straight into the AIDL class (an admin adds without an invitation).
+SCHOOL_SCOPES = (
+    "https://www.googleapis.com/auth/admin.directory.user.readonly",
+    "https://www.googleapis.com/auth/admin.directory.orgunit.readonly",
+    ROSTERS_SCOPE,
+)
+
+
+def school_auth_url(state: str, login_hint: str = "") -> str:
+    """Google's consent screen for the whole-school permissions, offline (a refresh token, so
+    AIDL can add new students every day without the admin)."""
+    query = {
+        "response_type": "code",
+        "client_id": client_id(),
+        "redirect_uri": redirect_uri(),
+        "scope": " ".join((SCOPES, *SCHOOL_SCOPES)),
+        "state": state,
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+    }
+    if login_hint:
+        query["login_hint"] = login_hint
+    return f"{AUTHORIZE_URL}?{urlencode(query)}"
+
+
+def has_school_scopes(granted: str) -> bool:
+    return set(SCHOOL_SCOPES) <= set((granted or "").split())
+
 
 def has_setup_scopes(granted: str) -> bool:
     return set(SETUP_SCOPES) - OPTIONAL_SCOPES <= set((granted or "").split())

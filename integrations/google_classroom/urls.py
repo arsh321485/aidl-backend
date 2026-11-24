@@ -1,12 +1,16 @@
 from django.urls import path
 
-from . import admin_views, policy_views, views
+from . import admin_views, policy_views, school_views, setup_views, views
 
 urlpatterns = [
     # step 1: sign up / sign in
     path("login/", views.login, name="google-classroom-login"),
     path("callback/", views.callback, name="google-classroom-callback"),
     path("open/", views.open_classroom, name="google-classroom-open"),
+    # the school's short setup after sign-up: details (approx. students) → AI policy → done
+    path("admin/setup/", setup_views.details, name="google-classroom-setup"),
+    path("admin/setup/policy/", setup_views.policy, name="google-classroom-setup-policy"),
+    path("admin/setup/done/", setup_views.done, name="google-classroom-setup-done"),
     # step 2: classes + students
     path("classes/", views.classes_page, name="google-classroom-classes"),
     path("classes/connect/", views.classes_connect, name="google-classroom-classes-connect"),
@@ -33,6 +37,12 @@ urlpatterns = [
     path("admin/upgrade/", admin_views.upgrade, name="google-classroom-admin-upgrade"),
     path("admin/plans/", admin_views.plans, name="google-classroom-admin-plans"),
     path("admin/coverage.csv", admin_views.coverage, name="google-classroom-admin-coverage"),
+    # Enterprise: the whole school (the IT admin adds every student)
+    path("admin/school/", school_views.page, name="google-classroom-admin-school"),
+    path("admin/school/action/", school_views.action, name="google-classroom-admin-school-action"),
+    path("admin/school/connect/", school_views.connect, name="google-classroom-admin-school-connect"),
+    path("school/it-admin/", school_views.it_admin, name="google-classroom-school-it-admin"),
+    path("school/it-admin/go/", school_views.it_admin_go, name="google-classroom-school-it-admin-go"),
     # step 6: Admin Center, AI policy
     path("admin/policy/", policy_views.policy, name="google-classroom-admin-policy"),
     path("admin/policy/<int:n>/", policy_views.policy_card, name="google-classroom-admin-policy-card"),

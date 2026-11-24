@@ -15,7 +15,9 @@ GET /api/google-classroom/callback/
     admin AIDL then creates / reuses the "AIDL" class with the Admin Center post
     (aidl_class.py), and the website opens that class in Google Classroom (/open/).
 GET /api/google-classroom/open/
-    Where the website sends an admin after sign-in: the AIDL class in Google Classroom.
+    Where the website sends an admin after sign-in: the AIDL class in Google Classroom, whose
+    Classwork holds the setup steps (onboarding.py); each opens its page in a new tab, and
+    "Back to Google Classroom" closes it. Without an AIDL class: the setup page itself.
 
 Step 2 (AIDL admins = teachers)
 GET  /api/google-classroom/classes/           page: the teacher's classes and students
@@ -32,6 +34,8 @@ Step 4 (learners)
 GET  /api/google-classroom/learn/             the link a teacher shares in Google Classroom: sign in with
                                               Google, then the learner flow (cards -> licence)
 POST /api/google-classroom/learn/action/      a learner's button
+
+Enterprise "whole school" (the IT admin adds every student): school_views.py
 """
 
 from __future__ import annotations
@@ -67,6 +71,7 @@ logger = logging.getLogger(__name__)
 MODE = "google_classroom"
 CLASSES = "google_classroom:classes"  # the OAuth state payload of a step-2 connect
 LEARN = "google_classroom:learn"  # ... of a step-4 learner sign-in (the shared link)
+SCHOOL = "google_classroom:school"  # ... of an IT admin connecting the whole school ("|<link token>", school_views)
 
 
 def _enroll_as(value: str | None) -> str:
@@ -95,6 +100,8 @@ def login(request):
 def callback(request):
     """Google's one redirect URI: website sign-in, connecting classes, learner sign-in."""
     enroll_as, payload, state_error = consume_oauth_state_with_payload(request.GET.get("state", ""))
+    if not state_error and (payload or "").startswith(SCHOOL + "|"):  # an IT admin connecting the whole school
+        return _school_callback(request, payload.split("|", 1)[1])
     for_classes = payload == CLASSES
     fail = _classes_error if for_classes else _learn_error if payload == LEARN else _error
 
@@ -121,6 +128,19 @@ def callback(request):
     if org is not None and user.role == AIDLUser.Role.ADMIN:
         aidl_class.setup(user, org, profile, tokens)  # never fails the sign-in
     return _redirect(request, user)
+
+
+def _school_callback(request, token: str):
+    from . import school_views
+
+    retry = f"{reverse('google-classroom-school-it-admin')}?t={token}"
+    if request.GET.get("error"):
+        return school_views._message(request, "Can't connect the whole school", "Google sign-in was cancelled.",
+                                     400, retry_url=retry)
+    if not request.GET.get("code"):
+        return school_views._message(request, "Can't connect the whole school",
+                                     "Google did not return a sign-in code.", 400, retry_url=retry)
+    return school_views.connected(request, request.GET["code"], token)
 
 
 def _redirect(request, user: AIDLUser):
@@ -154,8 +174,15 @@ def open_classroom(request):
     Google account that just signed in, when the browser has several."""
     from .models import AidlClass
 
+    from .onboarding import next_url
+
     user = session.signed_in(request)
     row = AidlClass.objects.filter(organization_id=user.organization_id).first() if user and user.organization_id else None
+    if not (row and row.link) and user is not None and user.role == AIDLUser.Role.ADMIN \
+            and (org := get_organization_for_user(user)) and (setup := next_url(org)):
+        # No AIDL class to show the setup steps in (Classroom permissions not granted): the setup itself.
+        return session.clear_focus_step(redirect(setup))
+    # Otherwise the AIDL class: its Classwork's "👉 Step 1 · School details" starts the setup.
     base = row.link if row and row.link else GOOGLE_CLASSROOM_URL
     email = request.GET.get("email", "").strip()
     if "@" in email:

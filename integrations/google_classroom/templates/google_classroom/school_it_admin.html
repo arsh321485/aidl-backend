@@ -1,0 +1,21 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Connect your school · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>🏫 Connect {{ school }} to AIDL</h1>
+  <p style="margin-top:8px">A teacher at your school asked you to connect AIDL, the AI Driving Licence, so every
+    student gets AIDL's short lessons in Google Classroom.</p>
+</section>
+
+<section class="box flat">
+  <h2>What AIDL asks Google for</h2>
+  <ul style="margin:8px 0 0 18px;line-height:1.6">
+    <li><b>Read your school's accounts and folders</b> (organisational units), to find the students. AIDL keeps
+      only each student's name, email and Google id.</li>
+    <li><b>Manage class rosters</b>, to add those students straight into the AIDL class, without invitations.</li>
+  </ul>
+  <p class="muted" style="margin-top:10px">Sign in with your <b>@{{ domain }}</b> Google Workspace admin account.
+    AIDL never changes or deletes accounts, and you can disconnect at any time.</p>
+  <p style="margin-top:14px"><a class="btn go" href="{{ go_url }}">🔑 Connect with Google</a></p>
+</section>
+{% endblock %}

@@ -2,8 +2,8 @@
 
 Same rules as the Slack / Teams Admin Center; this file only calls api/:
 
-    home()          the 5 setup steps (policy · admins · team · card approval · start),
-                    plan and seats
+    home()          the 2 setup steps (school details · AI policy, onboarding.py; the
+                    starter cards and the start are automatic), numbers, plan and seats
     team()          each learner's progress (licensing.team_progress) + their classes
     remove_learner / restore_learner
     add_admin / remove_admin / set_permissions   (admin_perms rules: the master
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from django.utils import timezone
 
-from api import admin_perms, admin_setup, card_approval, licensing
+from api import admin_perms, licensing
 from api.models import AIDLUser, Organization
 from api.plans import seat_holders, usage, user_limit
 
@@ -52,18 +52,16 @@ def can(org: Organization, user: AIDLUser) -> dict:
 
 
 def home(org: Organization, user: AIDLUser) -> dict:
-    st = admin_setup.summary(org)
+    from . import onboarding
+    from .aidl_class import STEPS
+
     people = licensing.learners(org)
     members, licensed = people.count(), people.filter(licence_issued=True).count()
     admins = AIDLUser.objects.filter(organization_id=str(org.pk), role=AIDLUser.Role.ADMIN, is_active=True).count()
-    steps = {
-        "policy": st["aup_done"],
-        "admins": bool(admin_setup.state(org).get("admins_step")) or admins > 1,
-        "team": members > 0,
-        "approval": card_approval.onboarding_ready(org),
-        "started": admin_setup.started(org),
-    }
-    done = sum(steps.values())
+    setup = onboarding.summary(org)
+    # The setup is 2 steps (onboarding.py); "started" follows by itself and isn't a step.
+    steps = {"details": setup["details"], "policy": setup["policy"], "started": setup["started"]}
+    done = sum(1 for key, _t, _d in STEPS if steps[key])
     from api import aup_store, aup_upload
     from api import policy_cards as pc
     from api.slack_cards import light_admin_context
@@ -73,8 +71,7 @@ def home(org: Organization, user: AIDLUser) -> dict:
         "policy_approved": len(pc.statuses(org)), "upload_allowed": aup_upload.can_upload(org),
         "company_set": bool(aup_store.company(org)), "logo_allowed": org.plan in ("basic", "enterprise"),
         "can_policy": perms["can_policy"], "can_apps": perms["can_apps"],
-        "steps": steps, "done_count": done, "bar": range(done), "rest": range(5 - done),
-        "onboarding": card_approval.onboarding(org),
+        "steps": steps, "done_count": done, "steps_total": len(STEPS), "setup": setup,
         "members": members, "licensed": licensed, "admins_count": admins,
         "classes_in_aidl": GoogleCourse.objects.filter(organization_id=str(org.pk), in_programme=True).count(),
         "plan": usage(org), "can": can(org, user),

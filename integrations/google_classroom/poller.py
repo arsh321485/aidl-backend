@@ -14,8 +14,15 @@ def sync_all() -> dict:
 
     from .learners import sync
     from .models import AidlClass
+    from .school_directory import sync_due
 
-    totals: dict[str, int] = {}
+    # Whole-school schools whose daily check is due: new students into the AIDL class first,
+    # so the learner sync below picks them up in the same pass.
+    try:
+        totals: dict[str, int] = sync_due()
+    except Exception:  # noqa: BLE001 - the learner sync must still run
+        logger.exception("google classroom: whole school check crashed")
+        totals = {}
     for org_id in AidlClass.objects.exclude(course_id="").values_list("organization_id", flat=True):
         org = Organization.objects.filter(pk=org_id, is_active=True).first()
         if org is None:

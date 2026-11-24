@@ -7,9 +7,9 @@
 <nav class="row" aria-label="Admin Center" style="font-size:14px">
   <a class="btn sm{% if tab == 'home' %} go{% endif %}" href="{% url 'google-classroom-admin' %}">🏠 Admin Center</a>
   <a class="btn sm{% if tab == 'classes' %} go{% endif %}" href="{% url 'google-classroom-classes' %}">🏫 Classes</a>
-  <a class="btn sm{% if tab == 'team' %} go{% endif %}" href="{% url 'google-classroom-admin-team' %}">👥 Team</a>
-  <a class="btn sm{% if tab == 'admins' %} go{% endif %}" href="{% url 'google-classroom-admin-admins' %}">🧑‍💼 Admins</a>
-  <a class="btn sm{% if tab == 'policy' %} go{% endif %}" href="{% url 'google-classroom-admin-policy' %}">📌 Policy</a>
+  <a class="btn sm{% if tab == 'school' %} go{% endif %}" href="{% url 'google-classroom-admin-school' %}">🌐 Whole school</a>
+  <a class="btn sm{% if tab == 'team' %} go{% endif %}" href="{% url 'google-classroom-admin-team' %}">👥 Students</a>
+  <a class="btn sm{% if tab == 'policy' %} go{% endif %}" href="{% url 'google-classroom-setup-policy' %}">📌 Policy</a>
   {% if classroom_link %}<a class="btn sm go back-to-classroom" href="{{ classroom_link }}" style="margin-left:auto">↩ Back to Google Classroom</a>{% endif %}
   <form method="post" action="{% url 'google-classroom-classes-signout' %}"{% if not classroom_link %} style="margin-left:auto"{% endif %}>{% csrf_token %}<button class="btn sm">Sign out</button></form>
 </nav>

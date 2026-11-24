@@ -1,0 +1,18 @@
+{% extends "teams_app/base.html" %}
+{% block title %}{{ heading }} · AIDL{% endblock %}
+{% block body %}
+{% include "google_classroom/setup/_steps.html" %}
+<section class="box done">
+  <h1>{{ heading }}</h1>
+  {% for line in lines %}<p style="margin-top:8px">{{ line }}</p>{% endfor %}
+  {% if hint %}<p class="notice" style="margin-top:10px">⭐ You expect {{ hint.estimate|lower }} students. Your {{ hint.plan }} plan {% if hint.limit %}covers {{ hint.limit }}{% else %}is for teachers only{% endif %}. Enterprise covers your whole school with no limit.</p>{% endif %}
+  <p class="muted" style="margin-top:12px" id="going">Taking you back to Google Classroom…</p>
+  <div class="row" style="margin-top:10px">
+    <a class="btn go back-to-classroom" href="{{ classroom_link }}">↩ Back to Google Classroom</a>
+  </div>
+</section>
+<script>
+/* Back to Classroom by itself, after a moment to read this (Classroom then shows the step ✅). */
+setTimeout(function () { aidlBackToClassroom("{{ classroom_link|escapejs }}"); }, {{ delay_ms }});
+</script>
+{% endblock %}

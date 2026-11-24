@@ -14,8 +14,10 @@ sync(org) then, with the teacher's stored Google access:
      platform (api.licensing.acknowledge, the stage order of
      api.employee_flow.stage); an answer given early counts once the student
      reaches that card
-  4. issues the licence when every card is done (api.licensing) and posts it
-     as a Classwork item that only that student (and the teachers) see.
+  4. issues the licence when every card is done (api.licensing). With a licence
+     picture (Drive allowed), the student first gets "Create your licence
+     avatar"; the licence is posted once they save one. It's a Classwork item
+     that only that student (and the teachers) see.
 
 Google Classroom doesn't tell apps when a student answers, so sync runs:
 after admin actions (aidl_class.refresh_later), on the Classes page's
@@ -26,6 +28,7 @@ GOOGLE_CLASSROOM_POLL_SECONDS) and from `manage.py google_classroom_sync`.
 from __future__ import annotations
 
 import logging
+import threading
 
 from api import admin_setup, aup_store, card_approval, card_image
 from api.models import AIDLUser, Organization
@@ -73,8 +76,24 @@ def _ready(org: Organization) -> bool:
     return admin_setup.started(org) and all(card_approval.is_approved(org, i) for i in card_approval.ONBOARDING)
 
 
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
 def sync(org: Organization) -> dict:
-    """Run steps 1-4 above. Returns counts for logs / the command."""
+    """Run steps 1-4 above. Returns counts for logs / the command.
+
+    One sync per school at a time: the poller, the Admin Center and adding a whole
+    school all start syncs, and two side by side each published the cards (and the
+    welcome), so students saw them twice. A sync started meanwhile waits, then runs
+    on what the first one saved."""
+    with _locks_guard:
+        lock = _locks.setdefault(str(org.pk), threading.Lock())
+    with lock:
+        return _sync(org)
+
+
+def _sync(org: Organization) -> dict:
     from api.microsoft_auth import open_refresh_token
 
     from . import google_oauth
@@ -111,7 +130,7 @@ def sync(org: Organization) -> dict:
 
         if _ready(org):
             counts["cards_published"] = _publish_cards(row, org, token)
-        if counts["cards_published"]:
+        if counts["cards_published"] or getattr(row, "cards_tidied", False):
             welcome_on_top(row, org, owner, token)
         else:
             sync_welcome(row, org, owner, token)  # the students' topic appears with the first student
@@ -337,6 +356,7 @@ def _publish_cards(row: AidlClass, org: Organization, token: str) -> int:
                 except GoogleError as exc:
                     logger.info("google classroom: card topic not set (%s)", exc.code)
             _assign(row, live[v["id"]], allowed, token)
+        row.cards_tidied = _drop_copies(row, org, published, live, token)
     wanted = _cards(org)
     todo = [c for c in wanted if (published.get(c["key"]) or {}).get("version") != c["version"]]
     row.cards = published
@@ -355,6 +375,25 @@ def _publish_cards(row: AidlClass, org: Organization, token: str) -> int:
                                   "version": card["version"]}
     row.cards = published
     return len(todo)
+
+
+def _drop_copies(row: AidlClass, org: Organization, published: dict, live: dict, token: str) -> bool:
+    """Copies of the cards AIDL has no record of (posted by syncs that ran side by side
+    before they took turns) go, so each student sees every card once. Only AIDL's own
+    questions with a card's title; the teacher's work stays. True when any went."""
+    keep = {v.get("id") for v in published.values()}
+    titles = {c["title"] for c in _cards(org)}
+    gone = False
+    for wid, work in live.items():
+        if wid in keep or not work.get("associatedWithDeveloper") or work.get("title") not in titles:
+            continue
+        try:
+            classroom_api.delete_coursework(token, row.course_id, wid)
+            gone = True
+        except GoogleError as exc:
+            if exc.code != "not_found":
+                logger.info("google classroom: card copy %s kept (%s)", wid, exc.code)
+    return gone
 
 
 def _assign(row: AidlClass, work: dict, allowed: set[str], token: str) -> None:
@@ -459,6 +498,16 @@ def _read_answers(row: AidlClass, org: Organization, token: str, can_drive: bool
                 licences += 1
             user.refresh_from_db()
         entry = posted.get(str(user.pk))
+        # A licence picture shows the student's avatar, so they make one first (like Slack):
+        # "Create your licence avatar" now, the licence once it's saved.
+        waiting = isinstance(entry, dict) and not entry.get("id")
+        if user.licence_issued and can_drive and not user.avatar_data and (entry is None or waiting):
+            entry = posted[str(user.pk)] = entry or {}
+            _avatar_item(row, user, gid, entry, token)
+            continue
+        ask = entry.get("avatar_ask", "") if waiting else ""
+        if waiting:  # the avatar is saved: the licence goes up now
+            entry = None
         if isinstance(entry, str):  # posted before the licence picture existed
             entry = {"id": entry, "image": False}
         if entry and entry.get("image") and "name" not in entry:  # posted before names were kept
@@ -479,8 +528,13 @@ def _read_answers(row: AidlClass, org: Organization, token: str, can_drive: bool
                     _remove_licence(row, entry, token)
                 if entry and entry.get("avatar_ask"):
                     new["avatar_ask"] = entry["avatar_ask"]
+                if ask:  # removed below, now the avatar is saved
+                    new["avatar_ask"] = ask
                 entry = posted[str(user.pk)] = new
-        if entry and entry.get("image"):
+            elif waiting:
+                entry = posted[str(user.pk)] = {"avatar_ask": ask} if ask else {}
+                continue
+        if entry and (entry.get("image") or entry.get("avatar_ask")):
             _avatar_item(row, user, gid, entry, token)
     row.licences = posted
     return acks, licences

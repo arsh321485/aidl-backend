@@ -47,9 +47,12 @@ def clear_focus_step(response):
 
 
 def focus_step(request) -> int:
-    """1-5 when the page was opened from a Classwork step, else 0."""
+    """The step's number when the page was opened from a Classwork step, else 0
+    (also for a cookie left from when there were more steps)."""
+    from .aidl_class import STEPS
+
     value = request.COOKIES.get(STEP_COOKIE, "")
-    return int(value) if value in ("1", "2", "3", "4", "5") else 0
+    return int(value) if value.isdigit() and 1 <= int(value) <= len(STEPS) else 0
 
 
 def focus_context(request) -> dict:

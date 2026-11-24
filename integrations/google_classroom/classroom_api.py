@@ -208,6 +208,13 @@ def create_invitation(access_token: str, course_id: str, user_id: str, role: str
                                                                    "role": role})
 
 
+def add_student(access_token: str, course_id: str, user_id: str) -> dict:
+    """Put someone straight into the class as a student, no invitation to accept
+    (classroom.rosters). Google allows this only for the school's Workspace admin
+    (school_directory.py); for anyone else it answers 403. user_id: Google id or email."""
+    return _call(access_token, "POST", f"{API}/courses/{course_id}/students", body={"userId": user_id})
+
+
 def delete_invitation(access_token: str, invitation_id: str) -> dict:
     return _call(access_token, "DELETE", f"{API}/invitations/{invitation_id}")
 

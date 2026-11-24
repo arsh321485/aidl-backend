@@ -1,0 +1,28 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Set up AIDL · School details{% endblock %}
+{% block body %}
+{% include "google_classroom/setup/_steps.html" %}
+<section class="box">
+  <h1>Tell us about your school</h1>
+  <p class="muted" style="margin-top:6px">Two quick answers, then your AI policy, and AIDL does the rest. Your teachers have nothing to set up.</p>
+  {% if error %}<div class="error" role="alert" style="margin-top:10px">{{ error }}</div>{% endif %}
+  <form method="post" style="margin-top:12px">{% csrf_token %}
+    <div class="field"><label for="name">School name</label>
+      <input type="text" id="name" name="name" value="{{ form.name }}" maxlength="120" required></div>
+    <fieldset class="field" style="border:0;padding:0;margin-top:12px">
+      <legend style="font-weight:600;margin-bottom:6px">About how many students?</legend>
+      {% for key, label, _ in student_ranges %}
+      <label class="check"><input type="radio" name="students" value="{{ key }}"{% if form.students == key %} checked{% endif %} required> {{ label }}</label>
+      {% endfor %}
+    </fieldset>
+    <fieldset class="field" style="border:0;padding:0;margin-top:12px">
+      <legend style="font-weight:600;margin-bottom:6px">About how many teachers? <span class="muted">(optional)</span></legend>
+      {% for key, label, _ in teacher_ranges %}
+      <label class="check"><input type="radio" name="teachers" value="{{ key }}"{% if form.teachers == key %} checked{% endif %}> {{ label }}</label>
+      {% endfor %}
+    </fieldset>
+    <p class="muted" style="margin:10px 0">ℹ️ Just an estimate. You can add more students any time later.</p>
+    <button class="btn go">Continue →</button>
+  </form>
+</section>
+{% endblock %}

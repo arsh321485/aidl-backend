@@ -49,20 +49,26 @@
 </section>
 {% endif %}
 
-{% if other_classes %}
+{% if other_classes or invite.enterprise and has_aidl_class %}
 <section class="box">
   <h2>📨 Invite students from your other classes</h2>
   {% if not invite.enterprise %}
   <p class="muted" style="margin-top:6px">⭐ Enterprise feature: invite all the students of your other classes in one go. Upgrade to Enterprise to use it.</p>
   {% elif invite.teachers_only %}
   <p class="muted" style="margin-top:6px">Your {{ invite.label }} plan is for teachers only, so students can't be invited. Upgrade your plan to add students.</p>
+  {% elif not other_classes %}
+  <p class="muted" style="margin-top:6px">You don't teach any other Google Classroom classes yet, so there's nobody to bring in from them. Once you create classes in Google Classroom and add students there, press ↻ Refresh: they show up here with a <b>✅ Select all students</b> button, and AIDL invites all their students to the AIDL class in one go. Until then, paste emails in the box above.</p>
   {% else %}
   <p class="muted" style="margin-top:6px">Tick your classes and AIDL invites all their students to the AIDL class in one go. Each student gets a Google Classroom invitation and presses <b>Join</b>; AIDL then adds them as learners. Anyone already in the AIDL class or already invited is skipped.
     {% if invite.enterprise %}Your Enterprise plan has no student limit: invite your whole school.{% else %}Your {{ invite.label }} plan has room for <b>{{ invite.room }}</b> more student{{ invite.room|pluralize }}.{% endif %}</p>
-  <form method="post" action="{% url 'google-classroom-classes-invite' %}" style="margin-top:10px">{% csrf_token %}
+  <form method="post" action="{% url 'google-classroom-classes-invite' %}" id="invite-classes" style="margin-top:10px">{% csrf_token %}
+    <div class="row" style="margin-bottom:6px">
+      <button type="button" class="btn sm ok" id="select-all-students">✅ Select all students</button>
+      <span class="muted" id="selected-count">No classes selected</span>
+    </div>
     {% for c in other_classes %}
-    <label class="check"><input type="checkbox" name="course_ids" value="{{ c.id }}"{% if not c.new %} disabled{% endif %}>
-      {{ c.name }}{% if c.section %} · {{ c.section }}{% endif %} <span class="muted">· {{ c.student_count }} student{{ c.student_count|pluralize }}{% if c.student_count %} · {% if c.new %}{{ c.new }} not in AIDL yet{% else %}all in AIDL already{% endif %}{% endif %}</span></label>
+    <label class="check"><input type="checkbox" name="course_ids" value="{{ c.id }}" data-new="{{ c.new }}"{% if not c.new %} disabled{% endif %}>
+      {{ c.name }}{% if c.section %} · {{ c.section }}{% endif %} <span class="muted">· {{ c.student_count }} student{{ c.student_count|pluralize }}{% if c.student_count %} · {% if c.new %}{{ c.new }} not in AIDL yet{% else %}all in AIDL already{% endif %}{% else %} · nobody to invite yet: students appear here once they've joined this class in Classroom (invited isn't enough), then press ↻ Refresh{% endif %}</span></label>
     {% endfor %}
     <div class="row" style="margin-top:10px">
       <button class="btn go"{% if not invite.room %} disabled{% endif %}>📨 Invite all their students</button>
@@ -117,4 +123,30 @@
   Google and land in {{ person.organization_name }}. Refresh also adds new students of those classes.
   Removing a class doesn't delete anyone's account or progress.</p>
 {% endif %}
+{% endblock %}
+{% block script %}
+<script>
+// "Select all students": tick every class that still has students to invite (and untick them again).
+(function () {
+  var form = document.getElementById("invite-classes");
+  if (!form) return;
+  var boxes = Array.prototype.slice.call(form.querySelectorAll('input[name="course_ids"]:not([disabled])'));
+  var button = document.getElementById("select-all-students"), count = document.getElementById("selected-count");
+  function update() {
+    var n = boxes.reduce(function (sum, b) { return sum + (b.checked ? +b.dataset.new : 0); }, 0);
+    var all = boxes.length && boxes.every(function (b) { return b.checked; });
+    count.textContent = n ? "Up to " + n + " student" + (n === 1 ? "" : "s") + " to invite (someone in several classes is invited once)"
+                          : "No classes selected";
+    button.textContent = all ? "Clear selection" : "✅ Select all students";
+  }
+  button.addEventListener("click", function () {
+    var all = boxes.every(function (b) { return b.checked; });
+    boxes.forEach(function (b) { b.checked = !all; });
+    update();
+  });
+  boxes.forEach(function (b) { b.addEventListener("change", update); });
+  if (!boxes.length) button.disabled = true;
+  update();
+})();
+</script>
 {% endblock %}

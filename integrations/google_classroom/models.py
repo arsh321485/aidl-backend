@@ -10,6 +10,11 @@ AidlClass         the "AIDL" class AIDL creates in the first admin's Google Clas
                   at sign-up (like Slack's #aidl channel), with its Admin Center post.
 GoogleStudent     a student of one of those classes (Google's roster). When the class is
                   in the AIDL programme (step 3), aidl_user_id links the AIDL learner.
+SchoolSetup       the admin's short setup after sign-up: approximate student / teacher
+                  numbers, and when the school's AI policy was confirmed (onboarding.py).
+SchoolDirectory   Enterprise "whole school": the school's Google Workspace admin let AIDL read
+                  the school's accounts, so every student is added straight into the AIDL class
+                  (school_directory.py).
 """
 
 from django.db import models
@@ -105,3 +110,49 @@ class AidlClass(models.Model):
 
     def __str__(self):
         return f"AIDL class {self.course_id or '(not created)'}"
+
+
+class SchoolSetup(models.Model):
+    """The short setup a school's admin does after signing up (onboarding.py): roughly how
+    many students and teachers, then the school's AI policy in one click."""
+
+    organization_id = models.CharField(max_length=64, unique=True)
+    # A range key from onboarding.STUDENT_RANGES / TEACHER_RANGES: an estimate, never a limit.
+    approx_students = models.CharField(max_length=16, blank=True, default="")
+    approx_teachers = models.CharField(max_length=16, blank=True, default="")
+    details_by = models.CharField(max_length=64, blank=True, default="")  # AIDL user id
+    details_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)  # policy confirmed: programme started
+    invited = models.JSONField(default=dict, blank=True)  # what finishing invited automatically (counts / why not)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Setup {self.organization_id}"
+
+
+class SchoolDirectory(models.Model):
+    """One school's whole-school connection, made by its Google Workspace (IT) admin."""
+
+    organization_id = models.CharField(max_length=64, unique=True)
+    domain = models.CharField(max_length=255)  # school.edu: only this domain's admin can connect
+    admin_user_id = models.CharField(max_length=64)  # the AIDL user (the IT admin) whose access is stored
+    admin_email = models.CharField(max_length=255, blank=True, default="")
+    refresh_token = models.TextField(blank=True, default="")  # encrypted (api.microsoft_auth.seal_refresh_token)
+    scopes = models.TextField(blank=True, default="")
+    # The school's organisational units (folders) whose accounts are students, e.g. ["/Students"].
+    student_units = models.JSONField(default=list, blank=True)
+    student_count = models.IntegerField(default=0)
+    counted_at = models.DateTimeField(null=True, blank=True)
+    preview = models.JSONField(default=list, blank=True)  # a few student names, shown before sending
+    # The admin pressed "Send AIDL to all students": the daily check keeps adding new students.
+    send_all = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, blank=True, default="")  # "", adding, done, error
+    progress = models.JSONField(default=dict, blank=True)  # counts of the last run (school_directory.run)
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Whole school {self.domain}"

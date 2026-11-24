@@ -1,0 +1,38 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Set up AIDL · Your AI policy{% endblock %}
+{% block body %}
+{% include "google_classroom/setup/_steps.html" %}
+<section class="box">
+  <h1>{{ org.name }}'s AI policy</h1>
+  <p class="muted" style="margin-top:6px">AIDL has written your school's AI policy for you. Check the few details below and press <b>Use this policy</b>. Students agree to it before they get their AI Driving Licence.</p>
+  {% if done %}<p class="notice" style="margin-top:10px">✅ Your policy is in use. Change anything below and press Use this policy again to update it.</p>{% endif %}
+  {% if problems %}<div class="error" role="alert" style="margin-top:10px">Please fix these first:<ul style="margin:6px 0 0">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
+  <form method="post" style="margin-top:12px">{% csrf_token %}
+    <div class="field"><label for="speaker">Who may speak publicly for the school?</label>
+      <input type="text" id="speaker" name="speaker" value="{{ fields.speaker }}" maxlength="200"></div>
+    {% if asks_storage %}<div class="field" style="margin-top:10px"><label for="storage">Where may school files be stored?</label>
+      <input type="text" id="storage" name="storage" value="{{ fields.storage }}" maxlength="200"></div>{% endif %}
+    {% if asks_report %}<div class="field" style="margin-top:10px"><label for="report">Report problems to (email)</label>
+      <input type="text" id="report" name="report" value="{{ fields.report }}" maxlength="200"></div>{% endif %}
+    <div class="field" style="margin-top:10px"><label for="tools">Approved AI tools <span class="muted">(separate with commas)</span></label>
+      <input type="text" id="tools" name="tools" value="{{ fields.tools }}" maxlength="600"></div>
+
+    <h2 style="margin-top:18px">What your students will agree to</h2>
+    <div class="list" style="margin-top:4px">
+      {% for c in cards %}
+      <div>
+        <b>{{ c.icon }} {{ c.title }}</b>{% if c.approved %} <span class="pill">✅ In use</span>{% endif %}
+        {% if c.lines %}<ul style="margin:6px 0 0">{% for l in c.lines %}<li>{{ l }}</li>{% endfor %}</ul>{% endif %}
+        {% if c.problems %}<p class="muted" style="color:var(--red)">⚠️ {{ c.problems|join:" " }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <button class="btn go" name="action" value="use">✅ Use this policy</button>
+      <button class="btn" name="action" value="preview">↻ Update preview</button>
+    </div>
+  </form>
+  <p class="muted" style="margin-top:12px">Want more control? <a href="{% url 'google-classroom-admin-policy' %}">Edit topic by topic</a>{% if org.plan == "basic" or org.plan == "enterprise" %} or <a href="{% url 'google-classroom-admin-upload' %}">upload your own policy</a>{% endif %}. Optional.</p>
+</section>
+{% endblock %}

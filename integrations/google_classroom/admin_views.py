@@ -1,7 +1,9 @@
 """Step 5: Admin Center pages for Google Classroom admins (core part).
 
-GET  /api/google-classroom/admin/               home: plan, the 5 setup steps, student link
+GET  /api/google-classroom/admin/               home: plan, setup, numbers, add students, policy
+                                                (a school without its details goes to the setup first)
 POST /api/google-classroom/admin/action/        approve a starter card / start / skip the admins step
+                                                (no longer on the pages: onboarding.auto_start does it)
 GET  /api/google-classroom/admin/step/<n>/       Classwork's "Step n" (teacher-only draft) → that step's page
 GET  /api/google-classroom/admin/team/          learners' progress; remove / add back
 POST /api/google-classroom/admin/team/action/
@@ -55,6 +57,9 @@ def _admin_page(view):
         response = view(request, user, org, *args, **kwargs)
         if request.method == "POST":  # something may have changed: update the AIDL class in Classroom
             from .aidl_class import refresh_later
+            from .onboarding import auto_start
+
+            auto_start(org, user)  # e.g. a policy approved topic by topic: start without a button
             refresh_later(org)
         return response
     return wrapper
@@ -74,6 +79,12 @@ def _render(request, user, org, template: str, **ctx):
 
 @_admin_page
 def home(request, user, org):
+    from .onboarding import auto_start, next_url
+
+    setup = next_url(org)
+    if setup:  # the school details come first
+        return redirect(setup)
+    auto_start(org, user)
     return _render(request, user, org, "admin.html", **admin_center.home(org, user),
                    learn_url=request.build_absolute_uri(reverse("google-classroom-learn")))
 

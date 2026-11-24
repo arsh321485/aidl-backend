@@ -1,0 +1,15 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Paid plan topic · AIDL{% endblock %}
+{% block body %}
+{% include "google_classroom/_nav.html" %}
+<section class="box">
+  <h1>🔒 {{ icon }} {{ title }} is on the paid plans</h1>
+  <p style="margin-top:8px">This is one of the <b>11 extra policy topics</b> that come with Basic and Enterprise. Your Trial includes <b>Passwords &amp; Sign-in</b>, <b>Email, Chat &amp; Social Media</b> and <b>Data Classification</b>.</p>
+  <div style="margin-top:14px;padding:16px;border:3px solid var(--ink);background:var(--yellow);box-shadow:5px 5px 0 var(--ink)">
+    <h2 style="margin:0 0 6px">⭐ What you unlock</h2>
+    <ul style="margin:6px 0 12px;padding-left:20px">{% for p in perks %}<li>{{ p }}</li>{% endfor %}</ul>
+    {% if can_upgrade %}<a class="btn go" style="background:#fff" href="{% url 'google-classroom-admin-plans' %}">⬆️ See plans &amp; upgrade</a>{% else %}<p class="muted" style="color:var(--ink)">Ask your master admin to open ⬆️ Upgrade plan in the Admin Center.</p>{% endif %}
+  </div>
+  <div class="row" style="margin-top:12px"><a class="btn" href="{% url 'google-classroom-admin-policy' %}">← Back to topics</a></div>
+</section>
+{% endblock %}

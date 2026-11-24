@@ -54,7 +54,7 @@ def _denied(request):
 
 def _when_note(org, send_on: str) -> str:
     if not admin_setup.started(org):
-        return " Learners get it when you start the programme."
+        return " Learners get it once the programme starts."
     return (f" Learners see it from {_day(send_on)}." if send_on
             else " Learners see it the next time they open AIDL.")
 
@@ -80,13 +80,24 @@ def policy(request, user, org):
     answers = aup_store.answers(org, with_tools=False)["answers"]
     states = pc.statuses(org)
     topics = []
-    for n in pc.TOPICS:
+    # Like Slack and Teams: the Trial includes 3 topics (shown first); the other 11 are paid (api.policy_cards).
+    for n in pc.ordered(org):
         st = states.get(n) or {"state": "new"}
         qs = len(pc.questions(n, answers)) + (1 if n == 7 else 0)
         topics.append({"n": n, "title": pc.SHORT[n], "icon": pc.ICONS[n], "state": st["state"],
-                       "agreed": st.get("agreed", 0), "day": _day(st.get("send_on")), "qs": qs})
+                       "agreed": st.get("agreed", 0), "day": _day(st.get("send_on")), "qs": qs,
+                       "locked": pc.is_locked(org, n), "free": n in pc.FREE_TOPICS})
     return _render(request, user, org, "policy/policy.html", topics=topics, done=len(states),
-                   upload_allowed=aup_upload.can_upload(org), tab="policy")
+                   upload_allowed=aup_upload.can_upload(org), tab="policy",
+                   on_trial=any(t["locked"] for t in topics), **_upsell(org, user))
+
+
+def _upsell(org, user) -> dict:
+    from api.policy_cards_slack import PERKS
+
+    from .admin_center import can
+
+    return {"perks": PERKS, "can_upgrade": can(org, user)["billing"]}
 
 
 def _url(name, *args):
@@ -101,6 +112,9 @@ def policy_card(request, user, org, n: int):
         return _denied(request)
     if n not in pc.TOPICS:
         return redirect("google-classroom-admin-policy")
+    if pc.is_locked(org, n):  # a paid topic on the Trial: never approved, also not by a direct POST
+        return _render(request, user, org, "policy/policy_locked.html", title=pc.SHORT[n], icon=pc.ICONS[n],
+                       tab="policy", **_upsell(org, user))
     a, when, day, errors = aup_store.answers(org), "today", "", {}
     if request.method == "POST":
         post = request.POST.copy()

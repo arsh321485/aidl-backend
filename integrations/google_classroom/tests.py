@@ -67,6 +67,14 @@ class GoogleClassroomSignIn(TestCase):
         self.assertEqual(f"{url.scheme}://{url.netloc}{url.path}", FRONTEND)
         return {k: v[0] for k, v in parse_qs(url.query).items()}
 
+    def _details_done(self, students="200"):
+        """Every school has done setup step 1 (onboarding: roughly how many students), as a
+        school that signed up has; tests of the Admin Center itself start from there."""
+        from integrations.google_classroom.models import SchoolSetup
+
+        for org_id in Organization.objects.values_list("pk", flat=True):
+            SchoolSetup.objects.update_or_create(organization_id=str(org_id), defaults={"approx_students": students})
+
     # --- sign-up ---
 
     def test_first_teacher_creates_the_school_and_is_its_admin(self):
@@ -89,7 +97,11 @@ class GoogleClassroomSignIn(TestCase):
         r = self._sign_in()
         self.assertTrue(r["admin_center_url"].startswith("https://backend.test/api/google-classroom/open/?email="))
         self.assertEqual(r["open_admin_center"], "1")
-        # No AIDL class yet: that link opens Google Classroom, as the signed-in account.
+        # A new school: that link opens the school's short setup first.
+        go = self.client.get(r["admin_center_url"].removeprefix("https://backend.test"))
+        self.assertEqual(go["Location"], "/api/google-classroom/admin/setup/")
+        # Once the school details are in (no AIDL class yet): Google Classroom, as the signed-in account.
+        self._details_done()
         go = self.client.get(r["admin_center_url"].removeprefix("https://backend.test"))
         self.assertEqual(go.status_code, 302)
         self.assertTrue(go["Location"].startswith("https://classroom.google.com/?authuser="))
@@ -501,27 +513,26 @@ class GoogleClassroomAidlClass(GoogleClassroomClasses):
         # Nothing on the Stream (Classroom shows teachers every Stream post), and no students'
         # topic or welcome until a student joins: only the Admin Center.
         self.assertEqual(self.fake.announcements, {})
-        # The 5 steps are teacher-only drafts in Classwork, step 1 created last (= on top),
+        # The 2 setup steps are teacher-only drafts in Classwork, step 1 created last (= on top),
         # then the setup summary above them.
         titles = [m["title"] for m in self.fake.materials.values()]
-        self.assertEqual(titles, ["⬜ Step 5 · Start the programme", "⬜ Step 4 · Card approval",
-                                  "⬜ Step 3 · Your team", "⬜ Step 2 · Admins (optional)",
-                                  "👉 Step 1 · Your AI policy", "⭐ Plan: Trial · 1/2 teachers · 0/5 students",
-                                  "📋 Setup progress · 0 of 5 done"])
-        plan = self.fake.materials["m6"]
+        self.assertEqual(titles, ["⬜ Step 2 · Your AI policy", "👉 Step 1 · School details",
+                                  "⭐ Plan: Trial · 1/2 teachers · 0/5 students", "📋 Setup progress · 0 of 2 done"])
+        plan = self.fake.materials["m3"]
         self.assertEqual(plan["state"], "DRAFT")
         self.assertEqual(plan["materials"][0]["link"]["url"], "https://backend.test/api/google-classroom/admin/upgrade/")
         self.assertIn("👉 Trial (free): 2 teachers, 5 students", plan["description"])
-        summary = self.fake.materials["m7"]["description"]
-        self.assertIn("👉 1. Your AI policy", summary)
+        summary = self.fake.materials["m4"]["description"]
+        self.assertIn("👉 1. School details", summary)
         self.assertIn("Next: open", summary)
         self.assertTrue(all(m["state"] == "DRAFT" for m in self.fake.materials.values()))
         # ... all under the "AIDL Admin Center" topic, made once.
         self.assertEqual(self.fake.topics, [{"topicId": "t1", "name": "🚦 AIDL Admin Center"}])
         self.assertTrue(all(m["topicId"] == "t1" for m in self.fake.materials.values()))
-        self.assertEqual(self.fake.materials["m5"]["materials"][0]["link"]["url"],
+        self.assertEqual(self.fake.materials["m2"]["materials"][0]["link"]["url"],
                          "https://backend.test/api/google-classroom/admin/step/1/")
-        # Continue on the website opens the AIDL class itself.
+        # Once the school details are in, Continue on the website opens the AIDL class itself.
+        self._details_done()
         r = self._sign_in(granted=ALL_SCOPES)
         go = self.client.get(r["admin_center_url"].removeprefix("https://backend.test"))
         self.assertEqual(go["Location"], "https://classroom.google.com/c/aidl2?authuser=asha%40school.edu")
@@ -554,48 +565,52 @@ class GoogleClassroomAidlClass(GoogleClassroomClasses):
 
     def test_steps_open_their_pages(self):
         self._sign_in(granted=ALL_SCOPES)
-        for n, where in ((1, "/api/google-classroom/admin/policy/"), (2, "/api/google-classroom/admin/"),
-                         (3, "/api/google-classroom/classes/"), (4, "/api/google-classroom/admin/"),
-                         (5, "/api/google-classroom/admin/")):
+        for n, where in ((1, "/api/google-classroom/admin/setup/"), (2, "/api/google-classroom/admin/setup/policy/")):
             resp = self.client.get(f"/api/google-classroom/admin/step/{n}/")
             self.assertEqual(resp["Location"], where)
-        # Opened from a step: that step only, no Admin Center tabs.
-        self.client.get("/api/google-classroom/admin/step/1/")
-        page = self.client.get("/api/google-classroom/admin/policy/")
-        self.assertContains(page, "Step 1 · Your AI policy")
-        self.assertContains(page, "Back to Google Classroom")
-        self.assertNotContains(page, "🏫 Classes")
-        self.client.get("/api/google-classroom/admin/step/4/")
-        page = self.client.get("/api/google-classroom/admin/")
-        self.assertContains(page, "Traffic Light Check")
-        self.assertNotContains(page, "Your AI policy</h2>")
-        self.assertNotContains(page, "Start the programme</button>")
-        self.assertNotContains(page, "Link for your students")
-        # Continue from the website clears it: the full Admin Center again.
-        self.client.get("/api/google-classroom/open/")
-        page = self.client.get("/api/google-classroom/admin/")
-        self.assertContains(page, "🏫 Classes")
-        self.assertContains(page, "Start the programme</button>")
+        self.assertContains(self.client.get("/api/google-classroom/admin/setup/"), "About how many students?")
+        # A step cookie left from when there were 5 steps is ignored.
+        self.client.cookies["aidl_gclassroom_step"] = "4"
+        self.assertContains(self.client.get("/api/google-classroom/admin/setup/"), "About how many students?")
 
     def test_an_admin_action_updates_classroom_right_away(self):
         self._sign_in(granted=ALL_SCOPES)
         with mock.patch("integrations.google_classroom.google_oauth.refresh_access_token", return_value="access-9"):
-            self.client.post("/api/google-classroom/admin/action/", {"action": "skip_admins"})
+            self.client.post("/api/google-classroom/admin/setup/", {"name": "Green Valley School", "students": "200"})
         titles = {m["title"] for m in self.fake.materials.values()}
-        self.assertIn("✅ Step 2 · Admins (optional)", titles)
-        self.assertIn("👉 Step 1 · Your AI policy", titles)
-        self.assertIn("✅ 2. Admins (optional)", self.fake.materials["m7"]["description"])
-        self.assertEqual(self.fake.materials["m7"]["title"], "📋 Setup progress · 1 of 5 done")
-        self.assertEqual(len(self.fake.materials), 7)  # updated, not added again
+        self.assertIn("✅ Step 1 · School details", titles)
+        self.assertIn("👉 Step 2 · Your AI policy", titles)
+        self.assertIn("✅ 1. School details", self.fake.materials["m4"]["description"])
+        self.assertEqual(self.fake.materials["m4"]["title"], "📋 Setup progress · 1 of 2 done")
+        self.assertEqual(len(self.fake.materials), 4)  # updated, not added again
 
-    def test_signing_in_again_keeps_five_steps(self):
+    def test_signing_in_again_keeps_two_steps(self):
         self._sign_in(granted=ALL_SCOPES)
         self._sign_in(granted=ALL_SCOPES)
-        self.assertEqual(len(self.fake.materials), 7)
+        self.assertEqual(len(self.fake.materials), 4)
         self.assertEqual(len(self.fake.topics), 1)
-        del self.fake.materials["m1"]  # a teacher deleted step 5
+        del self.fake.materials["m1"]  # a teacher deleted step 2
         self._sign_in(granted=ALL_SCOPES)
-        self.assertEqual(len(self.fake.materials), 7)
+        self.assertEqual(len(self.fake.materials), 4)
+
+    def test_a_class_with_the_old_five_steps_gets_the_new_two(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._sign_in(granted=ALL_SCOPES)
+        for n in range(1, 6):  # a class set up before: 5 steps, no version
+            self.fake.materials[f"old{n}"] = {"title": f"⬜ Step {n} · Old step", "state": "DRAFT"}
+        row = AidlClass.objects.get()
+        for k in ("1", "2"):  # the class only has the old steps
+            del self.fake.materials[row.step_ids[k]]
+        row.step_ids = {k: v for k, v in row.step_ids.items() if k not in ("1", "2", "steps_v")}
+        row.step_ids.update({str(n): f"old{n}" for n in range(1, 6)})
+        row.save()
+        self._sign_in(granted=ALL_SCOPES)
+        titles = [m["title"] for m in self.fake.materials.values()]
+        self.assertFalse([t for t in titles if "Old step" in t])
+        self.assertIn("👉 Step 1 · School details", titles)
+        self.assertIn("⬜ Step 2 · Your AI policy", titles)
+        self.assertEqual(len(self.fake.materials), 4)
 
     def test_old_admin_center_post_is_taken_off_the_stream(self):
         from integrations.google_classroom.models import AidlClass
@@ -624,7 +639,7 @@ class GoogleClassroomAidlClass(GoogleClassroomClasses):
         self.assertEqual(AidlClass.objects.get().course_id, "aidl2")  # the same class
         self.assertFalse(old & set(self.fake.materials))
         self.assertIn("own2", self.fake.materials)
-        self.assertEqual(len(self.fake.materials), 8)  # theirs + one plan, one summary, 5 steps
+        self.assertEqual(len(self.fake.materials), 5)  # theirs + one plan, one summary, 2 steps
         self.assertEqual(self.fake.announcements, {"own1": "Exam on Friday"})
         self.assertEqual(self.fake.coursework, {})
 
@@ -639,6 +654,7 @@ class GoogleClassroomAidlClass(GoogleClassroomClasses):
         r = self._sign_in(granted=ALL_SCOPES)
         self.assertIn("access_token", r)
         self.assertEqual(r["open_admin_center"], "1")
+        self._details_done()
         self.assertContains(self.client.get("/api/google-classroom/admin/"), "set up the AIDL class")
 
     def test_without_the_permissions_admin_center_offers_to_create_it(self):
@@ -647,6 +663,7 @@ class GoogleClassroomAidlClass(GoogleClassroomClasses):
         self._sign_in()
         self.assertFalse(AidlClass.objects.exists())
         self.assertEqual(self.fake.calls, [])
+        self._details_done()
         self.assertContains(self.client.get("/api/google-classroom/admin/"), "Create AIDL class in Google Classroom")
 
     def test_learner_sign_in_creates_nothing(self):
@@ -669,6 +686,7 @@ class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
 
     def _school_with_a_student(self):
         self._sign_in(granted=ALL_SCOPES)
+        self._details_done()
         self.fake.students["aidl2"] = [{"userId": "s7", "profile": {"name": {"fullName": "Zoya Khan"},
                                                                    "emailAddress": "zoya@school.edu"}}]
 
@@ -676,6 +694,17 @@ class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
         for item in ("traffic_light", "highway_code"):
             self.client.post("/api/google-classroom/admin/action/", {"action": "approve", "item": item})
         self.client.post("/api/google-classroom/admin/action/", {"action": "start"})
+
+    def _save_avatar(self, microsoft_id):
+        import base64
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGBA", (40, 40), "#2EC866").save(buf, "PNG")
+        AIDLUser.objects.filter(microsoft_id=microsoft_id).update(
+            avatar_data=base64.b64encode(buf.getvalue()).decode())
 
     def _answer(self, title, gid="s7"):
         cid = next(i for i, c in self.fake.coursework.items() if c["title"] == title)
@@ -731,6 +760,8 @@ class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
         self._start()
         self._answer("🚦 Traffic Light Check")
         self._answer("📖 The Highway Code")
+        self._sync()  # the avatar first
+        self._save_avatar("google:s7")
         self._sync()
         self.assertTrue(self.fake.uploads[0].startswith(b"--aidl-licence-boundary"))
         self.assertIn(b"\x89PNG", self.fake.uploads[0])
@@ -745,6 +776,8 @@ class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
         self._start()
         self._answer("🚦 Traffic Light Check")
         self._answer("📖 The Highway Code")
+        self._sync()  # the avatar first
+        self._save_avatar("google:s7")
         self._sync()
         self.assertEqual(len(self.fake.uploads), 1)
         self.fake.students["aidl2"][0]["profile"]["name"]["fullName"] = "Zoya Khan"
@@ -777,16 +810,19 @@ class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
         self.assertIn(f"/api/avatar/start/?u={zoya.pk}", ask["materials"][0]["link"]["url"])
         self._sync()  # asked once
         self.assertEqual(sum(1 for m in self.fake.materials.values() if m["title"].startswith("🧑")), 1)
+        # No licence until the avatar is saved.
+        self.assertFalse(getattr(self.fake, "uploads", []))
+        self.assertFalse([m for m in self.fake.materials.values() if "Licence number" in m["description"]])
 
         buf = io.BytesIO()
         Image.new("RGBA", (40, 40), "#2EC866").save(buf, "PNG")
         AIDLUser.objects.filter(pk=zoya.pk).update(avatar_data=base64.b64encode(buf.getvalue()).decode())
         self._sync()
-        self.assertEqual(len(self.fake.uploads), 2)  # the licence card again, now with the avatar
+        self.assertEqual(len(self.fake.uploads), 1)  # the licence card, with the avatar
         self.assertEqual(sum(1 for m in self.fake.materials.values() if "Licence number" in m["description"]), 1)
         self.assertFalse([m for m in self.fake.materials.values() if m["title"].startswith("🧑")])
         self._sync()  # once
-        self.assertEqual(len(self.fake.uploads), 2)
+        self.assertEqual(len(self.fake.uploads), 1)
 
     def test_upgrading_on_the_website_updates_the_plan_item(self):
         from api.models import Organization
@@ -834,6 +870,33 @@ class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
         self.assertEqual(len(self.fake.licence_materials), 2)
         self._sync()  # once
         self.assertEqual(len(self.fake.licence_materials), 2)
+
+    def test_duplicate_welcomes_from_side_by_side_syncs_are_cleaned_to_one(self):
+        from integrations.google_classroom.models import AidlClass
+
+        self._school_with_a_student()
+        self._sync()
+        # Two syncs that ran at the same time each posted their own copy.
+        for mid in ("dup1", "dup2"):
+            self.fake.materials[mid] = {"title": "👋 Welcome to AIDL · start here", "description": "old",
+                                        "creationTime": "2999-01-01T00:00:00Z", "topicId": "t2"}
+        self._start()
+        welcomes = [i for i, m in self.fake.materials.items() if m["title"].startswith("👋")]
+        self.assertEqual(len(welcomes), 1)
+        self.assertEqual(AidlClass.objects.get().step_ids["welcome_item"], welcomes[0])
+
+    def test_copies_of_the_cards_from_side_by_side_syncs_are_removed(self):
+        self._school_with_a_student()
+        self._start()
+        (light,) = [c for c in self.fake.coursework.values() if c["title"] == "🚦 Traffic Light Check"]
+        self.fake.coursework["copy1"] = dict(light)  # a second sync posted the card again
+        self.fake.coursework["own1"] = {**light, "title": "Teacher's own homework"}
+        self._sync()
+        titles = [c["title"] for c in self.fake.coursework.values()]
+        self.assertEqual(titles.count("🚦 Traffic Light Check"), 1)
+        self.assertIn("Teacher's own homework", titles)
+        welcomes = [m for m in self.fake.materials.values() if m["title"].startswith("👋")]
+        self.assertEqual(len(welcomes), 1)
 
     def test_the_welcome_moves_off_the_stream_and_stays_above_the_cards(self):
         from integrations.google_classroom.models import AidlClass
@@ -1115,6 +1178,7 @@ class GoogleClassroomLearnerCards(GoogleClassroomAidlClass):
         page = self.client.get("/api/google-classroom/classes/")
         self.assertContains(page, "Invite students from your other classes")
         self.assertContains(page, "3 not in AIDL yet")  # AI Basics: everyone but Zoya
+        self.assertContains(page, "Select all students")  # ticks every class at once
         resp = self.client.post("/api/google-classroom/classes/invite/", {"course_ids": ["c1", "c2"]}, follow=True)
         invited = sorted(i["userId"] for i in self.fake.invitations if i["courseId"] == "aidl2")
         self.assertEqual(invited, ["s1", "s2", "s3"])  # each once; Zoya's already in
@@ -1378,11 +1442,15 @@ class GoogleClassroomLearners(GoogleClassroomProgramme):
             return self.client.get("/api/google-classroom/callback/", {"code": "abc", "state": q["state"]},
                                    follow=True)
 
-    def test_admin_center_shows_setup_and_share_link(self, _warm):
+    def test_admin_center_asks_for_the_school_details_first(self, _warm):
         self._class_in_aidl()
+        resp = self.client.get("/api/google-classroom/admin/")
+        self.assertEqual(resp["Location"], "/api/google-classroom/admin/setup/")
+        self._details_done()
         page = self.client.get("/api/google-classroom/admin/")
-        self.assertContains(page, "4 · Card approval")
-        self.assertContains(page, "/api/google-classroom/learn/")
+        self.assertContains(page, "One step left: your AI policy")
+        self.assertNotContains(page, "Card approval")
+        self.assertNotContains(page, "Start the programme")
 
     def test_start_needs_both_cards_approved(self, _warm):
         self._class_in_aidl()
@@ -1437,9 +1505,10 @@ class GoogleClassroomLearners(GoogleClassroomProgramme):
 
     def test_teacher_opening_the_link_goes_to_the_admin_center(self, _warm):
         self._class_in_aidl()
+        self._details_done()
         resp = self._open_link()  # sub 111 = the teacher
         self.assertContains(resp, "Admin Center")
-        self.assertContains(resp, "5 · Start the programme")
+        self.assertContains(resp, "Review your AI policy")
 
 
 for _name in [n for n in dir(GoogleClassroomProgramme) if n.startswith("test_")]:
@@ -1461,6 +1530,7 @@ class GoogleClassroomAdminCenter(GoogleClassroomLearners):
     def _school(self):
         """Teacher (master admin) with class c1 in AIDL: learners Ravi (s1) and Meera (s2)."""
         self._class_in_aidl()
+        self._details_done()
         return (AIDLUser.objects.get(microsoft_id="google:111"), AIDLUser.objects.get(microsoft_id="google:s1"),
                 AIDLUser.objects.get(microsoft_id="google:s2"))
 
@@ -1468,21 +1538,28 @@ class GoogleClassroomAdminCenter(GoogleClassroomLearners):
         """Sign in to the Admin Center as this Google account (through the student link)."""
         return self._open_link(sub=sub, email=email)
 
-    def test_home_shows_steps_plan_and_team(self):
+    def test_home_shows_plan_numbers_and_no_old_steps(self):
         self._school()
         page = self.client.get("/api/google-classroom/admin/")
         self.assertContains(page, "👑 Master admin")
-        self.assertContains(page, "2 learners from 1 class in AIDL")
-        self.assertContains(page, "✅ 3 · Your team")
-        self.assertContains(page, "seats")
+        self.assertContains(page, "<b>2</b> learners in AIDL", html=False)
+        self.assertContains(page, "expected about 50–200")
+        self.assertContains(page, "Enterprise covers your whole school")  # Trial: 5 students, ~200 expected
+        for gone in ("Card approval", "Start the programme", "Admins (optional)", "🧑‍💼 Admins"):
+            self.assertNotContains(page, gone)
 
-    def test_start_from_the_admin_center(self):
-        self._school()
-        for item in ("traffic_light", "highway_code"):
-            self.client.post("/api/google-classroom/admin/action/", {"action": "approve", "item": item})
-        resp = self.client.post("/api/google-classroom/admin/action/", {"action": "start"}, follow=True)
-        self.assertContains(resp, "The programme has started")
-        self.assertContains(resp, "✅ 5 · Programme started")
+    def test_policy_in_use_starts_the_programme_by_itself(self):
+        from api import admin_setup, card_approval
+        from api import policy_cards as pc
+
+        teacher, _r, _m = self._school()
+        org = Organization.objects.get(pk=teacher.organization_id)
+        pc.approve(org, teacher, 1, {}, card_lines=["Use only the AI tools on the school's list."])
+        page = self.client.get("/api/google-classroom/admin/")
+        org.refresh_from_db()
+        self.assertTrue(admin_setup.started(org))
+        self.assertTrue(card_approval.onboarding_ready(org))  # the starter cards, approved for them
+        self.assertContains(page, "✅ Programme running")
 
     def test_learner_cannot_open_the_admin_center(self):
         self._school()
@@ -1536,7 +1613,6 @@ class GoogleClassroomAdminCenter(GoogleClassroomLearners):
         self.assertEqual(ravi.role, "admin")
         self.assertTrue(ravi.perm_approve_cards)
         self.assertFalse(ravi.perm_manage_admins)
-        self.assertContains(self.client.get("/api/google-classroom/admin/"), "✅ 2 · Admins")
 
         resp = self.client.post("/api/google-classroom/admin/admins/action/",
                                 {"action": "remove", "user_id": ravi.pk}, follow=True)
@@ -1627,16 +1703,17 @@ class GoogleClassroomPolicy(GoogleClassroomAdminCenter):
         self._school()
         resp = self._company()
         self.assertContains(resp, "Add a policy card")
-        self.assertContains(resp, "0 of 14 approved")
+        self.assertContains(resp, "0 of 3 approved")  # the Trial: 3 topics
         self.assertEqual(self.client.get("/api/google-classroom/admin/regulators/").status_code, 200)
 
     def test_policy_card_page_and_incomplete_answers(self):
         from api import policy_cards as pc
         self._school()
         self._company()
-        n = pc.TOPICS[0]
+        from django.utils.html import escape
+        n = pc.FREE_TOPICS[0]
         page = self.client.get(f"/api/google-classroom/admin/policy/{n}/")
-        self.assertContains(page, pc.SHORT[n])
+        self.assertContains(page, escape(pc.SHORT[n]))
         resp = self.client.post(f"/api/google-classroom/admin/policy/{n}/", {"action": "approve", "when": "today"})
         self.assertContains(resp, "Please check")
 
@@ -1647,7 +1724,7 @@ class GoogleClassroomPolicy(GoogleClassroomAdminCenter):
         self._start_programme()
         org = Organization.objects.get(pk=teacher.organization_id)
         pc.approve(org, teacher, 1, {}, card_lines=["Use only the AI tools on the school's list."])
-        self.assertContains(self.client.get("/api/google-classroom/admin/"), "1 of 14 policy cards approved")
+        self.assertContains(self.client.get("/api/google-classroom/admin/"), "In use: 1 policy card ")
 
         self._open_link(sub="s1", email="ravi@school.edu")
         self.client.post("/api/google-classroom/learn/action/", {"action": "start"})
@@ -1657,6 +1734,36 @@ class GoogleClassroomPolicy(GoogleClassroomAdminCenter):
         self.client.post("/api/google-classroom/learn/action/", {"action": "agree", "n": "1", "version": version})
         ravi = AIDLUser.objects.get(microsoft_id="google:s1")
         self.assertEqual(aup_store.pending_points(ravi, org), [])
+
+    def test_trial_has_3_free_topics_like_slack_and_teams(self):
+        from api import policy_cards as pc
+        self._school()
+        page = self._company()
+        self.assertContains(page, "Your Trial includes 3 policy topics")
+        self.assertContains(page, "🆓 Free in your Trial", count=3)
+        self.assertContains(page, "⭐ Paid plan", count=11)
+        self.assertContains(page, "See plans &amp; upgrade")
+        titles = [t["title"] for t in page.context["topics"]]
+        self.assertEqual(titles[:3], [pc.SHORT[n] for n in pc.FREE_TOPICS])  # free ones first
+        self.assertNotContains(page, "· point")
+
+    def test_a_paid_topic_on_the_trial_shows_the_upgrade_page_and_cant_be_approved(self):
+        from api import aup_store
+        teacher, _r, _m = self._school()
+        self._company()
+        page = self.client.get("/api/google-classroom/admin/policy/1/")
+        self.assertContains(page, "is on the paid plans")
+        self.assertContains(page, "11 extra policy topics")
+        self.client.post("/api/google-classroom/admin/policy/1/", {"action": "approve", "when": "today"})
+        self.assertIsNone(aup_store.card(Organization.objects.get(pk=teacher.organization_id), 1))
+
+    def test_all_14_topics_on_a_paid_plan(self):
+        teacher, _r, _m = self._school()
+        Organization.objects.filter(pk=teacher.organization_id).update(plan="enterprise")
+        page = self._company()
+        self.assertContains(page, "0 of 14 approved")
+        self.assertNotContains(page, "⭐ Paid plan")
+        self.assertNotContains(self.client.get("/api/google-classroom/admin/policy/1/"), "is on the paid plans")
 
     def test_upload_and_logo_are_paid_features(self):
         self._school()
@@ -1702,3 +1809,143 @@ class GoogleClassroomPolicy(GoogleClassroomAdminCenter):
 
 for _name in [n for n in dir(GoogleClassroomAdminCenter) if n.startswith("test_")]:
     setattr(GoogleClassroomPolicy, _name, None)
+
+
+# --- the school's short setup after sign-up (onboarding.py) ---
+
+class GoogleClassroomSetup(GoogleClassroomAidlClass):
+    """Sign up → school details (approx. students) → AI policy in one click → done, automatically."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch("integrations.google_classroom.google_oauth.refresh_access_token", return_value="access-2")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _org(self):
+        return Organization.objects.get()
+
+    def test_new_school_lands_in_classroom_and_starts_the_setup_from_classwork(self):
+        r = self._sign_in(granted=ALL_SCOPES)
+        go = self.client.get(r["admin_center_url"].removeprefix("https://backend.test"))
+        self.assertTrue(go["Location"].startswith("https://classroom.google.com/c/aidl2"))  # Classroom first
+        self.assertIn("👉 Step 1 · School details", [m["title"] for m in self.fake.materials.values()])
+        # Classwork's Step 1 opens the setup in a new tab, with a way back to Classroom.
+        go = self.client.get("/api/google-classroom/admin/step/1/")
+        page = self.client.get(go["Location"])
+        self.assertContains(page, "About how many students?")
+        self.assertContains(page, 'value="school.edu"')  # the name from Google, to change
+        self.assertContains(page, "Back to Google Classroom")
+        self.client.post("/api/google-classroom/admin/setup/", {"name": "Green Valley School", "students": "200"})
+        self.client.post("/api/google-classroom/admin/setup/policy/", {
+            "action": "use", "speaker": "the Principal", "storage": "Google Drive", "report": "it@school.edu",
+            "tools": "Google Gemini"})
+        saved = self.client.get("/api/google-classroom/admin/setup/policy/?saved=1")
+        self.assertContains(saved, 'class="btn go back-to-classroom" href="https://classroom.google.com/c/aidl2"')
+
+    def test_details_need_a_name_and_an_estimate(self):
+        from integrations.google_classroom.models import SchoolSetup
+
+        self._sign_in(granted=ALL_SCOPES)
+        resp = self.client.post("/api/google-classroom/admin/setup/", {"name": "Green Valley", "students": ""})
+        self.assertContains(resp, "roughly how many students")
+        resp = self.client.post("/api/google-classroom/admin/setup/", {"name": "  ", "students": "200"})
+        self.assertContains(resp, "school&#x27;s name")
+        resp = self.client.post("/api/google-classroom/admin/setup/",
+                                {"name": "Green Valley School", "students": "500", "teachers": "50"})
+        # Opened from Classwork: it says so and goes back to Classroom (Step 2 is there), not on to the policy.
+        self.assertEqual(resp["Location"], "/api/google-classroom/admin/setup/?saved=1")
+        saved = self.client.get(resp["Location"])
+        self.assertContains(saved, "School details saved")
+        self.assertContains(saved, "Step 2 · Your AI policy")
+        self.assertContains(saved, "Taking you back to Google Classroom")
+        self.assertNotContains(saved, "Use this policy")
+        row = SchoolSetup.objects.get()
+        self.assertEqual((row.approx_students, row.approx_teachers), ("500", "50"))
+        self.assertEqual(self._org().name, "Green Valley School")
+        # Then the Admin Center opens, and Continue goes to Google Classroom.
+        self.assertEqual(self.client.get("/api/google-classroom/admin/").status_code, 200)
+        self.assertTrue(self.client.get("/api/google-classroom/open/")["Location"].startswith(
+            "https://classroom.google.com/c/aidl2"))
+
+    def test_policy_is_prefilled_and_one_click_starts_everything(self):
+        from api import admin_setup, aup_store, card_approval
+
+        self._sign_in(granted=ALL_SCOPES)
+        self.client.post("/api/google-classroom/admin/setup/", {"name": "Green Valley School", "students": "200"})
+        page = self.client.get("/api/google-classroom/admin/setup/policy/")
+        self.assertContains(page, 'value="the Principal"')
+        self.assertContains(page, 'value="Google Drive"')
+        self.assertContains(page, 'value="asha@school.edu"')
+        self.assertEqual(len(page.context["cards"]), 3)  # the Trial's 3 topics
+        self.assertFalse([c for c in page.context["cards"] if c["problems"]])
+        org = self._org()
+        self.assertFalse(admin_setup.started(org))
+
+        resp = self.client.post("/api/google-classroom/admin/setup/policy/", {
+            "action": "use", "speaker": "the Head Teacher", "storage": "Google Drive",
+            "report": "it@school.edu", "tools": "Google Gemini, NotebookLM"})
+        self.assertEqual(resp["Location"], "/api/google-classroom/admin/setup/policy/?saved=1")
+        org.refresh_from_db()
+        self.assertEqual(len(aup_store.cards(org)), 3)
+        self.assertTrue(card_approval.onboarding_ready(org))  # no approving by hand
+        self.assertTrue(admin_setup.started(org))  # no Start button
+        saved = self.client.get(resp["Location"])
+        self.assertContains(saved, "Your AI policy is in use")
+        self.assertContains(saved, "The programme has started")
+        self.assertContains(saved, "Enterprise covers your whole school")
+        self.assertNotContains(saved, "About how many students")  # this step only
+        done = self.client.get("/api/google-classroom/admin/setup/done/")
+        self.assertContains(done, "AIDL is ready for Green Valley School")
+        self.assertContains(done, "Programme started")
+        self.assertContains(done, "Enterprise covers your whole school")  # ~200 students on a 5-student Trial
+        self.assertContains(done, "Inviting everyone automatically is part of Enterprise")
+        # Classroom's setup summary says it's done.
+        self.assertIn("🎉 Setup done · 2 of 2", [m["title"] for m in self.fake.materials.values()])
+
+    def test_an_empty_answer_is_asked_for_and_nothing_is_approved(self):
+        from api import admin_setup, aup_store
+
+        self._sign_in(granted=ALL_SCOPES)
+        self.client.post("/api/google-classroom/admin/setup/", {"name": "Green Valley School", "students": "50"})
+        resp = self.client.post("/api/google-classroom/admin/setup/policy/", {
+            "action": "use", "speaker": "", "storage": "Google Drive", "report": "it@school.edu", "tools": "Gemini"})
+        self.assertContains(resp, "Please fix these first")
+        self.assertEqual(aup_store.cards(self._org()), {})
+        self.assertFalse(admin_setup.started(self._org()))
+
+    def test_enterprise_invites_the_students_of_the_other_classes(self):
+        from integrations.google_classroom.models import GoogleCredential, SchoolSetup
+
+        self._sign_in(granted=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        Organization.objects.update(plan="enterprise", seats_purchased=50)
+        GoogleCredential.objects.update(scopes=f"{ALL_SCOPES} https://www.googleapis.com/auth/classroom.rosters")
+        self.client.post("/api/google-classroom/admin/setup/", {"name": "Green Valley School", "students": "1000+"})
+        self.client.post("/api/google-classroom/admin/setup/policy/", {
+            "action": "use", "speaker": "the Principal", "storage": "Google Drive", "report": "it@school.edu",
+            "tools": "Google Gemini"})
+        invited = sorted(i["userId"] for i in self.fake.invitations if i["courseId"] == "aidl2")
+        self.assertTrue(invited)
+        self.assertEqual(SchoolSetup.objects.get().invited["invited"], len(invited))
+        done = self.client.get("/api/google-classroom/admin/setup/done/")
+        self.assertContains(done, f"{len(invited)} student")
+        self.assertNotContains(done, "Enterprise covers")  # no limit: no upsell
+
+    def test_without_an_aidl_class_the_steps_follow_each_other(self):
+        self._sign_in()  # no Classroom permissions: no AIDL class to go back to
+        resp = self.client.post("/api/google-classroom/admin/setup/", {"name": "Green Valley School", "students": "50"})
+        self.assertEqual(resp["Location"], "/api/google-classroom/admin/setup/policy/")
+
+    def test_done_and_policy_need_the_details_first(self):
+        self._sign_in(granted=ALL_SCOPES)
+        for url in ("/api/google-classroom/admin/setup/policy/", "/api/google-classroom/admin/setup/done/"):
+            self.assertEqual(self.client.get(url)["Location"], "/api/google-classroom/admin/setup/")
+
+    def test_learner_cannot_open_the_setup(self):
+        self._sign_in(granted=ALL_SCOPES)
+        self._sign_in(sub="222", email="ravi@school.edu", granted=ALL_SCOPES)
+        self.assertContains(self.client.get("/api/google-classroom/admin/setup/"), "Admins only", status_code=403)
+
+
+for _name in [n for n in dir(GoogleClassroomAidlClass) if n.startswith("test_")]:
+    setattr(GoogleClassroomSetup, _name, None)
