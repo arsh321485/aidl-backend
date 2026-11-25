@@ -238,9 +238,12 @@ def find_app_tab(org: Organization, token: str = "") -> str:
         return ""
     token = token or token_for(org)
     channel = channel_id(org)
-    if not tabs.has_tab(token, org.teams_team_id, channel, tabs.CUSTOM_TAB_ENTITY):
+    tab = tabs.find_tab(token, org.teams_team_id, channel, tabs.CUSTOM_TAB_ENTITY)
+    if tab is None:
         return ""
-    link = tabs.app_tab_deep_link(settings.TEAMS_APP_ID, team_id=org.teams_team_id, channel_id=channel,
+    # An app in the company's own catalog has its own id there; Teams links need that one.
+    app_id = ((tab.get("teamsApp") or {}).get("id") or "").strip() or settings.TEAMS_APP_ID
+    link = tabs.app_tab_deep_link(app_id, team_id=org.teams_team_id, channel_id=channel,
                                   tenant_id=org.ms_tenant_id)
     tabs.remove_tab(token, org.teams_team_id, channel, tabs.APP_TAB_ENTITY)
     update(org, teams_app_tab_url=link, teams_app_tab_channel=channel, teams_tab_url="", teams_tab_channel="")
@@ -312,6 +315,9 @@ def ensure_home(org: Organization) -> None:
         publish_home(org)
     else:
         refresh_home_link(org)
+    from . import teams_app_install
+
+    teams_app_install.run_if_due(org)  # waiting for a Teams admin's approval, or a retry
 
 
 # ---------- starting the programme, reminders ----------

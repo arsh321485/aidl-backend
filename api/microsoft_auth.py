@@ -87,11 +87,20 @@ def consume_oauth_state_with_payload(state: str):
     return enroll_as, payload, None
 
 
+def signin_scopes() -> list[str]:
+    """What sign-in asks for. With TEAMS_AUTO_INSTALL on, also the Teams app install
+    permissions (teams_app_install.py) — only once a tenant admin has consented to them
+    in Entra, or people who aren't tenant admins can no longer sign in."""
+    if not settings.TEAMS_AUTO_INSTALL:
+        return list(settings.MS_SCOPES)
+    return list(settings.MS_SCOPES) + [s for s in settings.TEAMS_INSTALL_SCOPES if s not in settings.MS_SCOPES]
+
+
 def build_auth_url(enroll_as: str, payload: str = "") -> dict:
     state = create_oauth_state(enroll_as, payload)
     app = _msal_app()
     auth_url = app.get_authorization_request_url(
-        scopes=settings.MS_SCOPES,
+        scopes=signin_scopes(),
         state=state,
         redirect_uri=settings.MS_REDIRECT_URI,
         prompt="select_account",
@@ -103,7 +112,7 @@ def exchange_code_for_token(code: str) -> dict:
     app = _msal_app()
     result = app.acquire_token_by_authorization_code(
         code=code,
-        scopes=settings.MS_SCOPES,
+        scopes=signin_scopes(),
         redirect_uri=settings.MS_REDIRECT_URI,
     )
     return result
@@ -689,7 +698,7 @@ def open_refresh_token(stored: str) -> str:
         return stored
 
 
-def refresh_graph_token(refresh_token: str) -> dict:
+def refresh_graph_token(refresh_token: str, scopes: list[str] | None = None) -> dict:
     """
     Mint a fresh Graph access token from a stored refresh token (requires the
     "offline_access" scope at original login) — used for backend-initiated
@@ -700,10 +709,10 @@ def refresh_graph_token(refresh_token: str) -> dict:
     if not refresh_token:
         return {"error": "missing_refresh_token"}
     app = _msal_app()
-    return app.acquire_token_by_refresh_token(refresh_token, scopes=settings.MS_SCOPES)
+    return app.acquire_token_by_refresh_token(refresh_token, scopes=scopes or settings.MS_SCOPES)
 
 
-def get_access_token_for_user(user) -> str:
+def get_access_token_for_user(user, scopes: list[str] | None = None) -> str:
     """Mint a fresh Graph access token from an AIDLUser's stored refresh
     token, for backend-initiated Graph calls that happen with no browser
     session open (invite emails, scheduled card sends, ...). Keeps the
@@ -713,7 +722,7 @@ def get_access_token_for_user(user) -> str:
     refresh_token = open_refresh_token(getattr(user, "ms_refresh_token", "") or "")
     if not refresh_token:
         return ""
-    token_result = refresh_graph_token(refresh_token)
+    token_result = refresh_graph_token(refresh_token, scopes)
     access_token = token_result.get("access_token") if isinstance(token_result, dict) else ""
     if not access_token:
         logger.warning(

@@ -438,6 +438,14 @@ def teams_callback(request):
                 logging.getLogger(__name__).warning("Teams home card not posted for org %s: %s", org.pk, welcome_card_error)
                 # The channel has nothing to open AIDL from: go to the Admin Center.
                 landing_url = f"{settings.BACKEND_URL}{reverse('teams-app-admin')}"
+            else:
+                # Install the AIDL Teams app + its channel tab (TEAMS_AUTO_INSTALL); the card
+                # keeps its current link until the tab is really there.
+                from . import teams_app_install
+                from .slack_modals import in_background
+
+                if teams_app_install.enabled(org):
+                    in_background(teams_app_install.run, org)
         tab_info = channel_info.get("channel_tabs") or {}
         channel_tabs_created = len(tab_info.get("tabs_created") or [])
 

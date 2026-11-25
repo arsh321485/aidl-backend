@@ -50,9 +50,10 @@ def _tab_content_url(tab_slug: str) -> str:
     return f"{_teams_tab_base_url()}/tabs/{tab_slug}/"
 
 
-def list_channel_tabs(access_token: str, team_id: str, channel_id: str) -> list:
+def list_channel_tabs(access_token: str, team_id: str, channel_id: str, *, with_app: bool = False) -> list:
     url = f"{GRAPH_BASE}/teams/{team_id}/channels/{channel_id}/tabs"
-    response = requests.get(url, headers=graph_headers(access_token), timeout=20)
+    params = {"$expand": "teamsApp"} if with_app else None
+    response = requests.get(url, headers=graph_headers(access_token), params=params, timeout=20)
     response.raise_for_status()
     return response.json().get("value") or []
 
@@ -341,15 +342,35 @@ def ensure_app_tab(access_token: str, *, team_id: str, channel_id: str, content_
 CUSTOM_TAB_ENTITY = "aidl_tab"
 
 
-def has_tab(access_token: str, team_id: str, channel_id: str, entity_id: str) -> bool:
+def find_tab(access_token: str, team_id: str, channel_id: str, entity_id: str) -> dict | None:
+    """The channel's tab with this entity id (with its teamsApp), or None."""
     if not access_token or not team_id or not channel_id:
-        return False
+        return None
     try:
-        tabs = list_channel_tabs(access_token, team_id, channel_id)
+        tabs = list_channel_tabs(access_token, team_id, channel_id, with_app=True)
     except Exception as exc:  # noqa: BLE001
         logger.warning("list channel tabs failed: %s", type(exc).__name__)
-        return False
-    return any((tab.get("configuration") or {}).get("entityId") == entity_id for tab in tabs)
+        return None
+    return next((tab for tab in tabs if (tab.get("configuration") or {}).get("entityId") == entity_id), None)
+
+
+def add_app_tab(access_token: str, *, team_id: str, channel_id: str, catalog_app_id: str, content_url: str) -> dict:
+    """Add the AIDL app's channel tab (the app must already be installed in the team).
+    {"ok": bool, "status": HTTP status}."""
+    payload = {
+        "displayName": APP_TAB_NAME,
+        "teamsApp@odata.bind": f"https://graph.microsoft.com/v1.0/appCatalogs/teamsApps/{catalog_app_id}",
+        "configuration": {"entityId": CUSTOM_TAB_ENTITY, "contentUrl": content_url, "websiteUrl": content_url},
+    }
+    try:
+        resp = requests.post(f"{GRAPH_BASE}/teams/{team_id}/channels/{channel_id}/tabs",
+                             headers=graph_headers(access_token), json=payload, timeout=30)
+    except requests.RequestException as exc:
+        logger.warning("add AIDL app tab failed: %s", type(exc).__name__)
+        return {"ok": False, "status": 0}
+    if resp.status_code >= 400:
+        logger.warning("add AIDL app tab HTTP %s: %s", resp.status_code, (resp.text or "")[:300])
+    return {"ok": resp.status_code < 400, "status": resp.status_code}
 
 
 def remove_tab(access_token: str, team_id: str, channel_id: str, entity_id: str) -> None:

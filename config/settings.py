@@ -120,6 +120,17 @@ MS_SCOPES = [
     for s in os.getenv("MS_SCOPES", _DEFAULT_MS_SCOPES).split(",")
     if s.strip() and s.strip().lower() not in ("openid", "profile", "offline_access")
 ]
+# Install the AIDL Teams app (teams/aidl-app-package.zip) in each organisation's AIDL team
+# and add its channel tab after an admin signs in (api/teams_app_install.py). Turn on only
+# after these delegated permissions are added in Entra and admin consent is granted: sign-in
+# then asks for them too. Normal Graph calls keep using MS_SCOPES.
+TEAMS_AUTO_INSTALL = os.getenv("TEAMS_AUTO_INSTALL", "False").lower() in ("1", "true", "yes")
+TEAMS_INSTALL_SCOPES = [
+    "AppCatalog.ReadWrite.All",               # publish to the company's app catalog (Teams / Global admins only)
+    "AppCatalog.Submit",                      # anyone else: submit it for their Teams admin to approve
+    "TeamsAppInstallation.ReadWriteForTeam",  # install it in the AIDL team
+    "TeamsTab.Create",                        # add its tab to the aidl dashboard channel
+]
 
 # AIDL Microsoft Team + channel (auto-created on login when possible)
 # Optional override: set MS_AIDL_TEAM_ID to use an existing Team instead of creating "AIDL"

@@ -465,6 +465,25 @@ def request_app(request, user, org):
 
 # ---------- Admin Center ----------
 
+def _teams_app_notice(org: Organization) -> str:
+    """What the admin should know about installing the AIDL Teams app (teams_app_install)."""
+    from . import teams_app_install
+
+    if not teams_app_install.enabled(org):
+        return ""
+    return {
+        "submitted": "AIDL is waiting for your Teams admin to approve the AIDL app (Teams admin center → Teams apps → "
+                     "Manage apps). Once approved, AIDL adds its tab to your channel. Until then, Open AIDL opens "
+                     "these pages.",
+        "rejected": "Your Teams admin rejected the AIDL app, so Open AIDL opens these pages instead of a tab in your "
+                    "channel. Ask them to approve it, then sign in again.",
+        "needs_consent": "To add the AIDL tab to your channel, a Microsoft admin in your company needs to approve "
+                         "AIDL's permissions, then sign in again.",
+        "blocked": "Microsoft Teams didn't let AIDL add its app to your team (your company may have turned off "
+                   "custom apps). Open AIDL opens these pages instead.",
+    }.get(teams_app_install.progress(org).get("status", ""), "")
+
+
 @_admin_page
 def admin_home(request, user, org):
     st = admin_setup.summary(org)
@@ -474,6 +493,7 @@ def admin_home(request, user, org):
                    rest=range(5 - st["done_count"]), lost=admin_setup.state(org).get("teams_login_lost"),
                    no_team=not org.teams_team_id,
                    no_home_card=bool(org.teams_team_id and not org.teams_welcome_message_id),
+                   teams_app=_teams_app_notice(org),
                    tz_known=admin_setup.state(org).get("tz_offset_min") is not None,
                    policy_days=[{**c, "day": _day(c.get("send_on"))} for c in st["policy"]],
                    pending_apps=AppRequest.objects.filter(organization_id=str(org.pk),

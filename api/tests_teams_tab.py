@@ -46,6 +46,7 @@ class _Posts:
 
 
 APP_ID = "aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2"
+APP_TAB = {"id": "t9", "configuration": {"entityId": "aidl_tab"}, "teamsApp": {"id": APP_ID}}
 
 
 @override_settings(TEAMS_CHANNEL_TAB=True, TEAMS_APP_ID=APP_ID)
@@ -55,7 +56,7 @@ class HomeCardOpensTheTabTests(_Posts, TestCase):
 
     def _patch(self, has_tab):
         for target, kwargs in (("api.teams_channel_tabs.ensure_app_tab", {"return_value": TAB}),
-                               ("api.teams_channel_tabs.has_tab", {"return_value": has_tab}),
+                               ("api.teams_channel_tabs.find_tab", {"return_value": APP_TAB if has_tab else None}),
                                ("api.teams_channel_tabs.remove_tab", {})):
             p = patch(target, **kwargs)
             setattr(self, target.rsplit(".", 1)[1], p.start())
@@ -82,7 +83,7 @@ class HomeCardOpensTheTabTests(_Posts, TestCase):
         self._patch(True)
         teams_channel.publish_home(self.org, "tok")
         teams_channel.publish_home(self.org, "tok")
-        self.assertEqual(self.has_tab.call_count, 1)
+        self.assertEqual(self.find_tab.call_count, 1)
 
     def test_a_card_is_posted_again_once_the_app_tab_turns_up(self):
         self.org.teams_welcome_message_id = "old-card"
@@ -90,7 +91,7 @@ class HomeCardOpensTheTabTests(_Posts, TestCase):
         self._patch(False)
         teams_channel.ensure_home(self.org)
         self.assertEqual(self.posts, [])
-        self.has_tab.return_value = True
+        self.find_tab.return_value = APP_TAB
         teams_channel.ensure_home(self.org)  # checked an hour at most
         self.assertEqual(self.posts, [])
         admin_setup.update(self.org, teams_app_tab_checked="2000-01-01T00:00:00+00:00")
@@ -110,7 +111,7 @@ class HomeCardOpensTheTabTests(_Posts, TestCase):
     def test_switched_off(self):
         self._patch(True)
         teams_channel.publish_home(self.org, "tok")
-        self.has_tab.assert_not_called()
+        self.find_tab.assert_not_called()
         self.ensure_app_tab.assert_not_called()
         self.assertEqual(self._button(), teams_channel.app_url())
 
