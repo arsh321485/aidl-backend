@@ -1,0 +1,23 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Signed in · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>You're signed in</h1>
+  <p style="margin-top:8px">Going back to Teams… If this window stays open, close it and go back to the AIDL tab.</p>
+</section>
+{% endblock %}
+{% block script %}
+<script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js"></script>
+<script>
+(function () {
+  var code = "{{ code|escapejs }}";
+  function close() { try { window.close(); } catch (e) {} }
+  if (!window.microsoftTeams) return close();
+  var timer = setTimeout(close, 3000);  // opened without Teams: the tab notices by itself
+  microsoftTeams.app.initialize().then(function () {
+    clearTimeout(timer);
+    microsoftTeams.authentication.notifySuccess(code);
+  }, close);
+})();
+</script>
+{% endblock %}

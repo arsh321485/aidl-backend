@@ -195,16 +195,46 @@ def email(user: AIDLUser, subject: str, text: str, path: str = "") -> bool:
 
 # ---------- the channel's home card ----------
 
+def tab_url(org: Organization) -> str:
+    """The channel's AIDL tab link, if it was added to the channel the card is in."""
+    from .admin_setup import state
+
+    s = state(org)
+    return s.get("teams_tab_url", "") if s.get("teams_tab_channel") == channel_id(org) else ""
+
+
+def ensure_tab(org: Organization, token: str = "") -> str:
+    """Add the "AIDL" tab to the channel (teams_channel_tabs.ensure_app_tab) and
+    remember its link. "" = no tab (turned off, or Microsoft refused): the card's
+    button then opens AIDL's pages directly, as before."""
+    from .admin_setup import update
+    from .teams_channel_tabs import ensure_app_tab
+
+    if not settings.TEAMS_CHANNEL_TAB:
+        return ""
+    known = tab_url(org)
+    if known:
+        return known
+    channel = channel_id(org)
+    url = ensure_app_tab(token or token_for(org), team_id=org.teams_team_id, channel_id=channel,
+                         content_url=app_url("tab/"))
+    if url:
+        update(org, teams_tab_url=url, teams_tab_channel=channel)
+    return url
+
+
 def publish_home(org: Organization, token: str = "", settle: bool = False) -> dict:
     """The one card everyone opens AIDL from. Graph can't edit a card, so post the
     new one, then remove the old one. `settle`: the team may have been made seconds
-    ago, and Microsoft refuses posts until it's ready, so wait and try again."""
+    ago, and Microsoft refuses posts until it's ready, so wait and try again.
+    Open AIDL goes to the channel's AIDL tab, so AIDL opens inside Teams."""
     token = token or token_for(org)
     old = org.teams_welcome_message_id
     for wait in HOME_SETTLE_SECONDS if settle else (None,):
+        link = ensure_tab(org, token) or app_url()
         result = post(org, "AI Driving Licence", f"{org.name} runs its AI Driving Licence programme here. Open AIDL "
                       "to see your next card, or to run the programme if you're an admin.",
-                      button=("Open AIDL", app_url()), token=token)
+                      button=("Open AIDL", link), token=token)
         if wait is None or result.get("error") not in ("graph_http_403", "graph_http_404"):
             break
         time.sleep(wait)
@@ -219,8 +249,13 @@ def publish_home(org: Organization, token: str = "", settle: bool = False) -> di
 
 
 def ensure_home(org: Organization) -> None:
-    """Post the home card if sign-in couldn't: without it the channel is empty."""
-    if org.teams_team_id and channel_id(org) and not org.teams_welcome_message_id:
+    """Post the home card if sign-in couldn't: without it the channel is empty. A card
+    posted before the channel had its AIDL tab is posted again, pointing at the tab."""
+    if not org.teams_team_id or not channel_id(org):
+        return
+    if not org.teams_welcome_message_id:
+        publish_home(org)
+    elif settings.TEAMS_CHANNEL_TAB and not tab_url(org) and ensure_tab(org):
         publish_home(org)
 
 

@@ -307,6 +307,35 @@ def ensure_aidl_channel_tabs(
     }
 
 
+# The one "AIDL" tab the Open AIDL button jumps to. Its entity id must not start
+# with "aidl-": ensure_aidl_channel_tabs removes those on every sign-in.
+APP_TAB_ENTITY = "aidl_app"
+APP_TAB_NAME = "AIDL"
+
+
+def ensure_app_tab(access_token: str, *, team_id: str, channel_id: str, content_url: str) -> str:
+    """Add the AIDL tab to the channel (once) and return its Teams link (webUrl),
+    or "" if Microsoft refused. Opening that link shows AIDL inside the channel."""
+    if not access_token or not team_id or not channel_id:
+        return ""
+    try:
+        tabs = list_channel_tabs(access_token, team_id, channel_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("list channel tabs failed: %s", type(exc).__name__)
+        return ""
+    for tab in tabs:
+        config = tab.get("configuration") or {}
+        if (config.get("entityId") or "") != APP_TAB_ENTITY:
+            continue
+        if (config.get("contentUrl") or "") == content_url and tab.get("webUrl"):
+            return tab["webUrl"]
+        delete_channel_tab(access_token, team_id, channel_id, tab.get("id") or "")  # points somewhere old
+    created, _error = create_channel_website_tab(access_token, team_id=team_id, channel_id=channel_id,
+                                                 entity_id=APP_TAB_ENTITY, display_name=APP_TAB_NAME,
+                                                 content_url=content_url)
+    return ((created or {}).get("webUrl") or "").strip()
+
+
 def build_channel_tab_deep_link(
     *,
     entity_id: str,

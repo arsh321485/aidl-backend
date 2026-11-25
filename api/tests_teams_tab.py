@@ -1,0 +1,194 @@
+"""Open AIDL opens the channel's AIDL tab, inside Teams (not a popup)."""
+
+import json
+from unittest.mock import patch
+
+import jwt
+from django.conf import settings
+from django.test import TestCase, override_settings
+from rest_framework.test import APIClient
+
+from . import admin_setup, teams_channel, teams_channel_tabs
+from .models import AIDLUser
+from .teams_portal import COOKIE, _handoff_code, _session_token
+from .tests import make_org, make_user
+
+TAB = "https://teams.microsoft.com/l/entity/com.microsoft.teamspace.tab.web/aidl_app?context=x"
+
+
+class _Posts:
+    def setUp(self):
+        self.org = make_org(name="Secureitlab", teams_team_id="team-1", ms_tenant_id="t1",
+                            teams_welcome_channel_id="chan-1")
+        self.admin = make_user(self.org, full_name="Asha Admin", ms_refresh_token="x")
+        self.posts = []
+
+        def fake_post(url, headers=None, json=None, timeout=None, **kw):
+            self.posts.append(json)
+
+            class R:
+                status_code, content, headers = 201, b"{}", {}
+
+                def json(self_inner):
+                    return {"id": f"msg-{len(self.posts)}"}
+            return R()
+
+        for target, kwargs in (("api.teams_channel.token_for", {"return_value": "tok"}),
+                               ("api.teams_channel.requests.post", {"side_effect": fake_post}),
+                               ("api.teams_messaging.delete_channel_message", {"return_value": True})):
+            p = patch(target, **kwargs)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _button(self, n=-1) -> str:
+        card = json.loads(self.posts[n]["attachments"][0]["content"])
+        return card["actions"][0]["url"]
+
+
+@override_settings(TEAMS_CHANNEL_TAB=True)
+class HomeCardOpensTheTabTests(_Posts, TestCase):
+    def test_open_aidl_goes_to_the_channel_tab(self):
+        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB) as make:
+            teams_channel.publish_home(self.org, "tok")
+        self.assertEqual(self._button(), TAB)
+        self.assertEqual(make.call_args.kwargs["content_url"], teams_channel.app_url("tab/"))
+        s = admin_setup.state(self.org)
+        self.assertEqual((s["teams_tab_url"], s["teams_tab_channel"]), (TAB, "chan-1"))
+
+    def test_the_tab_is_made_once(self):
+        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB) as make:
+            teams_channel.publish_home(self.org, "tok")
+            teams_channel.publish_home(self.org, "tok")
+        self.assertEqual(make.call_count, 1)
+        self.assertEqual(self._button(), TAB)
+
+    def test_no_tab_keeps_the_old_link(self):
+        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=""):
+            teams_channel.publish_home(self.org, "tok")
+        self.assertEqual(self._button(), teams_channel.app_url())
+        self.assertNotIn("teams_tab_url", admin_setup.state(self.org))
+
+    def test_a_new_channel_gets_its_own_tab(self):
+        admin_setup.update(self.org, teams_tab_url="https://old", teams_tab_channel="chan-0")
+        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB) as make:
+            teams_channel.publish_home(self.org, "tok")
+        make.assert_called_once()
+        self.assertEqual(self._button(), TAB)
+
+    def test_a_card_posted_before_the_tab_is_posted_again_once(self):
+        self.org.teams_welcome_message_id = "old-card"
+        self.org.save(update_fields=["teams_welcome_message_id"])
+        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB):
+            teams_channel.ensure_home(self.org)
+            self.org.refresh_from_db()
+            teams_channel.ensure_home(self.org)
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(self._button(), TAB)
+
+    @override_settings(TEAMS_CHANNEL_TAB=False)
+    def test_switched_off(self):
+        with patch("api.teams_channel_tabs.ensure_app_tab") as make:
+            teams_channel.publish_home(self.org, "tok")
+        make.assert_not_called()
+        self.assertEqual(self._button(), teams_channel.app_url())
+
+
+class EnsureAppTabTests(TestCase):
+    URL = "https://aidl-backend.onrender.com/api/teams/app/tab/"
+
+    def _tab(self, content_url, web="https://teams/old"):
+        return {"id": "tab-1", "webUrl": web,
+                "configuration": {"entityId": teams_channel_tabs.APP_TAB_ENTITY, "contentUrl": content_url}}
+
+    def test_sign_in_cleanup_never_removes_it(self):
+        self.assertFalse(teams_channel_tabs.APP_TAB_ENTITY.startswith("aidl-"))
+
+    def test_an_existing_tab_is_reused(self):
+        with patch.object(teams_channel_tabs, "list_channel_tabs", return_value=[self._tab(self.URL)]), \
+                patch.object(teams_channel_tabs, "create_channel_website_tab") as create:
+            url = teams_channel_tabs.ensure_app_tab("tok", team_id="T", channel_id="C", content_url=self.URL)
+        self.assertEqual(url, "https://teams/old")
+        create.assert_not_called()
+
+    def test_a_tab_pointing_elsewhere_is_replaced(self):
+        with patch.object(teams_channel_tabs, "list_channel_tabs", return_value=[self._tab("https://old/")]), \
+                patch.object(teams_channel_tabs, "delete_channel_tab", return_value=True) as delete, \
+                patch.object(teams_channel_tabs, "create_channel_website_tab",
+                             return_value=({"webUrl": TAB}, None)) as create:
+            url = teams_channel_tabs.ensure_app_tab("tok", team_id="T", channel_id="C", content_url=self.URL)
+        self.assertEqual(url, TAB)
+        delete.assert_called_once()
+        kw = create.call_args.kwargs
+        self.assertEqual((kw["entity_id"], kw["display_name"], kw["content_url"]), ("aidl_app", "AIDL", self.URL))
+
+    def test_microsoft_refusing_gives_no_link(self):
+        with patch.object(teams_channel_tabs, "list_channel_tabs", side_effect=RuntimeError("403")):
+            self.assertEqual(teams_channel_tabs.ensure_app_tab("tok", team_id="T", channel_id="C",
+                                                               content_url=self.URL), "")
+
+
+@override_settings(DEBUG=False)
+class TabPagesTests(TestCase):
+    def setUp(self):
+        self.org = make_org(name="Secureitlab", teams_team_id="team-1", ms_tenant_id="t1",
+                            teams_welcome_channel_id="chan-1")
+        self.admin = make_user(self.org, full_name="Asha Admin")
+        p = patch("api.teams_channel.dispatch_if_due")
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_teams_may_show_the_pages_in_a_frame(self):
+        resp = APIClient().get("/api/teams/app/tab/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("X-Frame-Options", resp.headers)
+        self.assertIn("frame-ancestors", resp["Content-Security-Policy"])
+        self.assertIn("https://teams.microsoft.com", resp["Content-Security-Policy"])
+
+    def test_other_pages_still_refuse_frames(self):
+        resp = APIClient().get("/api/")
+        self.assertEqual(resp.headers.get("X-Frame-Options"), "DENY")
+        self.assertNotIn("Content-Security-Policy", resp.headers)
+
+    def test_signed_out_tab_shows_sign_in(self):
+        resp = APIClient().get("/api/teams/app/tab/")
+        self.assertContains(resp, "Sign in with Microsoft")
+        self.assertEqual(resp.context["login_url"], "/api/teams/app/login/?next=%2Fapi%2Fteams%2Fapp%2Ftab%2Fdone%2F")
+
+    def test_signed_in_tab_goes_to_your_page(self):
+        client = APIClient()
+        client.cookies[COOKIE] = _session_token(self.admin)
+        resp = client.get("/api/teams/app/tab/")
+        self.assertRedirects(resp, "/api/teams/app/", fetch_redirect_response=False)
+
+    def test_signed_out_page_in_the_tab_never_loads_microsoft_in_the_frame(self):
+        resp = APIClient().get("/api/teams/app/admin/", HTTP_SEC_FETCH_DEST="iframe")
+        self.assertRedirects(resp, "/api/teams/app/tab/", fetch_redirect_response=False)
+        resp = APIClient().get("/api/teams/app/admin/")  # a normal window still goes to Microsoft
+        self.assertIn("/api/teams/app/login/", resp["Location"])
+
+    def test_sign_in_window_hands_the_tab_a_code(self):
+        client = APIClient()
+        client.cookies[COOKIE] = _session_token(self.admin)
+        resp = client.get("/api/teams/app/tab/done/")
+        self.assertContains(resp, "notifySuccess")
+        code = resp.context["code"]
+        self.assertEqual(jwt.decode(code, settings.JWT_SECRET, algorithms=["HS256"])["type"], "teams_tab_handoff")
+
+    def test_the_code_signs_the_tab_in_with_a_cookie_teams_frames_can_use(self):
+        resp = APIClient().post("/api/teams/app/tab/session/", {"code": _handoff_code(self.admin)})
+        self.assertEqual(resp.status_code, 200)
+        cookie = resp.cookies[COOKIE]
+        self.assertEqual((cookie["samesite"], bool(cookie["secure"]), bool(cookie["httponly"])), ("None", True, True))
+        data = jwt.decode(cookie.value, settings.JWT_SECRET, algorithms=["HS256"])
+        self.assertEqual((data["type"], data["sub"]), ("teams_app", str(self.admin.pk)))
+
+    def test_only_a_handoff_code_works(self):
+        for code in ("", "junk", _session_token(self.admin)):
+            resp = APIClient().post("/api/teams/app/tab/session/", {"code": code})
+            self.assertEqual(resp.status_code, 400)
+            self.assertNotIn(COOKIE, resp.cookies)
+
+    def test_a_removed_person_cannot_use_a_code(self):
+        code = _handoff_code(self.admin)
+        AIDLUser.objects.filter(pk=self.admin.pk).update(is_active=False)
+        self.assertEqual(APIClient().post("/api/teams/app/tab/session/", {"code": code}).status_code, 400)

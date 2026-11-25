@@ -82,6 +82,9 @@ SLACK_REPLY_SYNC = False
 CARD_IMAGE_PREDRAW = os.getenv("CARD_IMAGE_PREDRAW", "True").lower() == "true" and "test" not in sys.argv[1:2]
 # Remember the master admin for a few seconds (slack_onboarding.primary_admin). Off in tests.
 PRIMARY_ADMIN_CACHE = "test" not in sys.argv[1:2]
+# Add an "AIDL" tab to the Teams channel; the home card's Open AIDL button opens it
+# (teams_channel.ensure_tab). Off in tests (no Graph calls).
+TEAMS_CHANNEL_TAB = os.getenv("TEAMS_CHANNEL_TAB", "True").lower() == "true" and "test" not in sys.argv[1:2]
 
 # Default = production Render callback (override with localhost in local .env).
 _DEFAULT_MS_REDIRECT_URI = (
@@ -307,7 +310,13 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "api.teams_frame.TeamsFrameMiddleware",  # /api/teams/app/ may be shown in a Teams channel tab
 ]
+
+# Inside a Teams tab AIDL's pages are a frame on another site, so the browser only sends
+# their cookies (sign-in, CSRF) when they are SameSite=None; Secure.
+CSRF_COOKIE_SAMESITE = "Lax" if DEBUG else "None"
+CSRF_COOKIE_SECURE = not DEBUG
 
 ROOT_URLCONF = "config.urls"
 

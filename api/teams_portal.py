@@ -56,9 +56,15 @@ def _session_token(user: AIDLUser) -> str:
                       settings.JWT_SECRET, algorithm="HS256")
 
 
+def _samesite() -> str:
+    # In the channel's AIDL tab these pages are a frame inside Teams: only a
+    # SameSite=None (Secure) cookie is sent there. Local http keeps Lax.
+    return "Lax" if settings.DEBUG else "None"
+
+
 def set_session(response, user: AIDLUser):
     response.set_cookie(COOKIE, _session_token(user), max_age=SESSION_DAYS * 86400, httponly=True,
-                        secure=not settings.DEBUG, samesite="Lax", path="/api/teams/app/")
+                        secure=not settings.DEBUG, samesite=_samesite(), path="/api/teams/app/")
     return response
 
 
@@ -89,6 +95,8 @@ def login(request):
 
     if not microsoft_configured():
         return _message(request, "Not available yet", "Microsoft sign-in isn't set up. Please tell your AIDL admin.", 503)
+    if request.headers.get("Sec-Fetch-Dest") == "iframe":
+        return redirect("teams-app-tab")
     data = build_auth_url("individual", "app:" + _safe_next(request.GET.get("next", "")))
     return HttpResponseRedirect(data["auth_url"])
 
@@ -97,13 +105,65 @@ def login(request):
 @require_POST
 def logout(request):
     response = redirect("teams-app-signed-out")
-    response.delete_cookie(COOKIE, path="/api/teams/app/")
+    response.delete_cookie(COOKIE, path="/api/teams/app/", samesite=_samesite())
     return response
 
 
 @never_cache
 def signed_out(request):
     return _message(request, "You're signed out", "Open AIDL from your Teams channel to sign in again.")
+
+
+# ---------- the channel's AIDL tab ----------
+# Microsoft's sign-in page refuses to open inside a frame, so the tab never sends
+# you there itself: "Sign in" opens it in a Teams sign-in window
+# (microsoftTeams.authentication.authenticate). That window ends on tab_done,
+# which hands the tab a one-time code; tab_session turns it into the tab's cookie.
+
+HANDOFF_SECONDS = 120
+
+
+def _handoff_code(user: AIDLUser) -> str:
+    now = datetime.now(dt_timezone.utc)
+    return jwt.encode({"sub": str(user.pk), "type": "teams_tab_handoff", "iat": now,
+                       "exp": now + timedelta(seconds=HANDOFF_SECONDS)}, settings.JWT_SECRET, algorithm="HS256")
+
+
+@never_cache
+def tab(request):
+    """What the AIDL tab shows: your page if you're signed in, else a Sign in button."""
+    if _signed_in(request) is not None:
+        return redirect("teams-app")
+    login_url = f"{reverse('teams-app-login')}?next={quote(reverse('teams-app-tab-done'), safe='')}"
+    return render(request, "teams_app/tab.html", {"login_url": login_url, "user": None})
+
+
+@never_cache
+def tab_check(request):
+    return JsonResponse({"signed_in": _signed_in(request) is not None})
+
+
+@never_cache
+def tab_done(request):
+    """The end of sign-in in the Teams sign-in window."""
+    user = _signed_in(request)
+    if user is None:
+        return redirect(f"{reverse('teams-app-login')}?next={quote(request.path, safe='')}")
+    return render(request, "teams_app/tab_done.html", {"code": _handoff_code(user), "user": None})
+
+
+@never_cache
+@require_POST
+def tab_session(request):
+    """The tab's own sign-in cookie, from the sign-in window's one-time code."""
+    try:
+        data = jwt.decode(request.POST.get("code", ""), settings.JWT_SECRET, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return JsonResponse({"ok": False}, status=400)
+    user = AIDLUser.objects.filter(pk=data.get("sub"), is_active=True).first()
+    if data.get("type") != "teams_tab_handoff" or user is None:
+        return JsonResponse({"ok": False}, status=400)
+    return set_session(JsonResponse({"ok": True, "next": reverse("teams-app")}), user)
 
 
 def finish_login(request, token_result: dict, profile: dict, next_url: str):
@@ -147,6 +207,8 @@ def _page(view):
     def wrapper(request, *args, **kwargs):
         user = _signed_in(request)
         if user is None:
+            if request.headers.get("Sec-Fetch-Dest") == "iframe":  # in the Teams tab: Microsoft can't load in a frame
+                return redirect("teams-app-tab")
             return redirect(f"{reverse('teams-app-login')}?next={quote(request.get_full_path(), safe='')}")
         org = get_organization_for_user(user)
         if not teams_channel.is_teams(org):

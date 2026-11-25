@@ -1,0 +1,63 @@
+{% extends "teams_app/base.html" %}
+{% block title %}AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>AI Driving Licence</h1>
+  <p style="margin-top:8px">Sign in with your work Microsoft account to see your next card, or to run the programme if you're an admin.</p>
+  <form id="handoff" method="post" action="{% url 'teams-app-tab-session' %}">{% csrf_token %}<input type="hidden" name="code"></form>
+  <div class="row" style="margin-top:12px">
+    <button type="button" class="btn go" id="signin">Sign in with Microsoft</button>
+  </div>
+  <p class="muted" id="status" role="status" style="margin-top:10px"></p>
+</section>
+{% endblock %}
+{% block script %}
+<script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js"></script>
+<script>
+(function () {
+  var loginUrl = "{{ login_url|escapejs }}";
+  var status = document.getElementById("status");
+  var inFrame = window.top !== window;
+  // In a Teams tab the SDK answers quickly; elsewhere it never does.
+  var teams = new Promise(function (resolve) {
+    if (!inFrame || !window.microsoftTeams) return resolve(false);
+    var timer = setTimeout(function () { resolve(false); }, 3000);
+    microsoftTeams.app.initialize().then(function () { clearTimeout(timer); resolve(true); },
+                                         function () { clearTimeout(timer); resolve(false); });
+  });
+
+  function useCode(code) {
+    var form = document.getElementById("handoff");
+    form.code.value = code;
+    return fetch(form.action, {method: "POST", body: new FormData(form), credentials: "same-origin"})
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (!d.ok) throw new Error("refused"); location.href = d.next; });
+  }
+
+  function waitForSignIn() {  // sign-in in a separate window, without the Teams SDK
+    var tries = 0;
+    var timer = setInterval(function () {
+      if (++tries > 150) { clearInterval(timer); return; }
+      fetch("{% url 'teams-app-tab-check' %}", {credentials: "same-origin"})
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d.signed_in) { clearInterval(timer); location.reload(); } });
+    }, 2000);
+  }
+
+  document.getElementById("signin").addEventListener("click", function () {
+    if (!inFrame) { location.href = loginUrl; return; }
+    status.textContent = "Opening Microsoft sign-in…";
+    teams.then(function (ok) {
+      if (ok) {
+        return microsoftTeams.authentication.authenticate({url: location.origin + loginUrl, width: 600, height: 640})
+          .then(useCode)
+          .catch(function () { status.textContent = "Sign-in didn't finish. Press Sign in to try again."; });
+      }
+      window.open(loginUrl, "aidl_signin", "width=600,height=640");
+      status.textContent = "Finish signing in in the new window. This tab opens AIDL when you're done.";
+      waitForSignIn();
+    });
+  });
+})();
+</script>
+{% endblock %}
