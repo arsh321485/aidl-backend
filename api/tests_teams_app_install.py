@@ -28,6 +28,7 @@ class FakeGraph:
         self.cards: list[dict] = []
         self.calls: list[tuple[str, str]] = []
         self.install_status = 201
+        self.old_app = False  # the installed copy predates the channel tab (no tab support)
         self.tab_failures = 0  # answer the first n tab requests with 400 (app not ready yet)
 
     class R:
@@ -50,13 +51,24 @@ class FakeGraph:
         if url.endswith("/appCatalogs/teamsApps"):
             return self.R(200, {"value": self.catalog})
         if url.endswith(f"/teams/{TEAM}/installedApps"):
-            return self.R(200, {"value": [{"teamsApp": {"id": i}} for i in self.installed]})
+            return self.R(200, {"value": [{"id": "inst-" + i, "teamsApp": {"id": i},
+                                           "teamsAppDefinition": {"version": "1.0.0" if self.old_app else "2.0.0"}}
+                                          for i in self.installed]})
         if url.endswith(f"/channels/{CHANNEL}/tabs"):
             return self.R(200, {"value": self.tabs})
         return self.R(404)
 
     def post(self, url, headers=None, json=None, data=None, timeout=None, **kw):
         self.calls.append(("POST", url))
+        if url.endswith("/appDefinitions"):
+            if "requiresReview=true" not in url and not self.teams_admin:
+                return self.R(403, {"error": {"code": "Forbidden"}})
+            if "requiresReview=true" not in url:
+                self.catalog[0]["appDefinitions"].append({"publishingState": "published", "version": "2.0.0"})
+            return self.R(201)
+        if url.endswith("/upgrade"):
+            self.old_app = False
+            return self.R(204)
         if "/appCatalogs/teamsApps" in url:
             review = "requiresReview=true" in url
             if not review and not self.teams_admin:
@@ -74,6 +86,8 @@ class FakeGraph:
             app = json["teamsApp@odata.bind"].rsplit("/", 1)[1]
             if app not in self.installed:
                 return self.R(404)
+            if self.old_app:
+                return self.R(400, {"error": {"code": "BadRequest", "message": "The specified app does not support tabs."}})
             if self.tab_failures > 0:
                 self.tab_failures -= 1
                 return self.R(400, {"error": {"code": "BadRequest", "message": "app not ready"}})
@@ -183,6 +197,30 @@ class TeamsAppInstallTests(TestCase):
         self.graph.tab_failures = 0
         self.assertEqual(teams_app_install.run(self.org), "installed")
         self.assertEqual((len(self.graph.catalog), len(self.graph.installed)), (1, 1))
+
+    def test_an_old_copy_in_the_catalog_is_updated_and_the_install_upgraded(self):
+        self.graph.catalog.append({"id": CATALOG_ID, "externalId": APP_ID,
+                                   "appDefinitions": [{"publishingState": "published", "version": "1.0.0"}]})
+        self.graph.installed.append(CATALOG_ID)
+        self.graph.old_app = True
+        self.assertEqual(teams_app_install.run(self.org), "installed")
+        self.assertEqual(self.graph.writes("/appDefinitions"), 1)
+        self.assertEqual(self.graph.writes("/upgrade"), 1)
+        self.assertEqual([t["configuration"]["entityId"] for t in self.graph.tabs], ["aidl_tab"])
+
+    def test_an_up_to_date_catalog_is_left_alone(self):
+        self.graph.catalog.append({"id": CATALOG_ID, "externalId": APP_ID,
+                                   "appDefinitions": [{"publishingState": "published", "version": "2.0.0"}]})
+        self.graph.installed.append(CATALOG_ID)
+        teams_app_install.run(self.org)
+        self.assertEqual(self.graph.writes("/appDefinitions") + self.graph.writes("/upgrade"), 0)
+
+    def test_a_non_admin_submits_the_new_version_for_approval(self):
+        self.graph.teams_admin = False
+        self.graph.catalog.append({"id": CATALOG_ID, "externalId": APP_ID,
+                                   "appDefinitions": [{"publishingState": "published", "version": "1.0.0"}]})
+        self.assertEqual(teams_app_install.run(self.org), "submitted")
+        self.assertEqual(self.graph.writes("/appDefinitions"), 2)
 
     # ---------- someone without Teams admin rights signs in ----------
 

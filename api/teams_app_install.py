@@ -27,8 +27,10 @@ Progress: setup_state["teams_app"] = {status, catalog_id, error, at}, status one
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -138,6 +140,64 @@ def publish(token: str) -> tuple[str, dict | None]:
         if resp.status_code not in (401, 403):
             return f"error:{last}", None
     return f"forbidden:{last}", None
+
+
+def package_version() -> str:
+    """The version in teams/aidl-app-package.zip's manifest."""
+    with zipfile.ZipFile(PACKAGE) as z:
+        return json.loads(z.read("manifest.json").decode("utf-8", "replace").lstrip("﻿"))["version"]
+
+
+def _vkey(version) -> tuple:
+    return tuple(int(p) if p.isdigit() else 0 for p in str(version or "0").split("."))
+
+
+def outdated(app: dict) -> bool:
+    """The company's catalog holds an older AIDL than ours (e.g. uploaded by hand before
+    the channel tab existed): Microsoft then says "the app does not support tabs"."""
+    versions = [d.get("version") for d in app.get("appDefinitions") or [] if d.get("version")]
+    return bool(versions) and max(_vkey(v) for v in versions) < _vkey(package_version())
+
+
+def publish_update(token: str, catalog_id: str) -> str:
+    """Add this package as a new version of the catalog app: "published" | "submitted" |
+    "exists" | "forbidden:<..>" | "error:<..>" (same ways as publish)."""
+    data = PACKAGE.read_bytes()
+    headers = {**graph_headers(token), "Content-Type": "application/zip"}
+    url = f"{GRAPH_BASE}/appCatalogs/teamsApps/{catalog_id}/appDefinitions"
+    last = ""
+    for review in (False, True):
+        try:
+            resp = requests.post(url + ("?requiresReview=true" if review else ""), headers=headers, data=data,
+                                 timeout=60)
+        except requests.RequestException as exc:
+            return f"error:{type(exc).__name__}"
+        if resp.status_code < 300:
+            return "submitted" if review else "published"
+        if resp.status_code == 409:
+            return "exists"
+        last = _error(resp)
+        logger.warning("update AIDL Teams app (review=%s) HTTP %s: %s", review, resp.status_code,
+                       (resp.text or "")[:300])
+        if resp.status_code not in (401, 403):
+            return f"error:{last}"
+    return f"forbidden:{last}"
+
+
+def upgrade_installed(token: str, team_id: str, catalog_id: str) -> None:
+    """The team still runs an older version of the app: move it to the newest."""
+    rows = _get(token, f"/teams/{team_id}/installedApps",
+                {"$expand": "teamsApp,teamsAppDefinition", "$filter": f"teamsApp/id eq '{catalog_id}'"})
+    for row in rows or []:
+        have = (row.get("teamsAppDefinition") or {}).get("version")
+        if (row.get("teamsApp") or {}).get("id") == catalog_id and row.get("id") and have                 and _vkey(have) < _vkey(package_version()):
+            try:
+                resp = requests.post(f"{GRAPH_BASE}/teams/{team_id}/installedApps/{row['id']}/upgrade",
+                                     headers=graph_headers(token), json={}, timeout=30)
+                if resp.status_code >= 400:
+                    logger.warning("upgrade AIDL Teams app HTTP %s: %s", resp.status_code, (resp.text or "")[:300])
+            except requests.RequestException as exc:
+                logger.warning("upgrade AIDL Teams app failed: %s", type(exc).__name__)
 
 
 def _published(app: dict) -> bool:
@@ -253,6 +313,13 @@ def _run(org: Organization) -> str:
     state = _state_of(app)
     if state != "published":
         return _save(org, state, catalog_id=catalog_id)
+    if outdated(app):  # an old copy in the catalog has no channel tab
+        outcome = publish_update(token, catalog_id)
+        if outcome == "submitted":
+            return _save(org, "submitted", catalog_id=catalog_id)
+        if outcome not in ("published", "exists"):
+            return _save(org, "blocked" if outcome.startswith("forbidden") else "failed", catalog_id=catalog_id,
+                         error=f"update {outcome.split(':', 1)[-1]}")
 
     # 2. installed in the AIDL team
     installed = is_installed(token, team, catalog_id)
@@ -262,6 +329,8 @@ def _run(org: Organization) -> str:
         ok, error = install(token, team, catalog_id)
         if not ok:
             return _save(org, "blocked" if error.startswith("403") else "failed", catalog_id=catalog_id, error=error)
+    else:
+        upgrade_installed(token, team, catalog_id)
 
     # 3. the channel tab
     # A just-installed app isn't always ready for a tab for a few seconds (400 / 404): try again.
