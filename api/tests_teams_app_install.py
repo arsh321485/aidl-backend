@@ -52,7 +52,7 @@ class FakeGraph:
             return self.R(200, {"value": self.catalog})
         if url.endswith(f"/teams/{TEAM}/installedApps"):
             return self.R(200, {"value": [{"id": "inst-" + i, "teamsApp": {"id": i},
-                                           "teamsAppDefinition": {"version": "1.0.0" if self.old_app else "2.0.0"}}
+                                           "teamsAppDefinition": {"version": "1.0.0" if self.old_app else "2.0.1"}}
                                           for i in self.installed]})
         if url.endswith(f"/channels/{CHANNEL}/tabs"):
             return self.R(200, {"value": self.tabs})
@@ -64,7 +64,7 @@ class FakeGraph:
             if "requiresReview=true" not in url and not self.teams_admin:
                 return self.R(403, {"error": {"code": "Forbidden"}})
             state = "submitted" if "requiresReview=true" in url else "published"
-            self.catalog[0]["appDefinitions"].append({"publishingState": state, "version": "2.0.0"})
+            self.catalog[0]["appDefinitions"].append({"publishingState": state, "version": "2.0.1"})
             return self.R(201)
         if url.endswith("/upgrade"):
             self.old_app = False
@@ -210,7 +210,7 @@ class TeamsAppInstallTests(TestCase):
 
     def test_an_up_to_date_catalog_is_left_alone(self):
         self.graph.catalog.append({"id": CATALOG_ID, "externalId": APP_ID,
-                                   "appDefinitions": [{"publishingState": "published", "version": "2.0.0"}]})
+                                   "appDefinitions": [{"publishingState": "published", "version": "2.0.1"}]})
         self.graph.installed.append(CATALOG_ID)
         teams_app_install.run(self.org)
         self.assertEqual(self.graph.writes("/appDefinitions") + self.graph.writes("/upgrade"), 0)
@@ -316,7 +316,7 @@ class TeamsAppInstallTests(TestCase):
     def test_a_new_version_waiting_for_approval_stays_submitted_each_hour(self):
         self.graph.catalog.append({"id": CATALOG_ID, "externalId": APP_ID, "appDefinitions": [
             {"publishingState": "published", "version": "1.0.0"},
-            {"publishingState": "submitted", "version": "2.0.0"}]})
+            {"publishingState": "submitted", "version": "2.0.1"}]})
         self.graph.installed.append(CATALOG_ID)
         self.assertEqual(teams_app_install.run(self.org), "submitted")
         self.assertEqual(self.graph.writes("/appDefinitions") + self.graph.writes("/upgrade"), 0)
