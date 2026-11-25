@@ -28,6 +28,7 @@ class FakeGraph:
         self.cards: list[dict] = []
         self.calls: list[tuple[str, str]] = []
         self.install_status = 201
+        self.tab_failures = 0  # answer the first n tab requests with 400 (app not ready yet)
 
     class R:
         def __init__(self, status, body=None):
@@ -73,6 +74,9 @@ class FakeGraph:
             app = json["teamsApp@odata.bind"].rsplit("/", 1)[1]
             if app not in self.installed:
                 return self.R(404)
+            if self.tab_failures > 0:
+                self.tab_failures -= 1
+                return self.R(400, {"error": {"code": "BadRequest", "message": "app not ready"}})
             self.tabs.append({"id": f"tab-{len(self.tabs)}", "configuration": json["configuration"],
                               "teamsApp": {"id": app}})
             return self.R(201, self.tabs[-1])
@@ -159,6 +163,26 @@ class TeamsAppInstallTests(TestCase):
         self.assertEqual(teams_app_install.run(self.org), "installed")
         self.assertEqual(self.graph.writes("/appCatalogs/teamsApps") + self.graph.writes("/installedApps"), 0)
         self.assertIn(f"/l/entity/{APP_ID}/aidl_tab?", self.graph.button())
+
+    def test_a_tab_refused_while_the_app_settles_is_tried_again(self):
+        self.graph.tab_failures = 2
+        with patch("api.teams_app_install.time.sleep") as sleep:
+            self.assertEqual(teams_app_install.run(self.org), "installed")
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual([t["configuration"]["entityId"] for t in self.graph.tabs], ["aidl_tab"])
+
+    def test_a_tab_that_never_works_says_why_and_keeps_the_old_link(self):
+        self.graph.tab_failures = 99
+        with patch("api.teams_app_install.time.sleep"):
+            self.assertEqual(teams_app_install.run(self.org), "failed")
+        self.assertIn("400 BadRequest: app not ready", teams_app_install.progress(self.org)["error"])
+        self.assertEqual(self.graph.cards, [])  # the card keeps its link
+        self.assertEqual(self.graph.writes("/appCatalogs/teamsApps"), 1)
+        # the next run only retries the tab: nothing published or installed twice
+        self.org.refresh_from_db()
+        self.graph.tab_failures = 0
+        self.assertEqual(teams_app_install.run(self.org), "installed")
+        self.assertEqual((len(self.graph.catalog), len(self.graph.installed)), (1, 1))
 
     # ---------- someone without Teams admin rights signs in ----------
 

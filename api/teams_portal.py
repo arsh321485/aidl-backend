@@ -481,6 +481,8 @@ def _teams_app_notice(org: Organization) -> str:
                          "AIDL's permissions, then sign in again.",
         "blocked": "Microsoft Teams didn't let AIDL add its app to your team (your company may have turned off "
                    "custom apps). Open AIDL opens these pages instead.",
+        "failed": "AIDL couldn't add its tab to your Teams channel yet. It tries again every hour (or sign in again "
+                  "to retry now). Until then, Open AIDL opens these pages.",
     }.get(teams_app_install.progress(org).get("status", ""), "")
 
 

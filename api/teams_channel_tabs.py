@@ -368,9 +368,15 @@ def add_app_tab(access_token: str, *, team_id: str, channel_id: str, catalog_app
     except requests.RequestException as exc:
         logger.warning("add AIDL app tab failed: %s", type(exc).__name__)
         return {"ok": False, "status": 0}
+    detail = ""
     if resp.status_code >= 400:
         logger.warning("add AIDL app tab HTTP %s: %s", resp.status_code, (resp.text or "")[:300])
-    return {"ok": resp.status_code < 400, "status": resp.status_code}
+        try:
+            err = resp.json().get("error") or {}
+            detail = f"{err.get('code', '')}: {err.get('message', '')}".strip(": ")[:200]
+        except ValueError:
+            pass
+    return {"ok": resp.status_code < 400, "status": resp.status_code, "detail": detail}
 
 
 def remove_tab(access_token: str, team_id: str, channel_id: str, entity_id: str) -> None:

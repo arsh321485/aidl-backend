@@ -28,6 +28,7 @@ Progress: setup_state["teams_app"] = {status, catalog_id, error, at}, status one
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -44,6 +45,7 @@ PACKAGE = Path(settings.BASE_DIR) / "teams" / "aidl-app-package.zip"
 LOCK_KEY = "lock:teams_app_install"
 LOCK_FOR = timedelta(minutes=5)
 RECHECK = timedelta(hours=1)
+TAB_RETRY_WAITS = (4, 8, 15, 0)  # the wait after each try (none after the last)
 DONE = ("installed",)
 
 
@@ -262,11 +264,16 @@ def _run(org: Organization) -> str:
             return _save(org, "blocked" if error.startswith("403") else "failed", catalog_id=catalog_id, error=error)
 
     # 3. the channel tab
-    added = tabs.add_app_tab(token, team_id=team, channel_id=channel, catalog_app_id=catalog_id,
-                             content_url=teams_channel.app_url("tab/"))
+    # A just-installed app isn't always ready for a tab for a few seconds (400 / 404): try again.
+    for wait in TAB_RETRY_WAITS:
+        added = tabs.add_app_tab(token, team_id=team, channel_id=channel, catalog_app_id=catalog_id,
+                                 content_url=teams_channel.app_url("tab/"))
+        if added["ok"] or added["status"] not in (400, 404):
+            break
+        time.sleep(wait)
     if not added["ok"] and tabs.find_tab(token, team, channel, tabs.CUSTOM_TAB_ENTITY) is None:
         return _save(org, "blocked" if added["status"] == 403 else "failed", catalog_id=catalog_id,
-                     error=f"tab {added['status']}")
+                     error=f"tab {added['status']} {added.get('detail', '')}".strip())
     return _finish(org, catalog_id=catalog_id)
 
 
