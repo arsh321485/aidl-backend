@@ -92,6 +92,8 @@ _DEFAULT_MS_REDIRECT_URI = (
 )
 MS_TENANT_ID = os.getenv("MS_TENANT_ID") or os.getenv("MICROSOFT_TENANT_ID") or "common"
 MS_CLIENT_ID = os.getenv("MS_CLIENT_ID") or os.getenv("MICROSOFT_CLIENT_ID") or ""
+# The AIDL Teams app's id (teams/manifest.json "id"; it is the Azure app's client id).
+TEAMS_APP_ID = os.getenv("TEAMS_APP_ID") or MS_CLIENT_ID
 MS_CLIENT_SECRET = os.getenv("MS_CLIENT_SECRET") or os.getenv("MICROSOFT_CLIENT_SECRET") or ""
 MS_REDIRECT_URI = (
     os.getenv("MS_REDIRECT_URI")

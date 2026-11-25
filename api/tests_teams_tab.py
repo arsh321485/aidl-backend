@@ -45,52 +45,111 @@ class _Posts:
         return card["actions"][0]["url"]
 
 
-@override_settings(TEAMS_CHANNEL_TAB=True)
+APP_ID = "aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2"
+
+
+@override_settings(TEAMS_CHANNEL_TAB=True, TEAMS_APP_ID=APP_ID)
 class HomeCardOpensTheTabTests(_Posts, TestCase):
-    def test_open_aidl_goes_to_the_channel_tab(self):
-        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB) as make:
-            teams_channel.publish_home(self.org, "tok")
-        self.assertEqual(self._button(), TAB)
-        self.assertEqual(make.call_args.kwargs["content_url"], teams_channel.app_url("tab/"))
-        s = admin_setup.state(self.org)
-        self.assertEqual((s["teams_tab_url"], s["teams_tab_channel"]), (TAB, "chan-1"))
+    """Open AIDL opens the AIDL app's tab once a channel admin has added it;
+    until then it opens AIDL's pages (never a dead link to a Website tab)."""
 
-    def test_the_tab_is_made_once(self):
-        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB) as make:
-            teams_channel.publish_home(self.org, "tok")
-            teams_channel.publish_home(self.org, "tok")
-        self.assertEqual(make.call_count, 1)
-        self.assertEqual(self._button(), TAB)
+    def _patch(self, has_tab):
+        for target, kwargs in (("api.teams_channel_tabs.ensure_app_tab", {"return_value": TAB}),
+                               ("api.teams_channel_tabs.has_tab", {"return_value": has_tab}),
+                               ("api.teams_channel_tabs.remove_tab", {})):
+            p = patch(target, **kwargs)
+            setattr(self, target.rsplit(".", 1)[1], p.start())
+            self.addCleanup(p.stop)
 
-    def test_no_tab_keeps_the_old_link(self):
-        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=""):
-            teams_channel.publish_home(self.org, "tok")
+    def test_without_the_app_the_button_opens_aidl_pages(self):
+        self._patch(False)
+        teams_channel.publish_home(self.org, "tok")
         self.assertEqual(self._button(), teams_channel.app_url())
-        self.assertNotIn("teams_tab_url", admin_setup.state(self.org))
+        self.ensure_app_tab.assert_called_once()  # the visible AIDL Website tab is still added
+        self.assertNotIn("teams_app_tab_url", admin_setup.state(self.org))
 
-    def test_a_new_channel_gets_its_own_tab(self):
-        admin_setup.update(self.org, teams_tab_url="https://old", teams_tab_channel="chan-0")
-        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB) as make:
-            teams_channel.publish_home(self.org, "tok")
-        make.assert_called_once()
-        self.assertEqual(self._button(), TAB)
+    def test_with_the_app_tab_the_button_opens_it(self):
+        self._patch(True)
+        teams_channel.publish_home(self.org, "tok")
+        link = self._button()
+        self.assertTrue(link.startswith(f"https://teams.microsoft.com/l/entity/{APP_ID}/aidl_tab?"), link)
+        self.assertIn("chan-1", link)
+        self.assertIn("groupId=team-1", link)
+        self.ensure_app_tab.assert_not_called()
+        self.remove_tab.assert_called_once_with("tok", "team-1", "chan-1", teams_channel_tabs.APP_TAB_ENTITY)
 
-    def test_a_card_posted_before_the_tab_is_posted_again_once(self):
+    def test_the_link_is_remembered(self):
+        self._patch(True)
+        teams_channel.publish_home(self.org, "tok")
+        teams_channel.publish_home(self.org, "tok")
+        self.assertEqual(self.has_tab.call_count, 1)
+
+    def test_a_card_is_posted_again_once_the_app_tab_turns_up(self):
         self.org.teams_welcome_message_id = "old-card"
         self.org.save(update_fields=["teams_welcome_message_id"])
-        with patch("api.teams_channel_tabs.ensure_app_tab", return_value=TAB):
-            teams_channel.ensure_home(self.org)
-            self.org.refresh_from_db()
-            teams_channel.ensure_home(self.org)
+        self._patch(False)
+        teams_channel.ensure_home(self.org)
+        self.assertEqual(self.posts, [])
+        self.has_tab.return_value = True
+        teams_channel.ensure_home(self.org)  # checked an hour at most
+        self.assertEqual(self.posts, [])
+        admin_setup.update(self.org, teams_app_tab_checked="2000-01-01T00:00:00+00:00")
+        teams_channel.ensure_home(self.org)
+        self.org.refresh_from_db()
+        teams_channel.ensure_home(self.org)
         self.assertEqual(len(self.posts), 1)
-        self.assertEqual(self._button(), TAB)
+        self.assertIn("/aidl_tab?", self._button())
+
+    def test_a_new_channel_is_looked_at_again(self):
+        self._patch(True)
+        admin_setup.update(self.org, teams_app_tab_url="https://old", teams_app_tab_channel="chan-0")
+        teams_channel.publish_home(self.org, "tok")
+        self.assertIn("chan-1", self._button())
 
     @override_settings(TEAMS_CHANNEL_TAB=False)
     def test_switched_off(self):
-        with patch("api.teams_channel_tabs.ensure_app_tab") as make:
-            teams_channel.publish_home(self.org, "tok")
-        make.assert_not_called()
+        self._patch(True)
+        teams_channel.publish_home(self.org, "tok")
+        self.has_tab.assert_not_called()
+        self.ensure_app_tab.assert_not_called()
         self.assertEqual(self._button(), teams_channel.app_url())
+
+    def test_adding_the_tab_posts_the_card_again(self):
+        from . import teams_portal
+
+        self._patch(True)
+        self.org.teams_welcome_message_id = "old-card"
+        self.org.save(update_fields=["teams_welcome_message_id"])
+        with patch("api.teams_portal.in_background", side_effect=lambda fn, *a: fn(*a)), \
+                patch.object(teams_portal, "TAB_ADDED_WAITS", (0,)):
+            resp = APIClient().post("/api/teams/app/tab/added/", {"team": "team-1"})
+            self.assertEqual(resp.status_code, 200)
+            APIClient().post("/api/teams/app/tab/added/", {"team": "team-1"})  # once is enough
+            APIClient().post("/api/teams/app/tab/added/", {"team": "someone-else"})
+        self.assertEqual(len(self.posts), 1)
+        self.assertIn("/aidl_tab?", self._button())
+
+    def test_the_setup_page_saves_the_tab_teams_can_open(self):
+        resp = APIClient().get("/api/teams/app/tab/config/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["entity_id"], teams_channel_tabs.CUSTOM_TAB_ENTITY)
+        self.assertTrue(resp.context["content_url"].endswith("/api/teams/app/tab/"))
+        self.assertContains(resp, "registerOnSaveHandler")
+
+
+class ManifestTests(TestCase):
+    def test_the_package_has_the_channel_tab_and_matches_the_manifest(self):
+        import zipfile
+        from pathlib import Path
+
+        folder = Path(settings.BASE_DIR) / "teams"
+        manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+        tab = manifest["configurableTabs"][0]
+        self.assertTrue(tab["configurationUrl"].endswith("/api/teams/app/tab/config/"))
+        self.assertEqual(tab["scopes"], ["team"])
+        self.assertNotIn("bots", manifest)
+        packed = json.loads(zipfile.ZipFile(folder / "aidl-app-package.zip").read("manifest.json"))
+        self.assertEqual(packed, manifest)
 
 
 class EnsureAppTabTests(TestCase):

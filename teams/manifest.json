@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
   "manifestVersion": "1.17",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "id": "aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2",
   "developer": {
     "name": "AIDL",
@@ -14,41 +14,25 @@
     "full": "AIDL — AI Driving Licence"
   },
   "description": {
-    "short": "AI Driving Licence Admin Center in Microsoft Teams",
-    "full": "AIDL Admin Center runs inside the aidl dashboard channel Posts as Adaptive Cards (same pattern as VaptFix)."
+    "short": "Your company's AI Driving Licence programme, inside Teams.",
+    "full": "AIDL runs your company's AI Driving Licence programme in a Teams channel. Add the AIDL tab to the channel: employees see their next card and their licence, and admins run the programme from the Admin Center."
   },
   "icons": {
     "color": "color.png",
     "outline": "outline.png"
   },
-  "accentColor": "#6264A7",
-  "bots": [
+  "accentColor": "#FFCC00",
+  "configurableTabs": [
     {
-      "botId": "aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2",
-      "scopes": ["personal", "team", "groupChat"],
-      "supportsFiles": false,
-      "isNotificationOnly": false,
-      "commandLists": [
-        {
-          "scopes": ["team", "personal"],
-          "commands": [
-            {
-              "title": "home",
-              "description": "Open AIDL Admin Center Adaptive Card"
-            }
-          ]
-        }
-      ]
+      "configurationUrl": "https://aidl-backend.onrender.com/api/teams/app/tab/config/",
+      "canUpdateConfiguration": false,
+      "scopes": ["team"],
+      "context": ["channelTab"]
     }
   ],
-  "permissions": ["identity", "messageTeamMembers"],
+  "permissions": ["identity"],
   "validDomains": [
     "aidl-backend.onrender.com",
-    "aidl-frontend-8owk.vercel.app",
-    "token.botframework.com"
-  ],
-  "webApplicationInfo": {
-    "id": "aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2",
-    "resource": "api://aidl-backend.onrender.com/aa5e1a12-7bda-4b2d-8abb-b0d0ad1dc2d2"
-  }
+    "aidl-frontend-8owk.vercel.app"
+  ]
 }

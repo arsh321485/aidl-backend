@@ -336,6 +336,43 @@ def ensure_app_tab(access_token: str, *, team_id: str, channel_id: str, content_
     return ((created or {}).get("webUrl") or "").strip()
 
 
+# The AIDL Teams app's own channel tab (teams/manifest.json → /api/teams/app/tab/config/
+# saves it with this entity id). Unlike a Website tab, a card button can open it.
+CUSTOM_TAB_ENTITY = "aidl_tab"
+
+
+def has_tab(access_token: str, team_id: str, channel_id: str, entity_id: str) -> bool:
+    if not access_token or not team_id or not channel_id:
+        return False
+    try:
+        tabs = list_channel_tabs(access_token, team_id, channel_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("list channel tabs failed: %s", type(exc).__name__)
+        return False
+    return any((tab.get("configuration") or {}).get("entityId") == entity_id for tab in tabs)
+
+
+def remove_tab(access_token: str, team_id: str, channel_id: str, entity_id: str) -> None:
+    try:
+        tabs = list_channel_tabs(access_token, team_id, channel_id)
+    except Exception:  # noqa: BLE001
+        return
+    for tab in tabs:
+        if (tab.get("configuration") or {}).get("entityId") == entity_id and tab.get("id"):
+            delete_channel_tab(access_token, team_id, channel_id, tab["id"])
+
+
+def app_tab_deep_link(app_id: str, *, team_id: str, channel_id: str, tenant_id: str = "") -> str:
+    """Teams' link to the AIDL app's tab in that channel (opens inside Teams)."""
+    import json
+    from urllib.parse import quote
+
+    context = quote(json.dumps({"channelId": channel_id}, separators=(",", ":")), safe="")
+    url = (f"https://teams.microsoft.com/l/entity/{quote(app_id, safe='')}/{CUSTOM_TAB_ENTITY}"
+           f"?label=AIDL&context={context}&groupId={quote(team_id, safe='')}")
+    return url + (f"&tenantId={quote(tenant_id, safe='')}" if tenant_id else "")
+
+
 def build_channel_tab_deep_link(
     *,
     entity_id: str,

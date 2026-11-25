@@ -139,6 +139,40 @@ def tab(request):
 
 
 @never_cache
+def tab_config(request):
+    """Teams shows this when someone adds the AIDL app to a channel: it saves the tab."""
+    return render(request, "teams_app/tab_config.html", {"user": None, "entity_id": "aidl_tab",
+                                                          "content_url": settings.BACKEND_URL + reverse("teams-app-tab")})
+
+
+@never_cache
+@require_POST
+def tab_added(request):
+    """The tab was just added: post the home card again so Open AIDL opens it. Only a
+    nudge — the tab is checked with Microsoft (find_app_tab), at most once a minute."""
+    team = (request.POST.get("team") or "").strip()
+    org = Organization.objects.filter(teams_team_id=team, is_active=True).first() if team else None
+    if org is not None and teams_channel.is_teams(org) and not teams_channel.app_tab_link(org):
+        last = admin_setup.state(org).get("teams_tab_added_at", "")
+        if not last or timezone.now() - datetime.fromisoformat(last) > timedelta(minutes=1):
+            admin_setup.update(org, teams_tab_added_at=timezone.now().isoformat())
+            in_background(_look_for_new_tab, org)
+    return JsonResponse({"ok": True})
+
+
+TAB_ADDED_WAITS = (5, 10, 20, 40)  # Teams makes the tab a moment after Save
+
+
+def _look_for_new_tab(org: Organization) -> None:
+    import time
+
+    for wait in TAB_ADDED_WAITS:
+        time.sleep(wait)
+        if teams_channel.refresh_home_link(org, timedelta(0)):
+            return
+
+
+@never_cache
 def tab_check(request):
     return JsonResponse({"signed_in": _signed_in(request) is not None})
 

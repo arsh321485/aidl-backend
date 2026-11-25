@@ -21,7 +21,7 @@ import json
 import logging
 import re
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from html import escape
 
 import requests
@@ -195,27 +195,24 @@ def email(user: AIDLUser, subject: str, text: str, path: str = "") -> bool:
 
 # ---------- the channel's home card ----------
 
-def tab_url(org: Organization) -> str:
-    """The channel's AIDL tab link, if it was added to the channel the card is in."""
-    from .admin_setup import state
+# Two kinds of "AIDL" tab in the channel:
+# - the AIDL Teams app's tab (teams/manifest.json, entity APP_TAB_ENTITY): a channel
+#   admin adds the app to the team once; a card button can jump to it, so Open AIDL
+#   opens AIDL inside the channel.
+# - before that, a built-in Website tab AIDL adds itself (WEBSITE_TAB_ENTITY). New Teams
+#   ignores links to Website tabs, so the button keeps opening AIDL's pages directly.
+APP_TAB_RECHECK = timedelta(hours=1)
 
-    s = state(org)
-    return s.get("teams_tab_url", "") if s.get("teams_tab_channel") == channel_id(org) else ""
 
-
-def ensure_tab(org: Organization, token: str = "") -> str:
-    """Add the "AIDL" tab to the channel (teams_channel_tabs.ensure_app_tab) and
-    remember its link. "" = no tab (turned off, or Microsoft refused): the card's
-    button then opens AIDL's pages directly, as before."""
-    from .admin_setup import update
+def website_tab(org: Organization, token: str = "") -> str:
+    """Add the built-in Website tab once (teams_channel_tabs.ensure_app_tab)."""
+    from .admin_setup import state, update
     from .teams_channel_tabs import ensure_app_tab
 
-    if not settings.TEAMS_CHANNEL_TAB:
-        return ""
-    known = tab_url(org)
-    if known:
-        return known
     channel = channel_id(org)
+    s = state(org)
+    if s.get("teams_tab_url") and s.get("teams_tab_channel") == channel:
+        return s["teams_tab_url"]
     url = ensure_app_tab(token or token_for(org), team_id=org.teams_team_id, channel_id=channel,
                          content_url=app_url("tab/"))
     if url:
@@ -223,15 +220,73 @@ def ensure_tab(org: Organization, token: str = "") -> str:
     return url
 
 
+def app_tab_link(org: Organization) -> str:
+    """The link to the AIDL app's tab, once it's been found in the card's channel."""
+    from .admin_setup import state
+
+    s = state(org)
+    return s.get("teams_app_tab_url", "") if s.get("teams_app_tab_channel") == channel_id(org) else ""
+
+
+def find_app_tab(org: Organization, token: str = "") -> str:
+    """Look for the AIDL app's tab in the channel; if it's there, remember the link to it
+    and remove the Website tab (one AIDL tab is enough)."""
+    from .admin_setup import update
+    from . import teams_channel_tabs as tabs
+
+    if not settings.TEAMS_APP_ID:
+        return ""
+    token = token or token_for(org)
+    channel = channel_id(org)
+    if not tabs.has_tab(token, org.teams_team_id, channel, tabs.CUSTOM_TAB_ENTITY):
+        return ""
+    link = tabs.app_tab_deep_link(settings.TEAMS_APP_ID, team_id=org.teams_team_id, channel_id=channel,
+                                  tenant_id=org.ms_tenant_id)
+    tabs.remove_tab(token, org.teams_team_id, channel, tabs.APP_TAB_ENTITY)
+    update(org, teams_app_tab_url=link, teams_app_tab_channel=channel, teams_tab_url="", teams_tab_channel="")
+    return link
+
+
+def _app_tab_check_due(org: Organization, every: timedelta = APP_TAB_RECHECK) -> bool:
+    from .admin_setup import state, update
+
+    last = state(org).get("teams_app_tab_checked", "")
+    now = timezone.now()
+    if last and now - datetime.fromisoformat(last) < every:
+        return False
+    update(org, teams_app_tab_checked=now.isoformat())
+    return True
+
+
+def home_link(org: Organization, token: str = "") -> str:
+    """Where Open AIDL goes: the AIDL app's tab if the channel has it, else AIDL's pages."""
+    if not settings.TEAMS_CHANNEL_TAB:
+        return app_url()
+    link = app_tab_link(org) or find_app_tab(org, token)
+    if not link:
+        website_tab(org, token)
+    return link or app_url()
+
+
+def refresh_home_link(org: Organization, every: timedelta = APP_TAB_RECHECK) -> bool:
+    """Post the card again once the AIDL app's tab turns up in the channel. True if it did."""
+    if not (settings.TEAMS_CHANNEL_TAB and settings.TEAMS_APP_ID and org.teams_team_id and channel_id(org)):
+        return False
+    if app_tab_link(org) or not _app_tab_check_due(org, every) or not find_app_tab(org):
+        return False
+    publish_home(org)
+    return True
+
+
 def publish_home(org: Organization, token: str = "", settle: bool = False) -> dict:
     """The one card everyone opens AIDL from. Graph can't edit a card, so post the
     new one, then remove the old one. `settle`: the team may have been made seconds
     ago, and Microsoft refuses posts until it's ready, so wait and try again.
-    Open AIDL goes to the channel's AIDL tab, so AIDL opens inside Teams."""
+    Open AIDL goes to the AIDL app's tab when the channel has it (home_link)."""
     token = token or token_for(org)
     old = org.teams_welcome_message_id
     for wait in HOME_SETTLE_SECONDS if settle else (None,):
-        link = ensure_tab(org, token) or app_url()
+        link = home_link(org, token)
         result = post(org, "AI Driving Licence", f"{org.name} runs its AI Driving Licence programme here. Open AIDL "
                       "to see your next card, or to run the programme if you're an admin.",
                       button=("Open AIDL", link), token=token)
@@ -249,14 +304,14 @@ def publish_home(org: Organization, token: str = "", settle: bool = False) -> di
 
 
 def ensure_home(org: Organization) -> None:
-    """Post the home card if sign-in couldn't: without it the channel is empty. A card
-    posted before the channel had its AIDL tab is posted again, pointing at the tab."""
+    """Post the home card if sign-in couldn't: without it the channel is empty. Once the
+    AIDL app's tab is added to the channel, the card is posted again to open it."""
     if not org.teams_team_id or not channel_id(org):
         return
     if not org.teams_welcome_message_id:
         publish_home(org)
-    elif settings.TEAMS_CHANNEL_TAB and not tab_url(org) and ensure_tab(org):
-        publish_home(org)
+    else:
+        refresh_home_link(org)
 
 
 # ---------- starting the programme, reminders ----------

@@ -1,0 +1,39 @@
+{% extends "teams_app/base.html" %}
+{% block title %}Add AIDL · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>Add AIDL to this channel</h1>
+  <p style="margin-top:8px">Press <b>Save</b>. An <b>AIDL</b> tab appears in this channel, and the channel's
+    <b>Open AIDL</b> button opens it. Everyone in the team signs in with their work Microsoft account.</p>
+  <form id="added" method="post" action="{% url 'teams-app-tab-added' %}">{% csrf_token %}<input type="hidden" name="team"></form>
+  <p class="muted" id="status" role="status"></p>
+</section>
+{% endblock %}
+{% block script %}
+<script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js"></script>
+<script>
+(function () {
+  var status = document.getElementById("status");
+  if (!window.microsoftTeams) { status.textContent = "Open this from Microsoft Teams."; return; }
+  microsoftTeams.app.initialize().then(function () {
+    var team = "";
+    microsoftTeams.app.getContext().then(function (ctx) { team = (ctx.team && ctx.team.groupId) || ""; });
+    microsoftTeams.pages.config.registerOnSaveHandler(function (save) {
+      microsoftTeams.pages.config.setConfig({
+        entityId: "{{ entity_id|escapejs }}",
+        contentUrl: "{{ content_url|escapejs }}",
+        websiteUrl: "{{ content_url|escapejs }}",
+        suggestedDisplayName: "AIDL"
+      }).then(function () {
+        var form = document.getElementById("added");
+        form.team.value = team;
+        // Tell AIDL, so the channel's card is posted again with a working Open AIDL.
+        fetch(form.action, {method: "POST", body: new FormData(form), credentials: "same-origin"})
+          .catch(function () {}).then(function () { save.notifySuccess(); });
+      }, function (err) { save.notifyFailure(String(err)); });
+    });
+    microsoftTeams.pages.config.setValidityState(true);
+  });
+})();
+</script>
+{% endblock %}
