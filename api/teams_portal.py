@@ -472,9 +472,6 @@ def _teams_app_notice(org: Organization) -> str:
     if not teams_app_install.enabled(org):
         return ""
     return {
-        "submitted": "AIDL is waiting for your Teams admin to approve the AIDL app (Teams admin center → Teams apps → "
-                     "Manage apps). Once approved, AIDL adds its tab to your channel. Until then, Open AIDL opens "
-                     "these pages.",
         "rejected": "Your Teams admin rejected the AIDL app, so Open AIDL opens these pages instead of a tab in your "
                     "channel. Ask them to approve it, then sign in again.",
         "needs_consent": "To add the AIDL tab to your channel, a Microsoft admin in your company needs to approve "
@@ -487,6 +484,30 @@ def _teams_app_notice(org: Organization) -> str:
 
 
 @_admin_page
+def install_status(request, user, org):
+    """Polled by the Admin Center while AIDL waits for the company's Teams admin to approve it."""
+    from . import teams_app_install
+
+    return JsonResponse({"status": teams_app_install.check_now(org)})
+
+
+def _install_banner(org: Organization) -> str:
+    """"pending" while AIDL waits for approval; "done" for a day after the tab was added."""
+    from . import teams_app_install
+
+    if not teams_app_install.enabled(org):
+        return ""
+    p = teams_app_install.progress(org)
+    if p.get("status") == "submitted":
+        return "pending"
+    try:
+        fresh = timezone.now() - datetime.fromisoformat(p.get("at", "")) < timedelta(days=1)
+    except ValueError:
+        fresh = False
+    return "done" if p.get("status") == "installed" and fresh else ""
+
+
+@_admin_page
 def admin_home(request, user, org):
     st = admin_setup.summary(org)
     team = licensing.team_progress(org)
@@ -495,7 +516,7 @@ def admin_home(request, user, org):
                    rest=range(5 - st["done_count"]), lost=admin_setup.state(org).get("teams_login_lost"),
                    no_team=not org.teams_team_id,
                    no_home_card=bool(org.teams_team_id and not org.teams_welcome_message_id),
-                   teams_app=_teams_app_notice(org),
+                   teams_app=_teams_app_notice(org), install_banner=_install_banner(org),
                    tz_known=admin_setup.state(org).get("tz_offset_min") is not None,
                    policy_days=[{**c, "day": _day(c.get("send_on"))} for c in st["policy"]],
                    pending_apps=AppRequest.objects.filter(organization_id=str(org.pk),

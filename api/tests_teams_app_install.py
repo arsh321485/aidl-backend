@@ -63,8 +63,8 @@ class FakeGraph:
         if url.endswith("/appDefinitions"):
             if "requiresReview=true" not in url and not self.teams_admin:
                 return self.R(403, {"error": {"code": "Forbidden"}})
-            if "requiresReview=true" not in url:
-                self.catalog[0]["appDefinitions"].append({"publishingState": "published", "version": "2.0.0"})
+            state = "submitted" if "requiresReview=true" in url else "published"
+            self.catalog[0]["appDefinitions"].append({"publishingState": state, "version": "2.0.0"})
             return self.R(201)
         if url.endswith("/upgrade"):
             self.old_app = False
@@ -268,7 +268,66 @@ class TeamsAppInstallTests(TestCase):
         client.cookies[COOKIE] = _session_token(self.admin)
         with patch("api.teams_channel.dispatch_if_due"):
             resp = client.get("/api/teams/app/admin/")
-        self.assertContains(resp, "waiting for your Teams admin to approve the AIDL app")
+        self.assertContains(resp, "AIDL is waiting for your Microsoft Teams administrator's approval.")
+        self.assertContains(resp, "Pending approval")
+        self.assertContains(resp, "Teams admin center")
+        self.assertContains(resp, "/api/teams/app/install/status/")  # it checks by itself
+        self.assertNotContains(resp, "AIDL is installed in Teams")
+
+    def _admin_center(self):
+        client = APIClient()
+        client.cookies[COOKIE] = _session_token(self.admin)
+        with patch("api.teams_channel.dispatch_if_due"):
+            return client, client.get("/api/teams/app/admin/")
+
+    def _approve(self):
+        for app in self.graph.catalog:
+            for d in app["appDefinitions"]:
+                d["publishingState"] = "published"
+
+    def test_a_normal_admin_waits_then_it_finishes_by_itself(self):
+        self.graph.teams_admin = False
+        teams_app_install.run(self.org)
+        client, _ = self._admin_center()
+        # still waiting: the page's check changes nothing
+        self.org.refresh_from_db()
+        with patch("api.teams_app_install.CHECK_EVERY", teams_app_install.timedelta(0)):
+            self.assertEqual(client.get("/api/teams/app/install/status/").json(), {"status": "submitted"})
+        self.assertEqual((self.graph.installed, self.graph.cards), ([], []))
+        # their Teams admin approves; the next check installs, adds the tab, updates the card
+        self._approve()
+        with patch("api.teams_app_install.CHECK_EVERY", teams_app_install.timedelta(0)):
+            self.assertEqual(client.get("/api/teams/app/install/status/").json(), {"status": "installed"})
+        self.assertEqual(self.graph.installed, [CATALOG_ID])
+        self.assertEqual([t["configuration"]["entityId"] for t in self.graph.tabs], ["aidl_tab"])
+        self.assertIn(f"/l/entity/{CATALOG_ID}/aidl_tab?", self.graph.button())
+        _, resp = self._admin_center()
+        self.assertContains(resp, "AIDL is installed in Teams")
+        self.assertNotContains(resp, "waiting for your Microsoft Teams administrator")
+
+    def test_the_check_is_not_run_more_often_than_every_45_seconds(self):
+        self.graph.teams_admin = False
+        teams_app_install.run(self.org)
+        self.org.refresh_from_db()
+        before = len(self.graph.calls)
+        self.assertEqual(teams_app_install.check_now(self.org), "submitted")
+        self.assertEqual(len(self.graph.calls), before)
+
+    def test_a_new_version_waiting_for_approval_stays_submitted_each_hour(self):
+        self.graph.catalog.append({"id": CATALOG_ID, "externalId": APP_ID, "appDefinitions": [
+            {"publishingState": "published", "version": "1.0.0"},
+            {"publishingState": "submitted", "version": "2.0.0"}]})
+        self.graph.installed.append(CATALOG_ID)
+        self.assertEqual(teams_app_install.run(self.org), "submitted")
+        self.assertEqual(self.graph.writes("/appDefinitions") + self.graph.writes("/upgrade"), 0)
+
+    def test_a_teams_admin_sees_success_and_no_pending_message(self):
+        teams_app_install.run(self.org)
+        client, resp = self._admin_center()
+        self.assertContains(resp, "AIDL is installed in Teams")
+        self.assertNotContains(resp, "waiting for your Microsoft Teams administrator")
+        self.assertNotContains(resp, "/api/teams/app/install/status/")
+        self.assertEqual(client.get("/api/teams/app/install/status/").json(), {"status": "installed"})
 
     # ---------- things that stop it ----------
 

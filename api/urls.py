@@ -109,6 +109,7 @@ urlpatterns = [
     path("teams/app/me/request-app/", teams_portal.request_app, name="teams-app-request"),
     path("teams/app/admin/", teams_portal.admin_home, name="teams-app-admin"),
     path("teams/app/admin/action/", teams_portal.admin_action, name="teams-app-admin-action"),
+    path("teams/app/install/status/", teams_portal.install_status, name="teams-app-install-status"),
     path("teams/app/admin/timezone/", teams_portal.admin_timezone, name="teams-app-timezone"),
     path("teams/app/admin/plans/", teams_portal.plans_link, name="teams-app-plans"),
     path("teams/app/admin/coverage.csv", teams_portal.coverage, name="teams-app-coverage"),

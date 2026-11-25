@@ -152,11 +152,23 @@ def _vkey(version) -> tuple:
     return tuple(int(p) if p.isdigit() else 0 for p in str(version or "0").split("."))
 
 
-def outdated(app: dict) -> bool:
-    """The company's catalog holds an older AIDL than ours (e.g. uploaded by hand before
-    the channel tab existed): Microsoft then says "the app does not support tabs"."""
-    versions = [d.get("version") for d in app.get("appDefinitions") or [] if d.get("version")]
-    return bool(versions) and max(_vkey(v) for v in versions) < _vkey(package_version())
+def update_state(app: dict) -> str:
+    """Is the newest AIDL in the company's catalog ours? "" yes (or unknown) · "outdated" an old copy
+    (e.g. uploaded before the channel tab existed: Microsoft then says "the app does not support tabs")
+    · "submitted" / "rejected" our new version is waiting for / was refused by their Teams admin."""
+    defs = [d for d in app.get("appDefinitions") or [] if d.get("version")]
+    if not defs:
+        return ""
+    want = _vkey(package_version())
+    mine = [d for d in defs if _vkey(d["version"]) >= want]
+    if any(d.get("publishingState") == "published" for d in mine):
+        return ""
+    states = {d.get("publishingState") for d in mine}
+    if "submitted" in states:
+        return "submitted"
+    if "rejected" in states:
+        return "rejected"
+    return "outdated"
 
 
 def publish_update(token: str, catalog_id: str) -> str:
@@ -313,7 +325,10 @@ def _run(org: Organization) -> str:
     state = _state_of(app)
     if state != "published":
         return _save(org, state, catalog_id=catalog_id)
-    if outdated(app):  # an old copy in the catalog has no channel tab
+    behind = update_state(app)
+    if behind in ("submitted", "rejected"):  # the new version waits for their Teams admin (or was refused)
+        return _save(org, behind, catalog_id=catalog_id)
+    if behind == "outdated":  # an old copy in the catalog has no channel tab
         outcome = publish_update(token, catalog_id)
         if outcome == "submitted":
             return _save(org, "submitted", catalog_id=catalog_id)
@@ -353,6 +368,22 @@ def _finish(org: Organization, **extra) -> str:
     if not teams_channel.app_tab_link(org) and teams_channel.find_app_tab(org):
         teams_channel.publish_home(org)
     return _save(org, "installed", **extra)
+
+
+CHECK_EVERY = timedelta(seconds=45)
+
+
+def check_now(org: Organization) -> str:
+    """The Admin Center asks every ~30 s while AIDL waits for approval: look again (at most
+    every 45 s) and, once approved, finish the install. Returns the current status."""
+    p = progress(org)
+    if p.get("status") != "submitted" or not enabled(org):
+        return p.get("status", "")
+    try:
+        recent = timezone.now() - datetime.fromisoformat(p["at"]) < CHECK_EVERY
+    except (KeyError, ValueError):
+        recent = False
+    return p["status"] if recent else (run(org) or p["status"])
 
 
 def due(org: Organization) -> bool:

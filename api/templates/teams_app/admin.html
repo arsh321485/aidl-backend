@@ -18,6 +18,11 @@
 
 {% if no_team %}<div class="error" role="alert"><b>AIDL couldn't create your Teams team.</b> Your company may not allow you to create teams. Ask your Microsoft 365 admin to allow it, then <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-admin' %}">sign in again</a>.</div>{% endif %}
 {% if lost %}<div class="error" role="alert"><b>AIDL can't post in your Teams channel.</b> Your Microsoft sign-in has expired. <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-admin' %}">Sign in again</a> to reconnect.</div>{% endif %}
+{% if install_banner == "pending" and not lost %}<div class="notice" role="status" id="install-pending">
+  <p><b>⏳ AIDL is waiting for your Microsoft Teams administrator's approval.</b> <span class="pill">Pending approval</span></p>
+  <p class="muted" style="margin-top:6px">Your Teams administrator needs to approve AIDL in the Teams admin center (Teams apps → Manage apps → AIDL → Publish) before the install can finish. You don't need to do anything else: this page checks automatically, then adds AIDL's tab to your channel and updates the Open AIDL card. Until then, Open AIDL opens these pages.</p>
+</div>{% endif %}
+{% if install_banner == "done" and not lost %}<div class="notice" role="status" style="background:#E3F6E5"><b>✅ AIDL is installed in Teams.</b> <span class="pill">Installed</span> Open AIDL in your channel now opens AIDL inside Teams.</div>{% endif %}
 {% if teams_app and not lost %}<div class="notice" role="status">{{ teams_app }}</div>{% endif %}
 {% if no_home_card and not lost %}<div class="notice">AIDL hasn't been able to post in your Teams channel yet, so the channel looks empty. AIDL keeps trying, and you can run everything from this page.</div>{% endif %}
 {% if pending_apps and can.can_apps %}<div class="notice">🛣 {{ pending_apps }} app request{{ pending_apps|pluralize }} waiting. <a href="{% url 'teams-app-apps' %}">Review</a></div>{% endif %}
@@ -105,6 +110,16 @@
 {% endblock %}
 {% block script %}
 {% if not tz_known %}{% csrf_token %}
+{% if install_banner == "pending" %}<script>
+// Waiting for the company's Teams admin: look again every 30 s; when AIDL is installed, show the new state.
+(function check() {
+  setTimeout(function () {
+    fetch("{% url 'teams-app-install-status' %}", {credentials: "same-origin"}).then(function (r) { return r.json(); })
+      .then(function (d) { if (d.status !== "submitted") { location.reload(); } else { check(); } })
+      .catch(check);
+  }, 30000);
+})();
+</script>{% endif %}
 <script>
 // The company's card times: 10:00 where this admin is.
 fetch("{% url 'teams-app-timezone' %}", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded", "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value},
