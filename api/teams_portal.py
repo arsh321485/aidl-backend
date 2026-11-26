@@ -26,7 +26,7 @@ import jwt
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect, render
-from django.urls import reverse
+from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
@@ -132,10 +132,29 @@ def _handoff_code(user: AIDLUser) -> str:
 @never_cache
 def tab(request):
     """What the AIDL tab shows: your page if you're signed in, else a Sign in button."""
-    if _signed_in(request) is not None:
+    signed_in = _signed_in(request) is not None
+    in_frame = request.headers.get("Sec-Fetch-Dest") == "iframe"
+    if signed_in and not in_frame:
         return redirect("teams-app")
     login_url = f"{reverse('teams-app-login')}?next={quote(reverse('teams-app-tab-done'), safe='')}"
-    return render(request, "teams_app/tab.html", {"login_url": login_url, "user": None})
+    return render(request, "teams_app/tab.html", {"login_url": login_url, "user": None, "signed_in": signed_in,
+                                                  "home": reverse("teams-app"), "pages": reverse("teams-app-tab-page")})
+
+
+@never_cache
+def tab_page(request):
+    """The tab was opened from a card's button: where in AIDL to go (?to=me/cards/5/). Only
+    AIDL's own Teams pages; anything else goes to the home page."""
+    to = (request.GET.get("to") or "").strip()
+    home = reverse("teams-app")
+    if not re.fullmatch(r"[A-Za-z0-9_\-/]{1,120}", to) or ".." in to or to.startswith("/"):
+        return JsonResponse({"url": home})
+    url = f"{home.rstrip('/')}/{to}"
+    try:
+        match = resolve(url)
+    except Resolver404:
+        return JsonResponse({"url": home})
+    return JsonResponse({"url": url if match.url_name and match.url_name.startswith("teams-app") else home})
 
 
 @never_cache

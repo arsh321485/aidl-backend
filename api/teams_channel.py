@@ -250,6 +250,25 @@ def find_app_tab(org: Organization, token: str = "") -> str:
     return link
 
 
+def card_link(org: Organization, path: str = "") -> str:
+    """A card's button. Once the channel has the AIDL tab, the button opens that page *inside* Teams
+    (the tab, told which page to show); until then, or without a tab, it opens AIDL's page in the browser."""
+    from urllib.parse import parse_qsl, quote, urlencode, urlsplit
+    import json
+
+    base = app_tab_link(org) if settings.TEAMS_CHANNEL_TAB else ""
+    if not base or not path:
+        return app_url(path)
+    parts = urlsplit(base)
+    query = dict(parse_qsl(parts.query))
+    try:
+        context = json.loads(query.get("context") or "{}")
+    except ValueError:
+        context = {}
+    query["context"] = json.dumps({**context, "subEntityId": path}, separators=(",", ":"))
+    return f"{parts.scheme}://{parts.netloc}{parts.path}?{urlencode(query, quote_via=quote)}"
+
+
 def _app_tab_check_due(org: Organization, every: timedelta = APP_TAB_RECHECK) -> bool:
     from .admin_setup import state, update
 
@@ -327,7 +346,7 @@ def start_programme(org: Organization) -> tuple[int, int]:
     people = list(_people(org))
     post_once(org, "welcome", f"Welcome to your AI Driving Licence, {org.name}",
               "One short card at a time. About 10 minutes, and you get your AI Driving Licence at the end.",
-              button=("Let's go →", app_url("me/")), mention=people)
+              button=("Let's go →", card_link(org, "me/")), mention=people)
     announce_policy(org, sorted(_due_policy(org)))
     for member in people:
         email(member, "Your AI Driving Licence",
@@ -339,7 +358,7 @@ def remind_everyone(org: Organization) -> tuple[int, int]:
     pending = [m for m in _people(org) if not m.licence_issued or not m.avatar_data]
     if pending:
         post(org, "Reminder: your AI Driving Licence", "You have cards waiting.",
-             button=("Open AIDL →", app_url("me/")), mention=pending)
+             button=("Open AIDL →", card_link(org, "me/")), mention=pending)
     for member in pending:
         email(member, "Reminder: your AI Driving Licence", "You still have cards to finish.", "me/")
     return len(pending), len(pending)
@@ -376,7 +395,7 @@ def announce_policy(org: Organization, ns: list[int]) -> int:
         count += post_once(org, f"aup:{n}:{c['version']}", f"Policy card: {SHORT.get(n, c.get('title', ''))}",
                            "Read it and press I agree. It counts towards your AI Driving Licence.",
                            image=card_image.image_url(kind, org), alt=card_image.alt_text(kind, org),
-                           button=("Read & agree →", app_url("me/")))
+                           button=("Read & agree →", card_link(org, "me/")))
     return count
 
 
@@ -394,7 +413,7 @@ def _post_awareness(org: Organization, card: dict) -> bool:
     predraw(card_image.png_for, kind, org)
     return post_once(org, f"pkg:{card['no']}", card["title"], card.get("hook", ""),
                      image=card_image.image_url(kind, org), alt=card["title"],
-                     button=("Got it →", app_url(f"me/cards/{card['no']}/")))
+                     button=("Got it →", card_link(org, f"me/cards/{card['no']}/")))
 
 
 def sync_package(org: Organization, member: AIDLUser, full: bool = False) -> dict:
@@ -474,7 +493,7 @@ def post_policy_awareness(org: Organization) -> int:
     for c in approved(org):
         kind = f"paw-{c['id']}"
         count += post_once(org, f"paw:{c['id']}", f"AI awareness: {c['title']}", image=card_image.image_url(kind, org),
-                           alt=c["title"], button=("Got it →", app_url("me/")))
+                           alt=c["title"], button=("Got it →", card_link(org, "me/")))
     return count
 
 
@@ -493,7 +512,7 @@ def send_reminders(org: Organization, now=None) -> int:
     for no, rows in by_card.items():
         people = list(AIDLUser.objects.filter(pk__in=[r.user_id for r in rows]))
         if not post(org, f"Reminder: {card_title(no)}", "Have you read this one? It takes about 30 seconds.",
-                    button=("Got it →", app_url(f"me/cards/{no}/")), mention=people).get("ok"):
+                    button=("Got it →", card_link(org, f"me/cards/{no}/")), mention=people).get("ok"):
             continue
         PackageDelivery.objects.filter(pk__in=[r.pk for r in rows]).update(reminded_at=now)
         sent += len(rows)
@@ -513,7 +532,7 @@ def remind_person(org: Organization, admin: AIDLUser, user_id: str) -> bool:
     row.save(update_fields=["reminded_by"])
     title = card_title(row.card_no)
     ok = post(org, f"Reminder: {title}", f"{row.reminded_by} (your AIDL admin) asked you to take a look at this card.",
-              button=("Got it →", app_url(f"me/cards/{row.card_no}/")), mention=[member]).get("ok")
+              button=("Got it →", card_link(org, f"me/cards/{row.card_no}/")), mention=[member]).get("ok")
     email(member, f"Reminder: {title}", f"{row.reminded_by} (your AIDL admin) asked you to take a look at this card.",
           f"me/cards/{row.card_no}/")
     reminded = dict(state(org).get("ack_reminded") or {})
@@ -599,7 +618,7 @@ def join(org: Organization, person: dict, token: str = "") -> AIDLUser | None:
         return member
     if started(org):
         post(org, f"Welcome to your AI Driving Licence, {(member.full_name or 'there').split()[0]}",
-             "One short card at a time, about 10 minutes.", button=("Let's go →", app_url("me/")), mention=[member])
+             "One short card at a time, about 10 minutes.", button=("Let's go →", card_link(org, "me/")), mention=[member])
         email(member, "Your AI Driving Licence",
               f"You've joined {org.name}'s AI Driving Licence programme. It takes about 10 minutes.", "me/")
     return member

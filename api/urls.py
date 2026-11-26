@@ -96,6 +96,7 @@ urlpatterns = [
     path("teams/app/logout/", teams_portal.logout, name="teams-app-logout"),
     path("teams/app/signed-out/", teams_portal.signed_out, name="teams-app-signed-out"),
     path("teams/app/tab/", teams_portal.tab, name="teams-app-tab"),
+    path("teams/app/tab/page/", teams_portal.tab_page, name="teams-app-tab-page"),
     path("teams/app/tab/check/", teams_portal.tab_check, name="teams-app-tab-check"),
     path("teams/app/tab/config/", teams_portal.tab_config, name="teams-app-tab-config"),
     path("teams/app/tab/added/", teams_portal.tab_added, name="teams-app-tab-added"),

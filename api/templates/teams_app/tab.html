@@ -17,6 +17,8 @@
 (function () {
   var loginUrl = "{{ login_url|escapejs }}";
   var status = document.getElementById("status");
+  var signedIn = {{ signed_in|yesno:"true,false" }};
+  var home = "{{ home|escapejs }}";
   var inFrame = window.top !== window;
   // In a Teams tab the SDK answers quickly; elsewhere it never does.
   var teams = new Promise(function (resolve) {
@@ -26,12 +28,30 @@
                                          function () { clearTimeout(timer); resolve(false); });
   });
 
+  // A card's button says which page to open (Teams passes it as the page's subEntityId).
+  function target() {
+    return teams.then(function (ok) {
+      if (!ok) return home;
+      return microsoftTeams.app.getContext().then(function (ctx) {
+        var sub = ctx && ctx.page && ctx.page.subPageId;
+        if (!sub) return home;
+        return fetch("{{ pages|escapejs }}?to=" + encodeURIComponent(sub), {credentials: "same-origin"})
+          .then(function (r) { return r.json(); }).then(function (d) { return d.url || home; });
+      }).catch(function () { return home; });
+    });
+  }
+  if (signedIn) {
+    document.getElementById("signin").hidden = true;
+    status.textContent = "Opening AIDL…";
+    target().then(function (url) { location.replace(url); });
+  }
+
   function useCode(code) {
     var form = document.getElementById("handoff");
     form.code.value = code;
     return fetch(form.action, {method: "POST", body: new FormData(form), credentials: "same-origin"})
       .then(function (r) { return r.json(); })
-      .then(function (d) { if (!d.ok) throw new Error("refused"); location.href = d.next; });
+      .then(function (d) { if (!d.ok) throw new Error("refused"); return target().then(function (url) { location.href = url; }); });
   }
 
   function waitForSignIn() {  // sign-in in a separate window, without the Teams SDK
@@ -40,7 +60,7 @@
       if (++tries > 150) { clearInterval(timer); return; }
       fetch("{% url 'teams-app-tab-check' %}", {credentials: "same-origin"})
         .then(function (r) { return r.json(); })
-        .then(function (d) { if (d.signed_in) { clearInterval(timer); location.reload(); } });
+        .then(function (d) { if (d.signed_in) { clearInterval(timer); target().then(function (url) { location.replace(url); }); } });
     }, 2000);
   }
 

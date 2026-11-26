@@ -252,3 +252,57 @@ class TabPagesTests(TestCase):
         code = _handoff_code(self.admin)
         AIDLUser.objects.filter(pk=self.admin.pk).update(is_active=False)
         self.assertEqual(APIClient().post("/api/teams/app/tab/session/", {"code": code}).status_code, 400)
+
+
+@override_settings(TEAMS_CHANNEL_TAB=True, TEAMS_APP_ID=APP_ID)
+class CardButtonsOpenInsideTeamsTests(TestCase):
+    """A card's button opens its page inside the AIDL tab once the channel has it."""
+
+    def setUp(self):
+        self.org = make_org(name="Secureitlab", teams_team_id="team-1", ms_tenant_id="t1",
+                            teams_welcome_channel_id="chan-1")
+        self.admin = make_user(self.org, full_name="Asha Admin")
+        p = patch("api.teams_channel.dispatch_if_due")
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _with_tab(self):
+        link = teams_channel_tabs.app_tab_deep_link(APP_ID, team_id="team-1", channel_id="chan-1", tenant_id="t1")
+        admin_setup.update(self.org, teams_app_tab_url=link, teams_app_tab_channel="chan-1")
+        self.org.refresh_from_db()
+
+    def test_without_the_tab_it_is_the_browser_page(self):
+        self.assertEqual(teams_channel.card_link(self.org, "me/cards/5/"),
+                         teams_channel.app_url("me/cards/5/"))
+
+    def test_with_the_tab_it_is_a_teams_link_carrying_the_page(self):
+        from urllib.parse import parse_qs, urlsplit
+
+        self._with_tab()
+        link = teams_channel.card_link(self.org, "me/cards/5/")
+        parts = urlsplit(link)
+        self.assertEqual((parts.netloc, parts.path), ("teams.microsoft.com", f"/l/entity/{APP_ID}/aidl_tab"))
+        q = parse_qs(parts.query)
+        self.assertEqual(json.loads(q["context"][0]), {"channelId": "chan-1", "subEntityId": "me/cards/5/"})
+        self.assertEqual((q["groupId"], q["tenantId"]), (["team-1"], ["t1"]))
+
+    def test_a_card_button_uses_it(self):
+        self._with_tab()
+        with patch("api.teams_channel.post_once") as post:
+            teams_channel.start_programme(self.org)
+        self.assertIn("/l/entity/", post.call_args.kwargs["button"][1])
+
+    def test_a_signed_in_tab_shows_no_sign_in_and_asks_teams_for_the_page(self):
+        client = APIClient()
+        client.cookies[COOKIE] = _session_token(self.admin)
+        resp = client.get("/api/teams/app/tab/", HTTP_SEC_FETCH_DEST="iframe")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "var signedIn = true;")
+        self.assertEqual(client.get("/api/teams/app/tab/").status_code, 302)  # a plain browser still goes home
+
+    def test_the_page_the_card_asked_for_is_checked(self):
+        client = APIClient()
+        url = lambda to: client.get("/api/teams/app/tab/page/", {"to": to}).json()["url"]
+        self.assertEqual(url("me/cards/5/"), "/api/teams/app/me/cards/5/")
+        for bad in ("../../admin/", "/api/", "https://evil.example/", "nope/nope/", "api/auth/me/", ""):
+            self.assertEqual(url(bad), "/api/teams/app/")
