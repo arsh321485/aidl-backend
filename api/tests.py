@@ -6178,6 +6178,61 @@ class TeamsWithoutBotTests(TestCase):
         co.refresh_from_db()
         self.assertEqual(co.role, AIDLUser.Role.LEARNER)
 
+    def _co_admin(self, **kwargs):
+        return make_user(self.org, full_name="Yash Co", ms_refresh_token="theirs", **kwargs)
+
+    def _remove_admin(self, co):
+        self._client(self.admin).post("/api/teams/app/admin/admins/", {"action": "remove", "user_id": str(co.pk)})
+        co.refresh_from_db()
+
+    def test_a_removed_admin_gets_their_own_welcome(self):
+        from .admin_setup import update
+
+        update(self.org, flow_started=timezone.now().isoformat())
+        co = self._co_admin()
+        with patch("api.microsoft_auth.remove_team_member", return_value=True) as out:
+            self._remove_admin(co)
+        out.assert_not_called()
+        self.assertEqual((co.role, co.slack_left_at, co.ms_refresh_token), (AIDLUser.Role.LEARNER, None, ""))
+        self.assertEqual(self._titles(), ["Welcome to your AI Driving Licence, Yash"])
+        self.assertEqual(self.posts[0]["mentions"][0]["mentioned"]["user"]["id"], co.microsoft_id)
+        self.assertTrue(any(co.email in m.to and "admin access" in m.body for m in self.mail.outbox))
+
+    def test_a_removed_admin_is_told_even_before_the_programme_starts(self):
+        co = self._co_admin()
+        self._remove_admin(co)
+        self.assertEqual(self.posts, [])
+        self.assertTrue(any(co.email in m.to and "when the programme starts" in m.body for m in self.mail.outbox))
+
+    def test_a_removed_admin_without_a_seat_leaves_the_team(self):
+        self.org.plan = "trial"
+        self.org.save(update_fields=["plan"])
+        for _ in range(4):
+            make_user(self.org, role=AIDLUser.Role.LEARNER)
+        co = self._co_admin()
+        with patch("api.microsoft_auth.remove_team_member", return_value=True) as out, \
+                patch("api.microsoft_auth.team_roster", return_value=[]):
+            self._remove_admin(co)
+        out.assert_called_once_with("tok", "team-1", co.microsoft_id)
+        self.assertIsNotNone(co.slack_left_at)
+        self.assertEqual(self.posts, [])
+        self.assertTrue(any(co.email in m.to and "no free seat" in m.body for m in self.mail.outbox))
+
+    def test_says_so_when_microsoft_keeps_the_removed_admin_in_the_team(self):
+        from .admin_people import remove_admin
+
+        self.org.plan = "trial"
+        self.org.save(update_fields=["plan"])
+        for _ in range(4):
+            make_user(self.org, role=AIDLUser.Role.LEARNER)
+        co = self._co_admin()
+        still = [{"user_id": co.microsoft_id, "email": co.email, "full_name": "x", "roles": ["owner"]}]
+        with patch("api.microsoft_auth.remove_team_member", return_value=True), \
+                patch("api.microsoft_auth.team_roster", return_value=still):
+            done, text = remove_admin(self.org, self.admin, str(co.pk))
+        self.assertTrue(done)
+        self.assertIn("remove them in Teams", text)
+
     def test_removing_someone_from_the_team(self):
         client = self._client(self.admin)
         with patch("api.microsoft_auth.remove_team_member", return_value=True) as out:

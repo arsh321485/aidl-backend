@@ -617,11 +617,59 @@ def join(org: Organization, person: dict, token: str = "") -> AIDLUser | None:
             sync(org, member)
         return member
     if started(org):
-        post(org, f"Welcome to your AI Driving Licence, {(member.full_name or 'there').split()[0]}",
-             "One short card at a time, about 10 minutes.", button=("Let's go →", card_link(org, "me/")), mention=[member])
-        email(member, "Your AI Driving Licence",
-              f"You've joined {org.name}'s AI Driving Licence programme. It takes about 10 minutes.", "me/")
+        welcome_one(org, member)
     return member
+
+
+def welcome_one(org: Organization, member: AIDLUser, note: str = "") -> None:
+    """Their own Welcome post and email (someone who joins a running programme)."""
+    post(org, f"Welcome to your AI Driving Licence, {(member.full_name or 'there').split()[0]}",
+         "One short card at a time, about 10 minutes.", button=("Let's go →", card_link(org, "me/")), mention=[member])
+    email(member, "Your AI Driving Licence",
+          f"{note}You've joined {org.name}'s AI Driving Licence programme. It takes about 10 minutes.", "me/")
+
+
+def demoted(org: Organization, by: AIDLUser, member: AIDLUser) -> str:
+    """An admin was just made a team member. With a free seat they're welcomed like
+    any new joiner; without one they're taken out of the Team. Returns the message
+    for the admin who removed them."""
+    from .admin_setup import started
+    from .microsoft_auth import remove_team_member, team_roster
+    from .package_delivery import sync_package
+    from .plans import seat_holders, user_limit
+
+    # Only admins' logins are kept, and AIDL mustn't keep posting as this person.
+    member.ms_refresh_token = ""
+    member.save(update_fields=["ms_refresh_token", "updated_at"])
+    forget_token(org)
+    name = member.full_name or member.email
+    notice = f"Your AIDL admin access for {org.name} was removed by {by.full_name or by.email}. "
+
+    if member.slack_left_at is None and seat_holders(org).count() > user_limit(org):
+        token = token_for(org)
+        gone = bool(token) and remove_team_member(token, org.teams_team_id, member.microsoft_id)
+        if gone:
+            roster = team_roster(token, org.teams_team_id)
+            gone = not any(p["user_id"] == member.microsoft_id for p in roster or [])
+        left(org, member)
+        email(member, "AIDL: your admin access was removed",
+              notice + "Your company's plan has no free seat, so you're no longer in the AIDL programme.")
+        if gone:
+            return (f"✓ {name} is no longer an admin. Your plan has no free seat, so they were also removed "
+                    "from the AIDL team.")
+        return (f"✓ {name} is no longer an admin and has no seat in your plan, but Microsoft didn't let AIDL remove "
+                "them from the AIDL team. Please remove them in Teams.")
+
+    if member.slack_left_at is None:
+        if member.licence_issued:
+            sync_package(org, member)
+            email(member, "AIDL: your admin access was removed", notice + "You're now a team member.", "me/")
+        elif started(org):
+            welcome_one(org, member, notice)
+        else:
+            email(member, "AIDL: your admin access was removed",
+                  notice + "You're now a team member. You'll get your welcome when the programme starts.", "me/")
+    return f"✓ {name} is no longer an admin. They're now a team member and use one of your plan's seats."
 
 
 def left(org: Organization, member: AIDLUser) -> None:
