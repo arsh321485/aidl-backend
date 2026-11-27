@@ -6,7 +6,8 @@ Rules:
   there's always one admin left.
 - A removed admin loses Admin Center access. If they're still in the AIDL
   channel they become a team member when the plan has a free seat;
-  otherwise AIDL takes them out of the channel.
+  otherwise AIDL takes them out of the channel. In Teams the same rule is
+  teams_channel.demoted (Welcome post and email, or out of the Team).
 - Any admin can remove a team member: they're taken out of the AIDL channel
   and offboarded (licence suspended, cards stopped; a licence they earned
   keeps counting toward the plan — see plans.py).
@@ -66,6 +67,11 @@ def remove_admin(org: Organization, by: AIDLUser, user_id: str) -> tuple[bool, s
     from .slack_onboarding import forget_primary_admin
 
     forget_primary_admin(org)
+
+    from . import teams_channel
+
+    if teams_channel.is_teams(org):
+        return True, teams_channel.demoted(org, by, target)
 
     token = slack_client.bot_token(org)
     slack_id = _slack_id(target)

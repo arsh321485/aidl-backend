@@ -244,6 +244,13 @@ def team_roster(access_token: str, team_id: str) -> list[dict] | None:
 def remove_team_member(access_token: str, team_id: str, user_id: str) -> bool:
     """Take someone out of the Team (a Team is a Microsoft 365 group)."""
     url = f"{GRAPH_BASE}/groups/{team_id}/members/{user_id}/$ref"
+    # An owner stays in the Team until their ownership is removed too. Best effort:
+    # Microsoft answers 404 for someone who isn't an owner.
+    try:
+        requests.delete(f"{GRAPH_BASE}/groups/{team_id}/owners/{user_id}/$ref",
+                        headers=_graph_headers(access_token), timeout=30)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("remove team owner failed: %s", exc)
     try:
         response = requests.delete(url, headers=_graph_headers(access_token), timeout=30)
     except Exception as exc:  # noqa: BLE001

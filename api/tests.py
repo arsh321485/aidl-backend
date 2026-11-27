@@ -5616,6 +5616,27 @@ class TeamsWithoutBotTests(TestCase):
             self.assertEqual(_safe_next(bad), "/api/teams/app/", bad)
         self.assertEqual(_safe_next("/api/teams/app/me/cards/001/"), "/api/teams/app/me/cards/001/")
 
+    def test_admins_pressing_a_learner_button_are_told_it_is_for_the_team(self):
+        from .admin_setup import update
+
+        update(self.org, flow_started=timezone.now().isoformat())
+        client = self._client(self.admin)
+        for resp in (client.get("/api/teams/app/me/"), client.get("/api/teams/app/me/cards/001/"),
+                     client.post("/api/teams/app/me/action/", {"action": "start"})):
+            self.assertEqual(resp.status_code, 200)
+            page = resp.content.decode()
+            self.assertIn("This card is for your team members", page)
+            self.assertIn("/api/teams/app/admin/", page)
+
+    def test_learner_posts_say_who_they_are_for(self):
+        from .teams_channel import LEARNER_NOTE, publish_home, welcome_one
+
+        welcome_one(self.org, self.member)
+        publish_home(self.org, "tok")
+        welcome, home = (json.dumps(p["attachments"][0]["content"]) for p in self.posts[-2:])
+        self.assertIn(LEARNER_NOTE, welcome)
+        self.assertNotIn(LEARNER_NOTE, home)
+
     def test_employees_cannot_open_admin_pages(self):
         client = self._client(self.member)
         for path in ("admin/", "admin/policy/", "admin/admins/", "admin/team/", "admin/cards/", "admin/apps/",
@@ -6155,10 +6176,10 @@ class TeamsWithoutBotTests(TestCase):
 
     def test_add_edit_and_remove_an_admin(self):
         client = self._client(self.admin)
-        found = {"id": "aad-co", "displayName": "Co Admin", "mail": "co@x.example"}
-        with patch("api.microsoft_auth.resolve_user_by_email", return_value=found), \
+        found = [{"user_id": "aad-co", "full_name": "Co Admin", "email": "co@x.example"}]
+        with patch("api.microsoft_auth.directory_users", return_value=found), \
                 patch("api.microsoft_auth.add_team_member", return_value={"ok": True}) as add:
-            client.post("/api/teams/app/admin/admins/", {"action": "add", "email": "co@x.example", "perms": ["approve_apps"]})
+            client.post("/api/teams/app/admin/admins/", {"action": "add", "person": "aad-co", "perms": ["approve_apps"]})
         add.assert_called_once()
         co = AIDLUser.objects.get(microsoft_id="aad-co")
         self.assertEqual(co.role, AIDLUser.Role.ADMIN)
@@ -6177,6 +6198,92 @@ class TeamsWithoutBotTests(TestCase):
         client.post("/api/teams/app/admin/admins/", {"action": "remove", "user_id": str(co.pk)})
         co.refresh_from_db()
         self.assertEqual(co.role, AIDLUser.Role.LEARNER)
+
+    def _directory(self):
+        return [{"user_id": u.microsoft_id, "full_name": u.full_name, "email": u.email} for u in (self.admin, self.member)] \
+            + [{"user_id": "aad-new", "full_name": "New Person", "email": "new@x.example"}]
+
+    def test_add_admin_offers_the_company_directory(self):
+        with patch("api.microsoft_auth.directory_users", return_value=self._directory()):
+            page = self._client(self.admin).get("/api/teams/app/admin/admins/").content.decode()
+        self.assertIn(f'value="{self.member.microsoft_id}"', page)
+        self.assertIn('value="aad-new"', page)
+        self.assertNotIn(f'name="person" value="{self.admin.microsoft_id}"', page)
+
+    def test_add_admin_says_what_did_not_happen(self):
+        from urllib.parse import unquote
+
+        client = self._client(self.admin)
+        with patch("api.microsoft_auth.directory_users", return_value=self._directory()), \
+                patch("api.microsoft_auth.add_team_member", return_value={"ok": False}), \
+                patch("api.teams_channel.send_mail", return_value=0):
+            note = unquote(client.post("/api/teams/app/admin/admins/", {"action": "add", "person": "aad-new"})["Location"])
+        self.assertIn("could not be sent", note)
+        self.assertIn("add them in Teams", note)
+        self.org.admin_seat_limit = 2
+        self.org.save(update_fields=["admin_seat_limit"])
+        with patch("api.microsoft_auth.directory_users", return_value=self._directory()):
+            note = unquote(client.post("/api/teams/app/admin/admins/",
+                                       {"action": "add", "person": self.member.microsoft_id})["Location"])
+            page = client.get("/api/teams/app/admin/admins/").content.decode()
+        self.assertIn("Not added", note)
+        self.assertIn("admin seats are used", page)
+        self.assertNotIn("Send admin invite", page)
+
+    def _co_admin(self, **kwargs):
+        return make_user(self.org, full_name="Yash Co", ms_refresh_token="theirs", **kwargs)
+
+    def _remove_admin(self, co):
+        self._client(self.admin).post("/api/teams/app/admin/admins/", {"action": "remove", "user_id": str(co.pk)})
+        co.refresh_from_db()
+
+    def test_a_removed_admin_gets_their_own_welcome(self):
+        from .admin_setup import update
+
+        update(self.org, flow_started=timezone.now().isoformat())
+        co = self._co_admin()
+        with patch("api.microsoft_auth.remove_team_member", return_value=True) as out:
+            self._remove_admin(co)
+        out.assert_not_called()
+        self.assertEqual((co.role, co.slack_left_at, co.ms_refresh_token), (AIDLUser.Role.LEARNER, None, ""))
+        self.assertEqual(self._titles(), ["Welcome to your AI Driving Licence, Yash"])
+        self.assertEqual(self.posts[0]["mentions"][0]["mentioned"]["user"]["id"], co.microsoft_id)
+        self.assertTrue(any(co.email in m.to and "admin access" in m.body for m in self.mail.outbox))
+
+    def test_a_removed_admin_is_told_even_before_the_programme_starts(self):
+        co = self._co_admin()
+        self._remove_admin(co)
+        self.assertEqual(self.posts, [])
+        self.assertTrue(any(co.email in m.to and "when the programme starts" in m.body for m in self.mail.outbox))
+
+    def test_a_removed_admin_without_a_seat_leaves_the_team(self):
+        self.org.plan = "trial"
+        self.org.save(update_fields=["plan"])
+        for _ in range(4):
+            make_user(self.org, role=AIDLUser.Role.LEARNER)
+        co = self._co_admin()
+        with patch("api.microsoft_auth.remove_team_member", return_value=True) as out, \
+                patch("api.microsoft_auth.team_roster", return_value=[]):
+            self._remove_admin(co)
+        out.assert_called_once_with("tok", "team-1", co.microsoft_id)
+        self.assertIsNotNone(co.slack_left_at)
+        self.assertEqual(self.posts, [])
+        self.assertTrue(any(co.email in m.to and "no free seat" in m.body for m in self.mail.outbox))
+
+    def test_says_so_when_microsoft_keeps_the_removed_admin_in_the_team(self):
+        from .admin_people import remove_admin
+
+        self.org.plan = "trial"
+        self.org.save(update_fields=["plan"])
+        for _ in range(4):
+            make_user(self.org, role=AIDLUser.Role.LEARNER)
+        co = self._co_admin()
+        still = [{"user_id": co.microsoft_id, "email": co.email, "full_name": "x", "roles": ["owner"]}]
+        with patch("api.microsoft_auth.remove_team_member", return_value=True), \
+                patch("api.microsoft_auth.team_roster", return_value=still):
+            done, text = remove_admin(self.org, self.admin, str(co.pk))
+        self.assertTrue(done)
+        self.assertIn("remove them in Teams", text)
 
     def test_removing_someone_from_the_team(self):
         client = self._client(self.admin)

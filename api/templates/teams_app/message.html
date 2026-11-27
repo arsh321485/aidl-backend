@@ -4,5 +4,6 @@
 <section class="box">
   <h1>{{ title }}</h1>
   <p style="margin-top:8px">{{ text }}</p>
+  {% if link %}<p style="margin-top:16px"><a class="btn" href="{{ link }}">{{ link_text }}</a></p>{% endif %}
 </section>
 {% endblock %}

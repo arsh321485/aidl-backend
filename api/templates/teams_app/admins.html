@@ -29,11 +29,31 @@
 <section class="box">
   <h2>Add another admin</h2>
   <p class="muted">Give a colleague access to your Admin Center. Choose exactly what they can see and do.</p>
+  {% if full %}<p style="margin-top:8px">All {{ limit }} admin seats are used. Remove an admin above to add another.</p>
+  <div class="row" style="margin-top:10px"><a class="btn" href="{% url 'teams-app-admin' %}">← Admin Center</a></div>
+  {% elif directory_failed %}<p class="error">AIDL couldn't load your company's people from Microsoft. Please <a href="{% url 'teams-app-login' %}?next={% url 'teams-app-admins' %}">sign in again</a>.</p>
+  {% elif not people %}<p style="margin-top:8px">Everyone in your company is already an admin.</p>
+  {% else %}
   <form method="post" style="margin-top:10px">
     {% csrf_token %}<input type="hidden" name="action" value="add">
-    <div class="field"><label for="email">Their work email</label><input id="email" type="email" name="email" required placeholder="name@company.com"></div>
+    <div class="field"><label for="find">Search people</label><input id="find" type="search" placeholder="Type a name or email"></div>
+    <div style="max-height:260px;overflow:auto;border:2px solid var(--ink);padding:8px;margin-bottom:12px">
+      {% for p in people %}<label class="check person"><input type="radio" name="person" value="{{ p.user_id }}" required> <span>{{ p.full_name }} <span class="muted">{{ p.email }}</span></span></label>{% endfor %}
+    </div>
     {% for p in perms %}<label class="check"><input type="checkbox" name="perms" value="{{ p.key }}"{% if forloop.first %} checked{% endif %}> {{ p.label }} · <span class="muted">{{ p.desc }}</span></label>{% endfor %}
     <div class="row" style="margin-top:8px"><button class="btn go">Send admin invite</button> <a class="btn" href="{% url 'teams-app-admin' %}">← Admin Center</a></div>
   </form>
+  {% endif %}
 </section>
+{% endblock %}
+{% block script %}
+<script>
+(function () {
+  var find = document.getElementById("find");
+  if (find) find.addEventListener("input", function () {
+    var q = find.value.toLowerCase();
+    document.querySelectorAll(".person").forEach(function (p) { p.style.display = !q || p.textContent.toLowerCase().indexOf(q) >= 0 ? "" : "none"; });
+  });
+})();
+</script>
 {% endblock %}
