@@ -305,6 +305,7 @@ INSTALLED_APPS = [
     "integrations.lti_core",
     "integrations.moodle",
     "integrations.google_classroom",
+    "integrations.google_workspace",
 ]
 
 MIGRATION_MODULES = {

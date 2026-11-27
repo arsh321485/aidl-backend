@@ -1,0 +1,89 @@
+{% extends "teams_app/base.html" %}
+{% block title %}AIDL · Google Workspace{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>Hi {{ person.first_name|default:person.full_name|default:"there" }}, you're an AIDL admin</h1>
+  <p class="muted" style="margin-top:8px">{{ org.name }}{% if course %} · {{ course }}{% endif %} · Admin{% if is_owner %} (owner){% endif %}</p>
+</section>
+
+<section class="box">
+  <h2>Get your team started</h2>
+  <p class="muted">Your team can't start until both cards are approved and you start the programme.</p>
+  <div class="list">
+    {% for c in onboarding %}
+    <div class="spread">
+      <div><b>{{ c.label }}</b><br><span class="muted">{% if c.status == "approved" %}✅ Approved{% if c.by %} by {{ c.by }}{% endif %}{% else %}Waiting for approval{% endif %}</span></div>
+      {% if c.status != "approved" %}
+      <form method="post" action="{% url 'google-workspace-setup' %}">
+        {% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="item" value="{{ c.item }}">
+        <button class="btn ok sm">Approve</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="spread">
+      <div><b>🚀 Start the programme</b><br><span class="muted">{% if started %}✅ Started{% elif ready %}Ready to start{% else %}Approve both cards first{% endif %}</span></div>
+      {% if not started %}
+      <form method="post" action="{% url 'google-workspace-setup' %}">
+        {% csrf_token %}<input type="hidden" name="action" value="start">
+        <button class="btn go sm"{% if not ready %} disabled{% endif %}>Start</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="box" id="invite">
+  <h2>Invite your team</h2>
+  <p class="muted">Paste your colleagues' work emails (only <b>@{{ domain }}</b>). AIDL emails each one a link to join {{ org.name }} with Google; once the programme has started, their cards arrive in their Gmail.</p>
+  <form method="post" action="{% url 'google-workspace-invite' %}">
+    {% csrf_token %}
+    <div class="field"><label for="gw-emails">Work emails</label>
+      <textarea id="gw-emails" name="emails" placeholder="ben@{{ domain }}, carla@{{ domain }}"></textarea></div>
+    <button class="btn go">✉️ Send invites</button>
+  </form>
+  <p class="muted" style="margin-top:10px">Or share this link: <code>{{ join_url }}</code></p>
+</section>
+
+<style>
+.gw-acts { flex:0 1 auto !important; }
+.gw-st { flex:0 1 auto !important; justify-content:flex-end; }
+@media (max-width:600px) { .gw-st { justify-content:flex-start; } }
+</style>
+<section class="box" id="team">
+  <div class="spread">
+    <div><h2>Your team</h2>
+      <p class="muted"><b>{{ team_summary.licensed }}</b> licensed · <b>{{ team_summary.in_progress }}</b> in progress · <b>{{ team_summary.invited }}</b> invited, not joined yet</p></div>
+    <div class="row gw-acts">
+      {% if team_summary.remindable %}
+      <form method="post" action="{% url 'google-workspace-remind' %}">
+        {% csrf_token %}<input type="hidden" name="who" value="all">
+        <button class="btn sm">🔔 Remind everyone who hasn't finished ({{ team_summary.remindable }})</button>
+      </form>
+      {% endif %}
+      <a class="btn sm" href="{% url 'google-workspace-export' %}">⬇️ Download CSV</a>
+    </div>
+  </div>
+  {% if team %}
+  <div class="list" style="margin-top:12px">
+    {% for p in team %}
+    <div class="spread">
+      <div><b>{{ p.name }}</b>{% if p.name != p.email %}<br><span class="muted">{{ p.email }}</span>{% endif %}</div>
+      <div class="row gw-st">
+        <span class="pill"{% if p.tone == "ok" %} style="background:#EAF8EF"{% elif p.tone == "go" %} style="background:#FFF6CC"{% endif %}>{% if p.tone == "ok" %}🪪 {% elif p.tone == "go" %}🟡 {% else %}⏳ {% endif %}{{ p.status }}</span>
+        {% if p.can_remind %}
+        <form method="post" action="{% url 'google-workspace-remind' %}">
+          {% csrf_token %}<input type="hidden" name="who" value="{{ p.key }}">
+          <button class="btn sm">Remind</button>
+        </form>
+        {% elif p.reminded %}<span class="muted" style="font-size:13px">Reminded today</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:10px">Nobody yet. Invite your colleagues above and they'll show up here.</p>
+  {% endif %}
+  <p class="muted" style="margin-top:12px;font-size:13px">A reminder re-sends that person's current email. Each person can be reminded once a day.</p>
+</section>
+{% endblock %}

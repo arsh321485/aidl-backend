@@ -1,0 +1,25 @@
+{
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/gmail.addons.execute",
+    "https://www.googleapis.com/auth/gmail.addons.current.message.readonly",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/admin.directory.user.readonly"
+  ],
+  "addOns": {
+    "common": {
+      "name": "AIDL",
+      "logoUrl": "https://aidl-backend.onrender.com/static/google_workspace/aidl-icon.png",
+      "homepageTrigger": {
+        "runFunction": "https://BACKEND_URL/api/google-workspace/addon/"
+      }
+    },
+    "gmail": {
+      "contextualTriggers": [
+        {
+          "unconditional": {},
+          "onTriggerFunction": "https://BACKEND_URL/api/google-workspace/addon/message/"
+        }
+      ]
+    }
+  }
+}

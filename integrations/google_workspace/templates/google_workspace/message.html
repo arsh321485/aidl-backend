@@ -1,0 +1,12 @@
+{% extends "teams_app/base.html" %}
+{% block title %}{{ title }} · AIDL{% endblock %}
+{% block body %}
+<section class="box">
+  <h1>{{ title }}</h1>
+  <p style="margin-top:8px">{{ text }}</p>
+  {% if retry_url or website_url %}<div class="row" style="margin-top:12px">
+    {% if retry_url %}<a class="btn go" href="{{ retry_url }}">Try again with Google</a>{% endif %}
+    {% if website_url %}<a class="btn" href="{{ website_url }}">Back to the AIDL website</a>{% endif %}
+  </div>{% endif %}
+</section>
+{% endblock %}

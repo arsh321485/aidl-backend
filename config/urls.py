@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/lti/", include("integrations.lti_core.urls")),
     path("api/moodle/", include("integrations.moodle.urls")),
     path("api/google-classroom/", include("integrations.google_classroom.urls")),
+    path("api/google-workspace/", include("integrations.google_workspace.urls")),
     path(
         "teams/manifest.json",
         serve,

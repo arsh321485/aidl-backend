@@ -122,7 +122,14 @@ def _after_save(member: AIDLUser) -> None:
 
 def _return_url(member: AIDLUser) -> str:
     """Teams people go back to their AIDL page; Slack, Google Classroom and Moodle
-    people just close the tab (their AIDL page is still open in the other one)."""
+    people just close the tab (their AIDL page is still open in the other one).
+    Google Workspace people go back to Gmail, where AIDL is in the side panel."""
+    if member.microsoft_id.startswith("google:"):
+        from integrations.google_workspace.mail import gmail_url
+        from integrations.google_workspace.models import WorkspaceMember
+
+        if WorkspaceMember.objects.filter(user_id=str(member.pk)).exists():
+            return gmail_url(member.email)
     if member.microsoft_id.startswith(("slack:", "local:", "google:", "moodle:")):
         return ""
     return f"{settings.BACKEND_URL}/api/teams/app/me/"
