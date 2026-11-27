@@ -867,28 +867,47 @@ def admins(request, user, org):
                           f"{target.full_name or target.email}'s admin permissions: {now}.")
             return _flash(request, f"Saved: {target.full_name or target.email}: {now}.", back)
         return _add_admin(request, user, org, chosen, allowed, back, forget_primary_admin)
-    return _render(request, user, org, "admins.html", admins=_admin_rows(org), can=can,
+    rows = _admin_rows(org)
+    full = len(rows) >= org.admin_seat_limit
+    people = [] if full else _admin_candidates(org)
+    return _render(request, user, org, "admins.html", admins=rows, can=can,
                    perms=[{"key": k, "label": l, "desc": d} for k, _f, l, d in admin_perms.PERMS if k in admin_perms.grantable(org, user)],
-                   seats=len(_admin_rows(org)), limit=org.admin_seat_limit)
+                   seats=len(rows), limit=org.admin_seat_limit, full=full, people=people or [],
+                   directory_failed=people is None)
+
+
+def _admin_candidates(org: Organization) -> list[dict] | None:
+    """The company's people who can be made an admin: not one already, and not in another
+    company's AIDL. None if Microsoft couldn't be asked."""
+    from .microsoft_auth import directory_users
+
+    token = teams_channel.token_for(org)
+    people = directory_users(token) if token else None
+    if people is None:
+        return None
+    ids = [p["user_id"] for p in people]
+    taken = {u.microsoft_id for u in AIDLUser.objects.filter(microsoft_id__in=ids)
+             if u.organization_id not in ("", str(org.pk))
+             or (u.organization_id == str(org.pk) and u.role == AIDLUser.Role.ADMIN and u.is_active)}
+    return [p for p in people if p["user_id"] not in taken]
 
 
 def _add_admin(request, user, org, chosen, allowed, back, forget_primary_admin):
-    from .microsoft_auth import add_team_member, resolve_user_by_email
+    from .microsoft_auth import add_team_member
 
-    email = request.POST.get("email", "").strip()
-    if not email:
-        return _flash(request, "Enter their work email.", back)
+    picked = request.POST.get("person", "")
+    if not picked:
+        return _flash(request, "Not added: choose a person from the list.", back)
     if len(_admin_rows(org)) >= org.admin_seat_limit:
-        return _flash(request, f"All {org.admin_seat_limit} admin seats are used.", back)
+        return _flash(request, f"Not added: all {org.admin_seat_limit} admin seats are used. Remove an admin first.", back)
+    people = _admin_candidates(org)
+    if people is None:
+        return _flash(request, "Not added: AIDL couldn't reach Microsoft. Please sign in again and retry.", back)
+    person = next((p for p in people if p["user_id"] == picked), None)
+    if person is None:
+        return _flash(request, "Not added: this person is already an admin, or can't be added.", back)
     token = teams_channel.token_for(org)
-    found = resolve_user_by_email(token, email) if token else None
-    if not found:
-        return _flash(request, "This person isn't in your company's Microsoft 365 directory.", back)
-    person = {"user_id": found["id"], "email": found.get("mail") or found.get("userPrincipalName") or email,
-              "full_name": found.get("displayName", "")}
     target = AIDLUser.objects.filter(microsoft_id=person["user_id"]).first()
-    if target is not None and target.organization_id not in ("", str(org.pk)):
-        return _flash(request, "This person already belongs to another AIDL organization.", back)
     if target is None:
         target = teams_channel._new_member(org, person)  # noqa: SLF001
     target.organization_id, target.organization_name = str(org.pk), org.name
@@ -897,13 +916,19 @@ def _add_admin(request, user, org, chosen, allowed, back, forget_primary_admin):
     admin_perms.apply(target, chosen, allowed)
     target.save()
     forget_primary_admin(org)
-    add_team_member(token, team_id=org.teams_team_id, aad_user_id=person["user_id"])
-    teams_channel.email(target, "You're an AIDL admin", f"{user.full_name or user.email} added you as an AIDL admin for "
-                        f"{org.name}. Sign in with your Microsoft account to open the Admin Center.", "admin/")
+    joined = add_team_member(token, team_id=org.teams_team_id, aad_user_id=person["user_id"])
+    sent = teams_channel.email(target, "You're an AIDL admin", f"{user.full_name or user.email} added you as an AIDL admin "
+                               f"for {org.name}. Sign in with your Microsoft account to open the Admin Center.", "admin/")
     in_background(admin_perms.notify_master, org, user, f"{user.full_name or user.email} added "
                   f"{target.full_name or target.email} as an admin "
                   f"({', '.join(admin_perms.labels(target)) or 'no permissions'}).")
-    return _flash(request, f"Invited {target.email or target.full_name}.", back)
+    name = target.full_name or target.email
+    text = f"{name} is now an admin."
+    text += (f" An invite email went to {target.email} (ask them to check spam)." if sent
+             else " The invite email could not be sent, so tell them yourself.")
+    if not joined.get("ok"):
+        text += " Microsoft didn't let AIDL add them to the AIDL team: add them in Teams."
+    return _flash(request, text, back)
 
 
 # ---------- step 3: team ----------

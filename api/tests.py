@@ -6176,10 +6176,10 @@ class TeamsWithoutBotTests(TestCase):
 
     def test_add_edit_and_remove_an_admin(self):
         client = self._client(self.admin)
-        found = {"id": "aad-co", "displayName": "Co Admin", "mail": "co@x.example"}
-        with patch("api.microsoft_auth.resolve_user_by_email", return_value=found), \
+        found = [{"user_id": "aad-co", "full_name": "Co Admin", "email": "co@x.example"}]
+        with patch("api.microsoft_auth.directory_users", return_value=found), \
                 patch("api.microsoft_auth.add_team_member", return_value={"ok": True}) as add:
-            client.post("/api/teams/app/admin/admins/", {"action": "add", "email": "co@x.example", "perms": ["approve_apps"]})
+            client.post("/api/teams/app/admin/admins/", {"action": "add", "person": "aad-co", "perms": ["approve_apps"]})
         add.assert_called_once()
         co = AIDLUser.objects.get(microsoft_id="aad-co")
         self.assertEqual(co.role, AIDLUser.Role.ADMIN)
@@ -6198,6 +6198,37 @@ class TeamsWithoutBotTests(TestCase):
         client.post("/api/teams/app/admin/admins/", {"action": "remove", "user_id": str(co.pk)})
         co.refresh_from_db()
         self.assertEqual(co.role, AIDLUser.Role.LEARNER)
+
+    def _directory(self):
+        return [{"user_id": u.microsoft_id, "full_name": u.full_name, "email": u.email} for u in (self.admin, self.member)] \
+            + [{"user_id": "aad-new", "full_name": "New Person", "email": "new@x.example"}]
+
+    def test_add_admin_offers_the_company_directory(self):
+        with patch("api.microsoft_auth.directory_users", return_value=self._directory()):
+            page = self._client(self.admin).get("/api/teams/app/admin/admins/").content.decode()
+        self.assertIn(f'value="{self.member.microsoft_id}"', page)
+        self.assertIn('value="aad-new"', page)
+        self.assertNotIn(f'name="person" value="{self.admin.microsoft_id}"', page)
+
+    def test_add_admin_says_what_did_not_happen(self):
+        from urllib.parse import unquote
+
+        client = self._client(self.admin)
+        with patch("api.microsoft_auth.directory_users", return_value=self._directory()), \
+                patch("api.microsoft_auth.add_team_member", return_value={"ok": False}), \
+                patch("api.teams_channel.send_mail", return_value=0):
+            note = unquote(client.post("/api/teams/app/admin/admins/", {"action": "add", "person": "aad-new"})["Location"])
+        self.assertIn("could not be sent", note)
+        self.assertIn("add them in Teams", note)
+        self.org.admin_seat_limit = 2
+        self.org.save(update_fields=["admin_seat_limit"])
+        with patch("api.microsoft_auth.directory_users", return_value=self._directory()):
+            note = unquote(client.post("/api/teams/app/admin/admins/",
+                                       {"action": "add", "person": self.member.microsoft_id})["Location"])
+            page = client.get("/api/teams/app/admin/admins/").content.decode()
+        self.assertIn("Not added", note)
+        self.assertIn("admin seats are used", page)
+        self.assertNotIn("Send admin invite", page)
 
     def _co_admin(self, **kwargs):
         return make_user(self.org, full_name="Yash Co", ms_refresh_token="theirs", **kwargs)

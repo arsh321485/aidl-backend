@@ -44,7 +44,7 @@
   var find = document.getElementById("find"), all = document.getElementById("all");
   if (find) find.addEventListener("input", function () {
     var q = find.value.toLowerCase();
-    document.querySelectorAll(".person").forEach(function (p) { p.hidden = q && p.textContent.toLowerCase().indexOf(q) < 0; });
+    document.querySelectorAll(".person").forEach(function (p) { p.style.display = !q || p.textContent.toLowerCase().indexOf(q) >= 0 ? "" : "none"; });
   });
   if (all) all.addEventListener("change", function () {
     document.querySelectorAll("[name=people]").forEach(function (c) { c.checked = all.checked; });
