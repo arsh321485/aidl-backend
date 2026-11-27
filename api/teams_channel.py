@@ -110,10 +110,16 @@ def channel_id(org: Organization) -> str:
     return admin.teams_channel_id if admin else ""
 
 
+LEARNER_NOTE = "For team members. Admins: nothing to do here."
+LEARNER_BUTTONS = ("Let's go", "Read & agree", "Got it", "Open AIDL →")
+
+
 def _card(title: str, text: str, image: str, alt: str, button: tuple[str, str] | None) -> dict:
     body = [{"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True}]
     if text:
         body.append({"type": "TextBlock", "text": text, "wrap": True})
+    if button and button[0].startswith(LEARNER_BUTTONS):  # Teams shows channel posts to admins too
+        body.append({"type": "TextBlock", "text": LEARNER_NOTE, "isSubtle": True, "size": "Small", "wrap": True})
     if image:
         body.append({"type": "Image", "url": image, "altText": alt or title, "size": "Stretch"})
     card = {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard", "version": "1.4",

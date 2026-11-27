@@ -84,9 +84,19 @@ def _safe_next(value: str) -> str:
     return value if value.startswith(base) and "//" not in value and "\\" not in value else base
 
 
-def _message(request, title: str, text: str, status: int = 200, user=None, org=None):
-    return render(request, "teams_app/message.html", {"title": title, "text": text, "user": user, "org": org},
-                  status=status)
+def _message(request, title: str, text: str, status: int = 200, user=None, org=None, link: str = "",
+             link_text: str = ""):
+    return render(request, "teams_app/message.html", {"title": title, "text": text, "user": user, "org": org,
+                                                      "link": link, "link_text": link_text}, status=status)
+
+
+def _admins_not_learners(request, user, org):
+    """An admin pressed a learner's button (Let's go, I agree, Got it): the channel's cards are
+    for the team, and Teams can't hide them from admins, so say so instead of jumping away."""
+    return _message(request, "This card is for your team members",
+                    "You're an AIDL admin, so there's nothing for you to do here. Your team members press this "
+                    "button to work towards their AI Driving Licence. You run the programme from the Admin Center.",
+                    user=user, org=org, link=reverse("teams-app-admin"), link_text="Open the Admin Center")
 
 
 @never_cache
@@ -324,7 +334,7 @@ def me(request, user, org):
     from .policy_cards import ICONS, SHORT
 
     if user.role == AIDLUser.Role.ADMIN:
-        return redirect("teams-app-admin")
+        return _admins_not_learners(request, user, org)
     if user.slack_left_at:
         return _message(request, "You're no longer in the programme", f"You were removed from {org.name}'s AIDL "
                         "programme, so your licence is suspended. Your AIDL admin can add you back.", user=user, org=org)
@@ -390,7 +400,9 @@ def me_action(request, user, org):
     from .licensing import acknowledge, issue_licence_if_ready
 
     action = request.POST.get("action", "")
-    if user.role == AIDLUser.Role.ADMIN or user.slack_left_at or not admin_setup.started(org):
+    if user.role == AIDLUser.Role.ADMIN:
+        return _admins_not_learners(request, user, org)
+    if user.slack_left_at or not admin_setup.started(org):
         return redirect("teams-app")
     if action == "start":
         if not user.slack_onboarded_at:
@@ -446,6 +458,8 @@ def my_cards_moved(request, user, org):
 def card_page(request, user, org, no: str):
     from .package_delivery import _local_line
 
+    if user.role == AIDLUser.Role.ADMIN:
+        return _admins_not_learners(request, user, org)
     teams_channel.deliver_due(org, user)
     row = PackageDelivery.objects.filter(user_id=str(user.pk), card_no=no).first()
     card = card_by_no(no)

@@ -5616,6 +5616,27 @@ class TeamsWithoutBotTests(TestCase):
             self.assertEqual(_safe_next(bad), "/api/teams/app/", bad)
         self.assertEqual(_safe_next("/api/teams/app/me/cards/001/"), "/api/teams/app/me/cards/001/")
 
+    def test_admins_pressing_a_learner_button_are_told_it_is_for_the_team(self):
+        from .admin_setup import update
+
+        update(self.org, flow_started=timezone.now().isoformat())
+        client = self._client(self.admin)
+        for resp in (client.get("/api/teams/app/me/"), client.get("/api/teams/app/me/cards/001/"),
+                     client.post("/api/teams/app/me/action/", {"action": "start"})):
+            self.assertEqual(resp.status_code, 200)
+            page = resp.content.decode()
+            self.assertIn("This card is for your team members", page)
+            self.assertIn("/api/teams/app/admin/", page)
+
+    def test_learner_posts_say_who_they_are_for(self):
+        from .teams_channel import LEARNER_NOTE, publish_home, welcome_one
+
+        welcome_one(self.org, self.member)
+        publish_home(self.org, "tok")
+        welcome, home = (json.dumps(p["attachments"][0]["content"]) for p in self.posts[-2:])
+        self.assertIn(LEARNER_NOTE, welcome)
+        self.assertNotIn(LEARNER_NOTE, home)
+
     def test_employees_cannot_open_admin_pages(self):
         client = self._client(self.member)
         for path in ("admin/", "admin/policy/", "admin/admins/", "admin/team/", "admin/cards/", "admin/apps/",
